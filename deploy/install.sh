@@ -4,11 +4,23 @@
 # Dari folder hasil ekstrak zip:   sudo bash deploy/install.sh editor.domainkamu.com
 # Langsung dari GitHub:            curl -fsSL https://raw.githubusercontent.com/otongrusdiana2021-sudo/najja-editor/main/deploy/install.sh | sudo bash -s editor.domainkamu.com
 #
-# Yang dilakukan: pasang Docker (jika belum), buat token login, buka port 80/443,
-# jalankan Najja + Caddy (HTTPS otomatis), lalu tampilkan URL dan token.
+# Cek dulu tanpa mengubah apa pun:  ... | sudo bash -s editor.domainkamu.com --cek
+#
+# Yang dilakukan: pasang Docker (jika belum), buat token login, jalankan Najja.
+# Port 80/443 kosong → Najja + Caddy (HTTPS otomatis).
+# Port 80/443 dipakai web server lain (aaPanel/nginx/apache) → Najja hanya di port lokal,
+# website lain tidak diubah.
 set -euo pipefail
 
-DOMAIN="${1:-${DOMAIN:-}}"
+CHECK=0
+DOMAIN="${DOMAIN:-}"
+for arg in "$@"; do
+  case "$arg" in
+    --cek|--check|--dry-run) CHECK=1 ;;
+    -*) ;;
+    *) DOMAIN="$arg" ;;
+  esac
+done
 REPO_URL="${NAJJA_REPO_URL:-https://github.com/otongrusdiana2021-sudo/najja-editor.git}"
 INSTALL_DIR="${NAJJA_DIR:-/opt/najja-editor}"
 WAIT_TRIES="${NAJJA_WAIT_TRIES:-40}"
@@ -24,6 +36,54 @@ if [ -z "$DOMAIN" ] && [ -t 0 ]; then read -rp "Domain untuk editor (mis. editor
 DOMAIN="$(printf '%s' "$DOMAIN" | tr 'A-Z' 'a-z' | sed -e 's#^https\?://##' -e 's#/.*$##')"
 [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] || die "Domain tidak valid: '$DOMAIN'"
 
+detect() {
+  DNS_IP="$( (getent ahostsv4 "$DOMAIN" 2>/dev/null || true) | awk 'NR==1{print $1}')"
+  LOCAL_IPS=" $(hostname -I 2>/dev/null || true) "
+  MODE=caddy; WEB=""; PANEL=""; BUSY=""
+  PROJECT="$(basename "${APP_DIR:-$INSTALL_DIR}" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9_-')"
+  if command -v ss >/dev/null 2>&1; then
+    BUSY="$(ss -ltnpH 2>/dev/null | awk '$4 ~ /:(80|443)$/' | grep -v -e docker-proxy -e '"caddy"' || true)"
+  fi
+  if [ -n "$BUSY" ]; then
+    MODE=proxy
+    WEB="$(printf '%s\n' "$BUSY" | grep -oE 'users:\(\("[^"]+' | head -1 | sed 's/.*"//')"
+  fi
+  OTHER_DOCKER="$( (docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null || true) | grep -E ':(80|443)->' | grep -v "^${PROJECT}-caddy-" || true)"
+  if [ -n "$OTHER_DOCKER" ]; then MODE=proxy; WEB="${WEB:-container $(printf '%s' "$OTHER_DOCKER" | awk 'NR==1{print $1}')}"; fi
+  [ -d /www/server/panel ] && PANEL=aapanel
+  [ -d /usr/local/CyberCP ] && PANEL=cyberpanel
+  return 0
+}
+free_port() {
+  local p="${1:-3333}"
+  while ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${p}\$"; do p=$((p + 1)); done
+  echo "$p"
+}
+
+if [ "$CHECK" = 1 ]; then
+  bold "✦ Pengecekan untuk https://$DOMAIN — TIDAK ADA yang diubah"
+  detect
+  . /etc/os-release 2>/dev/null || true
+  info "Sistem       : ${PRETTY_NAME:-tidak diketahui}, RAM bebas $(free -m 2>/dev/null | awk '/^Mem:/{print $7}') MB, disk bebas $(df -h / 2>/dev/null | awk 'NR==2{print $4}')"
+  if ! command -v docker >/dev/null 2>&1; then info "Docker       : belum ada → akan dipasang (docker.io + docker compose)"
+  elif ! docker compose version >/dev/null 2>&1; then info "Docker       : $(docker --version 2>/dev/null) → hanya plugin compose yang ditambah, Docker yang ada tidak diubah"
+  else info "Docker       : sudah ada ($(docker compose version --short 2>/dev/null)) → tidak diubah"; fi
+  if [ "$MODE" = proxy ]; then
+    info "Port 80/443  : dipakai ${WEB:-web server lain}${PANEL:+ ($PANEL)} → Najja di belakangnya, port lokal 127.0.0.1:$(free_port 3333)"
+    if [ "$PANEL" = aapanel ]; then info "nginx/aaPanel: TIDAK diubah oleh installer (kamu tambah reverse proxy di panel)"
+    elif [ "$WEB" = nginx ] && [ -d /etc/nginx ]; then info "nginx        : akan ditambah 1 file situs baru untuk $DOMAIN (situs lain tidak diubah)"
+    else info "Web server   : tidak diubah (kamu arahkan reverse proxy ke port lokal Najja)"; fi
+  else
+    info "Port 80/443  : kosong → Najja + Caddy (HTTPS otomatis)"
+  fi
+  if [ -z "$DNS_IP" ]; then warn "DNS          : $DOMAIN belum punya A record"
+  elif [[ "$LOCAL_IPS" != *" $DNS_IP "* ]]; then warn "DNS          : $DOMAIN → $DNS_IP, IP VPS ini:$LOCAL_IPS"
+  else info "DNS          : OK ($DOMAIN → $DNS_IP)"; fi
+  info "Akan dibuat  : folder $INSTALL_DIR + container Docker 'najja' (maks. RAM 512 MB)"
+  bold "Kalau sudah oke, jalankan perintah yang sama tanpa --cek."
+  exit 0
+fi
+
 bold "✦ Memasang Najja Editor untuk https://$DOMAIN"
 
 # 1. Kode aplikasi
@@ -34,7 +94,7 @@ elif [ -f "$INSTALL_DIR/docker-compose.yml" ] && [ -z "$REPO_URL" ]; then
   APP_DIR="$INSTALL_DIR"
 else
   [ -n "$REPO_URL" ] || die "Kode Najja tidak ditemukan. Jalankan dari folder hasil ekstrak zip, atau set NAJJA_REPO_URL."
-  command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
+  command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-remove git; }
   if [ -d "$INSTALL_DIR/.git" ]; then info "Memperbarui kode di $INSTALL_DIR"; git -C "$INSTALL_DIR" pull --ff-only -q
   else info "Mengunduh kode ke $INSTALL_DIR"; git clone -q --depth 1 "$REPO_URL" "$INSTALL_DIR"; fi
   APP_DIR="$INSTALL_DIR"
@@ -42,22 +102,28 @@ fi
 cd "$APP_DIR"
 info "Folder aplikasi: $APP_DIR"
 
-# 2. Docker
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+# 2. Docker — Docker yang sudah ada TIDAK pernah dipasang ulang; apt dibatalkan kalau akan menghapus paket.
+export DEBIAN_FRONTEND=noninteractive
+APT=(apt-get install -y -qq --no-remove)
+if ! command -v docker >/dev/null 2>&1; then
   info "Memasang Docker…"
-  export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq docker.io docker-compose-v2 >/dev/null 2>&1 || apt-get install -y -qq docker.io docker-compose-plugin >/dev/null 2>&1 || {
+  "${APT[@]}" docker.io docker-compose-v2 >/dev/null 2>&1 || "${APT[@]}" docker.io docker-compose-plugin >/dev/null 2>&1 || {
     warn "Paket Docker dari apt tidak tersedia, memakai skrip resmi get.docker.com"
     curl -fsSL https://get.docker.com | sh
   }
+elif ! docker compose version >/dev/null 2>&1; then
+  info "Docker sudah ada — hanya menambah plugin docker compose"
+  apt-get update -qq
+  if dpkg -s docker-ce >/dev/null 2>&1; then "${APT[@]}" docker-compose-plugin >/dev/null 2>&1
+  else "${APT[@]}" docker-compose-v2 >/dev/null 2>&1 || "${APT[@]}" docker-compose-plugin >/dev/null 2>&1
+  fi || die "Gagal memasang plugin docker compose. Docker yang sudah ada tidak diubah."
 fi
 command -v systemctl >/dev/null 2>&1 && systemctl enable --now docker >/dev/null 2>&1 || true
 docker compose version >/dev/null 2>&1 || die "docker compose tidak tersedia"
 
-# 3. Cek DNS (A record harus mengarah ke VPS ini)
-DNS_IP="$( (getent ahostsv4 "$DOMAIN" 2>/dev/null || true) | awk 'NR==1{print $1}')"
-LOCAL_IPS=" $(hostname -I 2>/dev/null || true) "
+# 3–4. Cek DNS dan port 80/443
+detect
 if [ -z "$DNS_IP" ]; then
   warn "Domain $DOMAIN belum punya A record. HTTPS baru aktif setelah A record mengarah ke VPS ini."
 elif [[ "$LOCAL_IPS" != *" $DNS_IP "* ]]; then
@@ -66,31 +132,14 @@ elif [[ "$LOCAL_IPS" != *" $DNS_IP "* ]]; then
 else
   info "DNS OK: $DOMAIN → $DNS_IP"
 fi
-
-# 4. Port 80/443: bebas → pakai Caddy (HTTPS otomatis). Sudah dipakai web server lain → pasang di belakangnya.
-MODE=caddy
-WEB=""
-PANEL=""
-PROJECT="$(basename "$APP_DIR" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9_-')"
-if command -v ss >/dev/null 2>&1; then
-  BUSY="$(ss -ltnpH 2>/dev/null | awk '$4 ~ /:(80|443)$/' | grep -v -e docker-proxy -e '"caddy"' || true)"
-  if [ -n "$BUSY" ]; then
-    MODE=proxy
-    WEB="$(printf '%s\n' "$BUSY" | grep -oE 'users:\(\("[^"]+' | head -1 | sed 's/.*"//')"
-  fi
-fi
-OTHER_DOCKER="$(docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -E ':(80|443)->' | grep -v "^${PROJECT}-caddy-" || true)"
-if [ -n "$OTHER_DOCKER" ]; then MODE=proxy; WEB="${WEB:-container $(printf '%s' "$OTHER_DOCKER" | awk 'NR==1{print $1}')}"; fi
-[ -d /www/server/panel ] && PANEL=aapanel
-[ -d /usr/local/CyberCP ] && PANEL=cyberpanel
 if [ "$MODE" = proxy ]; then
   info "Port 80/443 sudah dipakai ${WEB:-web server lain}${PANEL:+ ($PANEL)}. Najja dipasang di belakangnya — situs lain di VPS ini tidak diubah."
 fi
 
-# 5. Firewall
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+# 5. Firewall — hanya kalau Najja sendiri yang memakai port 80/443
+if [ "$MODE" = caddy ] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
   info "Membuka port 80 dan 443 di ufw"
-  ufw allow OpenSSH >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 443/udp >/dev/null
+  for r in 80/tcp 443/tcp 443/udp; do ufw allow "$r" >/dev/null 2>&1 || true; done
 fi
 
 # 6. Konfigurasi (.env) — token lama dipertahankan saat install ulang
@@ -123,7 +172,7 @@ else
   docker compose down --remove-orphans >/dev/null 2>&1 || true
   LPORT="$(sed -n 's/^NAJJA_LOCAL_PORT=//p' .env 2>/dev/null | head -1)"
   LPORT="${LPORT:-3333}"
-  while ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${LPORT}\$"; do LPORT=$((LPORT + 1)); done
+  LPORT="$(free_port "$LPORT")"
   sed -i '/^NAJJA_LOCAL_PORT=/d' .env
   printf 'NAJJA_LOCAL_PORT=%s\n' "$LPORT" >> .env
   COMPOSE=(docker compose -f docker-compose.yml -f deploy/compose.proxy.yml)

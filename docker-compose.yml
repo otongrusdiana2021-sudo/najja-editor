@@ -4,6 +4,14 @@ services:
   najja:
     build: .
     restart: unless-stopped
+    # Batasi sumber daya supaya aplikasi lain di VPS yang sama tidak terganggu
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       NAJJA_TOKEN: ${NAJJA_TOKEN:?Isi NAJJA_TOKEN di file .env}
       NAJJA_PUBLIC_URL: https://${DOMAIN:?Isi DOMAIN di file .env}
@@ -15,6 +23,11 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       - najja
     ports:
