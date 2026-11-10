@@ -1,0 +1,88 @@
+// Server (VPS) storage client: projects, media library and chunked uploads.
+const CHUNK = 8 * 1024 * 1024; // well below common proxy limits (aaPanel nginx defaults to 50 MB per request)
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { credentials: 'same-origin', ...opts });
+  if (r.status === 401) {
+    location.href = '/login';
+    throw new Error('Sesi login habis');
+  }
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
+    throw Object.assign(new Error(msg), { status: r.status });
+  }
+  return r;
+}
+const json = (body) => ({ headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const rid = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('');
+
+function putChunk(url, blob, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => onProgress?.(e.loaded);
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(Object.assign(new Error(`Upload gagal (HTTP ${xhr.status})`), { status: xhr.status })));
+    xhr.onerror = () => reject(new Error('Koneksi terputus saat upload'));
+    xhr.send(blob);
+  });
+}
+
+export const remote = {
+  enabled: false,
+  pending: 0,
+
+  async listProjects() { return (await api('/api/projects')).json(); },
+  async getProject(id) { return (await api(`/api/projects/${encodeURIComponent(id)}`)).json(); },
+  async putProject(rec) { return (await api(`/api/projects/${encodeURIComponent(rec.id)}`, { method: 'PUT', ...json(rec) })).json(); },
+  async deleteProject(id) { return (await api(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })).json(); },
+
+  mediaUrl: (id) => `/api/media/${encodeURIComponent(id)}/file`,
+  async getMeta(id) { return (await api(`/api/media/${encodeURIComponent(id)}/meta`)).json(); },
+  async putMeta(id, meta) { return (await api(`/api/media/${encodeURIComponent(id)}/meta`, { method: 'PUT', ...json(meta) })).json(); },
+  async getPeaks(id) {
+    const buf = new Uint8Array(await (await api(`/api/media/${encodeURIComponent(id)}/peaks`)).arrayBuffer());
+    const out = new Float32Array(buf.length);
+    for (let i = 0; i < buf.length; i++) out[i] = buf[i] / 255;
+    return out;
+  },
+  async putPeaks(id, peaks) {
+    const q = new Uint8Array(peaks.length);
+    for (let i = 0; i < peaks.length; i++) q[i] = Math.round(Math.max(0, Math.min(1, peaks[i])) * 255);
+    return (await api(`/api/media/${encodeURIComponent(id)}/peaks`, { method: 'PUT', body: q })).json();
+  },
+  async adopt(id, source, filename, mime) {
+    return (await api(`/api/media/${encodeURIComponent(id)}/adopt`, { method: 'POST', ...json({ source, filename, mime }) })).json();
+  },
+  async deleteMedia(id, projectId) {
+    return (await api(`/api/media/${encodeURIComponent(id)}?project=${encodeURIComponent(projectId || '')}`, { method: 'DELETE' })).json();
+  },
+
+  /** Upload a Blob in chunks with retries. target: 'media' (needs mediaId) | 'export'. */
+  async upload(blob, { target, mediaId, filename, mime, onProgress } = {}) {
+    const id = rid();
+    const parts = Math.max(1, Math.ceil(blob.size / CHUNK));
+    this.pending++;
+    try {
+      for (let i = 0; i < parts; i++) {
+        const chunk = blob.slice(i * CHUNK, Math.min(blob.size, (i + 1) * CHUNK));
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await putChunk(`/api/upload/${id}/${i}`, chunk, (loaded) => onProgress?.(Math.min(1, (i * CHUNK + loaded) / Math.max(1, blob.size))));
+            break;
+          } catch (err) {
+            if (err.status === 401) { location.href = '/login'; throw err; }
+            if (err.status === 507 || err.status === 413 || attempt >= 5) throw err;
+            await sleep(1000 * 2 ** (attempt - 1));
+          }
+        }
+      }
+      onProgress?.(1);
+      return (await api(`/api/upload/${id}/finish`, { method: 'POST', ...json({ parts, size: blob.size, target, mediaId, filename, mime }) })).json();
+    } finally {
+      this.pending--;
+    }
+  },
+};

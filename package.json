@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node server.js",
     "mcp": "node mcp-stdio.js",
-    "test": "node --test test/mcp.test.js test/security.test.js"
+    "test": "node --test test/mcp.test.js test/security.test.js test/storage.test.js"
   },
   "engines": {
     "node": ">=18.17"

@@ -5,6 +5,7 @@
 # Langsung dari GitHub:            curl -fsSL https://raw.githubusercontent.com/otongrusdiana2021-sudo/najja-editor/main/deploy/install.sh | sudo bash -s editor.domainkamu.com
 #
 # Cek dulu tanpa mengubah apa pun:  ... | sudo bash -s editor.domainkamu.com --cek
+# Ganti token login:                ... | sudo bash -s editor.domainkamu.com --token-baru
 #
 # Yang dilakukan: pasang Docker (jika belum), buat token login, jalankan Najja.
 # Port 80/443 kosong → Najja + Caddy (HTTPS otomatis).
@@ -13,10 +14,12 @@
 set -euo pipefail
 
 CHECK=0
+NEW_TOKEN=0
 DOMAIN="${DOMAIN:-}"
 for arg in "$@"; do
   case "$arg" in
     --cek|--check|--dry-run) CHECK=1 ;;
+    --token-baru|--new-token) NEW_TOKEN=1 ;;
     -*) ;;
     *) DOMAIN="$arg" ;;
   esac
@@ -147,9 +150,10 @@ TOKEN=""
 OLD_LPORT=""
 [ -f .env ] && TOKEN="$(sed -n 's/^NAJJA_TOKEN=//p' .env | head -1)"
 [ -f .env ] && OLD_LPORT="$(sed -n 's/^NAJJA_LOCAL_PORT=//p' .env | head -1)"
-if [ -z "$TOKEN" ]; then
+if [ -z "$TOKEN" ] || [ "$NEW_TOKEN" = 1 ]; then
   TOKEN="$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  info "Token login baru dibuat"
+  if [ "$NEW_TOKEN" = 1 ]; then info "Token login BARU dibuat — token lama tidak berlaku lagi, semua perangkat perlu login ulang"
+  else info "Token login baru dibuat"; fi
 fi
 umask 077
 printf 'DOMAIN=%s\nNAJJA_TOKEN=%s\n' "$DOMAIN" "$TOKEN" > .env

@@ -3,6 +3,8 @@ import { uid, waitEvent, clamp } from './util.js';
 import { db } from './db.js';
 import { store } from './store.js';
 import { SFX } from './presets.js';
+import { remote } from './remote.js';
+import { toast } from './ui.js';
 
 /** Runtime data per media id (not serialized): { url, img, sprite, spriteN, spriteW, spriteH, poster, peaks, status, error } */
 export const mediaRT = new Map();
@@ -123,7 +125,40 @@ async function computePeaks(blob) {
 }
 
 /** Import a File/Blob into the project's media library. Returns the media entry. */
-export async function importFile(file, { name, silent = false } = {}) {
+/** Save a freshly imported media item: to the VPS (server mode) or this browser (IndexedDB). */
+async function persistMedia(entry, file, rt, { adoptFrom } = {}) {
+  if (!remote.enabled) {
+    await db.putMedia({ id: entry.id, blob: file, meta: entry, sprite: rt.sprite, spriteN: rt.spriteN, spriteW: rt.spriteW, spriteH: rt.spriteH, poster: rt.poster, peaks: rt.peaks || null });
+    return;
+  }
+  rt.upload = { state: 'uploading', progress: 0 };
+  changed(entry.id);
+  let last = 0;
+  try {
+    if (adoptFrom) await remote.adopt(entry.id, adoptFrom, file.name, file.type);
+    else {
+      await remote.upload(file, {
+        target: 'media', mediaId: entry.id, filename: file.name, mime: file.type,
+        onProgress: (p) => {
+          rt.upload.progress = p;
+          if (performance.now() - last > 200) { last = performance.now(); changed(entry.id); }
+        },
+      });
+    }
+    await remote.putMeta(entry.id, { entry, sprite: rt.sprite, spriteN: rt.spriteN, spriteW: rt.spriteW, spriteH: rt.spriteH, poster: rt.poster, hasPeaks: !!rt.peaks });
+    if (rt.peaks) await remote.putPeaks(entry.id, rt.peaks);
+    rt.upload = null;
+    changed(entry.id);
+    store.scheduleSave();
+  } catch (err) {
+    rt.upload = { state: 'error', error: err.message, retry: () => persistMedia(entry, file, rt, { adoptFrom }) };
+    changed(entry.id);
+    toast(`Upload "${entry.name}" ke server gagal: ${err.message}`, { type: 'error', timeout: 8000, action: { label: 'Coba lagi', run: () => rt.upload.retry() } });
+  }
+}
+export const uploadsPending = () => [...mediaRT.values()].some((rt) => rt.upload?.state === 'uploading');
+
+export async function importFile(file, { name, silent = false, adoptFrom } = {}) {
   const type = detectType(file);
   if (!type) throw new Error(`Jenis file tidak didukung: ${file.name || file.type}`);
   const id = uid('m');
@@ -167,7 +202,7 @@ export async function importFile(file, { name, silent = false } = {}) {
     throw err;
   }
   changed(id);
-  db.putMedia({ id, blob: file, meta: entry, sprite: rt.sprite, spriteN: rt.spriteN, spriteW: rt.spriteW, spriteH: rt.spriteH, poster: rt.poster, peaks: rt.peaks || null });
+  persistMedia(entry, file, rt, { adoptFrom });
   if (!silent) store.scheduleSave();
   return entry;
 }
@@ -175,6 +210,25 @@ export async function importFile(file, { name, silent = false } = {}) {
 /** Restore runtime data for media listed in the project from IndexedDB. */
 export async function restoreMedia(P) {
   const missing = [];
+  if (remote.enabled) {
+    await Promise.all(P.media.map(async (m) => {
+      if (mediaRT.has(m.id)) return;
+      try {
+        const meta = await remote.getMeta(m.id);
+        if (!meta.file) throw new Error('upload belum selesai');
+        const url = remote.mediaUrl(m.id);
+        const rt = { url, status: 'ready', sprite: meta.sprite, spriteN: meta.spriteN, spriteW: meta.spriteW, spriteH: meta.spriteH, poster: meta.poster, peaks: null };
+        if (meta.hasPeaks) rt.peaks = await remote.getPeaks(m.id).catch(() => null);
+        if (m.type === 'image') rt.img = await loadImage(url).catch(() => { rt.status = 'error'; return null; });
+        mediaRT.set(m.id, rt);
+      } catch {
+        missing.push(m.id);
+        mediaRT.set(m.id, { status: 'missing' });
+      }
+    }));
+    changed(null);
+    return missing;
+  }
   await Promise.all(P.media.map(async (m) => {
     if (mediaRT.has(m.id)) return;
     const rec = await db.getMedia(m.id);
@@ -202,9 +256,13 @@ export async function removeMedia(id) {
   const rt = mediaRT.get(id);
   if (rt?.url) setTimeout(() => URL.revokeObjectURL(rt.url), 2000);
   mediaRT.delete(id);
-  // Keep the blob if another saved project still references it.
-  const projects = await db.listProjects();
-  if (!projects.some((p) => p.id !== P.id && p.media?.some((m) => m.id === id))) db.deleteMedia(id);
+  if (remote.enabled) {
+    remote.deleteMedia(id, P.id).catch(() => {}); // the server keeps it if another project still uses it
+  } else {
+    // Keep the blob if another saved project still references it.
+    const projects = await db.listProjects();
+    if (!projects.some((p) => p.id !== P.id && p.media?.some((m) => m.id === id))) db.deleteMedia(id);
+  }
   changed(id);
   store.touch('media');
 }
@@ -213,8 +271,8 @@ export async function importFromServerUrl(serverUrl, name, mime) {
   const r = await fetch(serverUrl);
   if (!r.ok) throw new Error(`Gagal mengambil media (${r.status})`);
   const blob = await r.blob();
-  const file = new File([blob], name || serverUrl.split('/').pop(), { type: mime || blob.type });
-  return importFile(file);
+  const file = new File([blob], name || decodeURIComponent(serverUrl.split('/').pop()), { type: mime || blob.type });
+  return importFile(file, { adoptFrom: serverUrl }); // the server already has the file: no re-upload
 }
 
 // ---------------------------------------------------------------------------------------------

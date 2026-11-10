@@ -3,6 +3,7 @@ FROM node:22-alpine
 WORKDIR /app
 COPY package.json server.js mcp-stdio.js ./
 COPY mcp ./mcp
+COPY lib ./lib
 COPY public ./public
 RUN mkdir -p /data/media /data/exports && chown -R node:node /data
 ENV NODE_ENV=production \

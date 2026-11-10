@@ -13,6 +13,7 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { createMcpHandler, formatToolResult } from './mcp/protocol.js';
 import { TOOLS } from './mcp/tools.js';
+import { createStorage } from './lib/storage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -42,12 +43,22 @@ const MIME = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif',
   '.ico': 'image/x-icon', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac',
-  '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.srt': 'text/plain; charset=utf-8',
+  '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8', '.srt': 'text/plain; charset=utf-8',
 };
 const EXT_FROM_MIME = Object.fromEntries(Object.entries(MIME).map(([ext, mime]) => [mime.split(';')[0], ext]));
 EXT_FROM_MIME['audio/mp3'] = '.mp3';
 EXT_FROM_MIME['audio/x-wav'] = '.wav';
 EXT_FROM_MIME['image/jpg'] = '.jpg';
+
+/** Safe media file extension from a file name or MIME type. */
+function extFor(filename, mime) {
+  const ext = path.extname(String(filename || '')).toLowerCase();
+  if (MIME[ext] && /^(video|image|audio)\//.test(MIME[ext])) return ext;
+  return EXT_FROM_MIME[String(mime || '').split(';')[0].trim().toLowerCase()] || '.bin';
+}
+const storage = createStorage(DATA_DIR, { exportDir: EXPORT_DIR, extFor });
+storage.cleanupUploads().catch(() => {});
+setInterval(() => storage.cleanupUploads().catch(() => {}), 6 * 3600 * 1000).unref();
 
 const TOOL_TIMEOUTS = { import_media: 180_000, get_frame: 45_000, export_video: 20_000, new_project: 20_000 };
 
@@ -214,7 +225,7 @@ const loginFailures = new Map();
 
 function loginPage(error = '') {
   return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Masuk · Najja Editor</title>
-<link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
+<meta name="theme-color" content="#0b0b0d"><link rel="icon" href="/favicon.svg"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
 <style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Poppins,system-ui,sans-serif;background:#0b0b0d;color:#f2f2f5;padding:16px}
 form{width:min(360px,100%);background:#141417;border:1px solid #2b2b31;border-radius:18px;padding:28px 24px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
 .b{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600}.b span{background:linear-gradient(135deg,#7c6cff,#22d3c5);-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -271,7 +282,13 @@ async function sendFile(req, res, filePath, extraHeaders = {}) {
     return;
   }
   const type = MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
-  const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache', ...extraHeaders };
+  const lastModified = stat.mtime.toUTCString();
+  const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache', 'Last-Modified': lastModified, ...extraHeaders };
+  const ims = req.headers['if-modified-since'];
+  if (ims && !req.headers.range && Math.floor(stat.mtimeMs / 1000) <= Math.floor(Date.parse(ims) / 1000)) {
+    res.writeHead(304, { 'Last-Modified': lastModified, 'Cache-Control': headers['Cache-Control'] });
+    return res.end();
+  }
   const range = req.headers.range;
   if (range) {
     const m = /bytes=(\d*)-(\d*)/.exec(range);
@@ -427,7 +444,9 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('Najja Editor berjalan tanpa NAJJA_TOKEN, jadi hanya bisa dibuka dari localhost. Untuk VPS/akses publik, jalankan dengan NAJJA_TOKEN (lihat docs/DEPLOY.md).');
     }
-    if (p === '/favicon.svg') return sendFile(req, res, path.join(PUBLIC_DIR, 'favicon.svg'));
+    if (p === '/favicon.svg' || p === '/manifest.webmanifest' || p === '/sw.js' || /^\/icons\/[\w.-]+\.png$/.test(p)) {
+      return sendFile(req, res, path.join(PUBLIC_DIR, p), p === '/sw.js' ? { 'Service-Worker-Allowed': '/', 'Cache-Control': 'no-cache' } : {});
+    }
     if (p === '/login') {
       if (!TOKEN) { res.writeHead(302, { Location: '/' }); return res.end(); }
       const html = (status, err) => { res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(loginPage(err)); };
@@ -497,6 +516,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
         version: PKG.version,
         url: publicUrl,
         auth: !!TOKEN,
+        storage: 'server',
         mcp: { http: `${publicUrl}/mcp`, stdio: { command: 'node', args: [path.join(__dirname, 'mcp-stdio.js')] } },
         editors: bridge.clients.size,
         mcpClients: bridge.mcpClients,
@@ -517,6 +537,51 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
         return sendJson(res, 200, { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true });
       }
     }
+    // ---- server storage: projects, media library, chunked uploads
+    let m;
+    if (p === '/api/projects' && req.method === 'GET') return sendJson(res, 200, await storage.listProjects());
+    if ((m = /^\/api\/projects\/([\w-]+)$/.exec(p))) {
+      if (req.method === 'GET') return sendJson(res, 200, await storage.getProject(m[1]));
+      if (req.method === 'PUT') {
+        const body = JSON.parse((await readBody(req, 32 * 1024 * 1024)).toString('utf8') || 'null');
+        return sendJson(res, 200, await storage.putProject(m[1], body));
+      }
+      if (req.method === 'DELETE') return sendJson(res, 200, await storage.deleteProject(m[1]));
+    }
+    if ((m = /^\/api\/media\/([\w-]+)\/(meta|peaks|file|adopt)$/.exec(p))) {
+      const [, id, part] = m;
+      if (part === 'meta' && req.method === 'GET') return sendJson(res, 200, await storage.getMeta(id));
+      if (part === 'meta' && req.method === 'PUT') return sendJson(res, 200, await storage.putMeta(id, JSON.parse((await readBody(req, 8 * 1024 * 1024)).toString('utf8'))));
+      if (part === 'peaks' && req.method === 'GET') return sendFile(req, res, storage.peaksPath(id), { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'private, max-age=31536000, immutable' });
+      if (part === 'peaks' && req.method === 'PUT') return sendJson(res, 200, await storage.putPeaks(id, await readBody(req, 8 * 1024 * 1024)));
+      if (part === 'file' && (req.method === 'GET' || req.method === 'HEAD')) {
+        return sendFile(req, res, await storage.mediaFile(id), { 'Cache-Control': 'private, max-age=31536000, immutable' });
+      }
+      if (part === 'adopt' && req.method === 'POST') {
+        const body = await readJson(req);
+        const src = String(body.source || '');
+        let file = null;
+        let move = false;
+        const local = /^\/media-cache\/local\/([\w-]+)\//.exec(src);
+        if (local) file = localFiles.get(local[1]);
+        else if (src.startsWith('/media-cache/')) { file = path.join(CACHE_DIR, path.basename(decodeURIComponent(src))); move = true; }
+        if (!file || !fs.existsSync(file)) return sendJson(res, 404, { error: 'Source file not found on server' });
+        return sendJson(res, 200, await storage.adoptFile(id, file, { filename: body.filename, mime: body.mime, move }));
+      }
+    }
+    if ((m = /^\/api\/media\/([\w-]+)$/.exec(p)) && req.method === 'DELETE') {
+      return sendJson(res, 200, await storage.deleteMedia(m[1], url.searchParams.get('project') || ''));
+    }
+    if ((m = /^\/api\/upload\/([\w-]+)\/(\d+)$/.exec(p)) && req.method === 'PUT') {
+      return sendJson(res, 200, await storage.putChunk(m[1], Number(m[2]), req));
+    }
+    if ((m = /^\/api\/upload\/([\w-]+)\/finish$/.exec(p)) && req.method === 'POST') {
+      const body = await readJson(req);
+      const done = await storage.finishUpload(m[1], body);
+      if (body.target === 'export') done.url = `/exports/${encodeURIComponent(done.file)}`;
+      return sendJson(res, 200, done);
+    }
+
     if (p === '/api/import-url' && req.method === 'POST') {
       const body = await readJson(req);
       try {

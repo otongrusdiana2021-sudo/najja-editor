@@ -90,11 +90,13 @@ export class Library {
     const status = rt.status || 'ready';
     const thumb = rt.poster ? `<img src="${rt.poster}" alt="" draggable="false">` : `<div class="mc-ph">${icon(m.type === 'audio' ? 'audio' : m.type === 'image' ? 'image' : 'video', 26)}</div>`;
     const used = store.P.clips.some((c) => c.mediaId === m.id);
-    return `<div class="media-card ${status} type-${m.type}" draggable="${status === 'ready'}" data-media="${m.id}" title="${escapeHtml(m.name)}">
+    return `<div class="media-card ${status} type-${m.type} ${rt.upload ? 'uploading' : ''}" draggable="${status === 'ready'}" data-media="${m.id}" title="${escapeHtml(m.name)}">
       <div class="mc-thumb">${thumb}
         ${m.type !== 'image' && m.duration ? `<span class="mc-dur">${fmtDur(m.duration)}</span>` : ''}
         ${status === 'processing' ? '<span class="mc-spin"></span>' : ''}
         ${status === 'missing' ? `<span class="mc-missing">${icon('help', 14)} Hilang</span>` : ''}
+        ${rt.upload?.state === 'uploading' ? `<span class="mc-up" title="Mengunggah ke server"><i style="width:${Math.round((rt.upload.progress || 0) * 100)}%"></i><b>${icon('upload', 11)} ${Math.round((rt.upload.progress || 0) * 100)}%</b></span>` : ''}
+        ${rt.upload?.state === 'error' ? `<button class="mc-up err" data-retry="${m.id}" title="${escapeHtml(rt.upload.error || '')}"><b>${icon('rotate', 11)} Gagal unggah · coba lagi</b></button>` : ''}
         ${used ? '<span class="mc-used">Dipakai</span>' : ''}
         <button class="mc-add" data-add="${m.id}" title="Tambah ke timeline">${icon('plus', 16)}</button>
         <button class="mc-del" data-del="${m.id}" title="Hapus dari pustaka">${icon('x', 13)}</button>
@@ -384,6 +386,7 @@ export class Library {
     if (d.mfilter) { this.mediaFilter = d.mfilter; this.render(); return; }
     if (d.fxcat) { this.fxCat = d.fxcat; this.render(); return; }
     if (d.capmode) { this.capText = this.panel.querySelector('.cap-input')?.value; this.capMode = d.capmode; this.render(); return; }
+    if (d.retry) { e.stopPropagation(); mediaRT.get(d.retry)?.upload?.retry?.(); return; }
     if (d.add) { run(() => actions.addMediaClip(d.add, {})); return; }
     if (d.del) {
       e.stopPropagation();

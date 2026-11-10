@@ -1,7 +1,8 @@
 // Project model, editing operations, undo/redo and autosave.
 import { uid, clone, deepMerge, clamp, debounce } from './util.js';
 import { ASPECTS, DEFAULT_TEXT, ADJUSTMENTS } from './presets.js';
-import { db, prefs } from './db.js';
+import { prefs } from './db.js';
+import { storage } from './storage.js';
 
 export const MIN_CLIP = 0.1;
 export const VISUAL_TYPES = ['video', 'image', 'solid', 'text', 'sticker'];
@@ -446,9 +447,16 @@ class Store {
     const rec = clone(this.project);
     try { rec.thumb = this.thumbProvider ? await this.thumbProvider() : undefined; } catch { /* ignore */ }
     rec.duration = this.duration();
-    await db.putProject(rec);
-    prefs.set('lastProject', this.project.id);
-    this.saveState = 'saved';
+    try {
+      await storage.putProject(rec);
+      prefs.set('lastProject', this.project.id);
+      this.saveState = 'saved';
+    } catch (err) {
+      console.warn('save failed', err);
+      this.saveState = 'error';
+      clearTimeout(this.retryTimer);
+      this.retryTimer = setTimeout(() => this.scheduleSave(), 5000);
+    }
     this.emit('save', this.saveState);
   }
 }

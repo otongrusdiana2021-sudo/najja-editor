@@ -1,7 +1,9 @@
 // Najja Editor — bootstrap and app shell (top bar, shortcuts, resizers, projects, export).
 import { store, newProject } from './store.js';
-import { db, prefs } from './db.js';
-import { restoreMedia, importFile, detectType } from './media.js';
+import { prefs } from './db.js';
+import { storage } from './storage.js';
+import { remote } from './remote.js';
+import { restoreMedia, importFile, detectType, uploadsPending } from './media.js';
 import { Engine } from './engine.js';
 import { Player } from './player.js';
 import { Timeline } from './timeline.js';
@@ -66,7 +68,9 @@ store.on('selection', (id) => document.body.classList.toggle('has-selection', !!
 store.on('rename', syncName);
 store.on('save', (s) => {
   saveState.className = `save-state ${s}`;
-  saveState.innerHTML = s === 'saving' ? '<i class="spin"></i>Menyimpan…' : `${icon('check', 13)}Tersimpan`;
+  saveState.innerHTML = s === 'saving' ? '<i class="spin"></i>Menyimpan…'
+    : s === 'error' ? `${icon('x', 13)}Gagal menyimpan — mencoba lagi…`
+      : `${icon('check', 13)}${storage.server ? 'Tersimpan di server' : 'Tersimpan'}`;
 });
 
 store.thumbProvider = () => {
@@ -93,6 +97,7 @@ topbar.addEventListener('click', (e) => {
         { label: 'Ekspor video…', icon: 'export', kbd: 'Ctrl+E', run: () => exportDialog() },
         { label: 'Simpan proyek (.json)', icon: 'download', run: () => downloadBlob(new Blob([JSON.stringify(store.P, null, 2)], { type: 'application/json' }), `${store.P.name}.najja.json`) },
         'sep',
+        ...(installPrompt ? [{ label: 'Pasang sebagai aplikasi', icon: 'download', run: () => installApp() }] : []),
         { label: 'Pintasan keyboard', icon: 'keyboard', kbd: '?', run: () => shortcutsDialog() },
         { label: 'Tentang Najja Editor', icon: 'help', run: () => aboutDialog() },
       ]);
@@ -115,6 +120,21 @@ function updateMcpPill() {
   pill.title = st.connected ? `MCP aktif${st.clients.length ? ` · ${st.clients.map((c) => c.name).join(', ')}` : ''}` : st.available === false ? 'MCP offline — jalankan npm start' : 'Menghubungkan MCP…';
 }
 bridge.on(updateMcpPill);
+
+// ---------------------------------------------------------------------------------------------
+// Installable app (PWA)
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+window.addEventListener('appinstalled', () => { installPrompt = null; toast('Najja Editor terpasang sebagai aplikasi', { type: 'ok' }); });
+async function installApp() {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => null);
+  installPrompt = null;
+}
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 
 // ---------------------------------------------------------------------------------------------
 // Resizable panels
@@ -189,7 +209,10 @@ window.addEventListener('drop', (e) => {
   const files = [...e.dataTransfer.files].filter((f) => detectType(f));
   if (files.length) { library.open('media'); library.importFiles(files); }
 });
-window.addEventListener('beforeunload', () => { store.scheduleSave.flush?.(); });
+window.addEventListener('beforeunload', (e) => {
+  store.scheduleSave.flush?.();
+  if (uploadsPending() || remote.pending > 0) { e.preventDefault(); e.returnValue = ''; }
+});
 
 // ---------------------------------------------------------------------------------------------
 // Projects
@@ -206,7 +229,7 @@ async function createProject({ name = 'Proyek tanpa judul', aspect = '16:9' } = 
 async function openProject(id) {
   engine.pause();
   await store.save();
-  const rec = await db.getProject(id);
+  const rec = await storage.getProject(id);
   if (!rec) return toast('Proyek tidak ditemukan', { type: 'error' });
   delete rec.thumb;
   delete rec.duration;
@@ -214,7 +237,7 @@ async function openProject(id) {
   store.setProject(rec);
   engine.seek(0);
   timeline.fit();
-  if (missing.length) toast(`${missing.length} file media tidak ditemukan di browser ini`, { type: 'warn', timeout: 5000 });
+  if (missing.length) toast(`${missing.length} file media tidak ditemukan${storage.server ? ' di server' : ' di browser ini'}`, { type: 'warn', timeout: 5000 });
 }
 
 function newProjectDialog() {
@@ -236,7 +259,8 @@ function newProjectDialog() {
 
 async function projectsDialog() {
   await store.save();
-  const list = (await db.listProjects()).sort((a, b) => b.updatedAt - a.updatedAt);
+  let list = [];
+  try { list = (await storage.listProjects()).sort((a, b) => b.updatedAt - a.updatedAt); } catch (err) { toast(`Gagal memuat daftar proyek: ${err.message}`, { type: 'error' }); }
   const m = modal({
     title: 'Proyek saya',
     wide: true,
@@ -252,8 +276,8 @@ async function projectsDialog() {
     const del = e.target.closest('[data-delp]');
     if (del) {
       e.stopPropagation();
-      if (await confirmDialog('Hapus proyek?', 'Proyek ini akan dihapus permanen dari browser.', 'Hapus', true)) {
-        await db.deleteProject(del.dataset.delp);
+      if (await confirmDialog('Hapus proyek?', `Proyek ini akan dihapus permanen dari ${storage.server ? 'server' : 'browser'}.`, 'Hapus', true)) {
+        await storage.deleteProject(del.dataset.delp);
         del.closest('.proj-card').remove();
       }
       return;
@@ -342,10 +366,13 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
       const el = (performance.now() - started) / 1000;
       if (p > 0.03) ov.querySelector('.ex-sub').textContent = `Sisa ±${Math.max(0, Math.round(el / p - el))} detik · jangan tutup tab ini`;
     });
-    if (saveToServer && bridge.state.available) {
+    if ((saveToServer || storage.server) && storage.server) {
+      ov.querySelector('.ex-sub').textContent = 'Menyimpan hasil ekspor ke server…';
       try {
-        const r = await fetch(`/api/exports?filename=${encodeURIComponent(res.filename)}`, { method: 'POST', body: res.blob, headers: { 'content-type': res.mime } });
-        const j = await r.json();
+        const j = await remote.upload(res.blob, {
+          target: 'export', filename: res.filename, mime: res.mime,
+          onProgress: (p) => { ov.querySelector('.ex-pct').textContent = `${Math.round(p * 100)}%`; },
+        });
         exportState.result.serverPath = j.path;
         exportState.result.serverUrl = j.url;
       } catch (err) {
@@ -356,7 +383,7 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
     ov.querySelector('.export-card').innerHTML = `
       <div class="ex-done">${icon('check', 34)}</div>
       <h3>Ekspor selesai</h3>
-      <p class="hint">${escapeHtml(res.filename)} · ${res.width}×${res.height} · ${fmtBytes(res.size)}${exportState.result?.serverPath ? `<br>Disimpan di server: <code>${escapeHtml(exportState.result.serverPath)}</code>` : ''}</p>
+      <p class="hint">${escapeHtml(res.filename)} · ${res.width}×${res.height} · ${fmtBytes(res.size)}${exportState.result?.serverPath ? `<br>Tersimpan di server ✓` : ''}${exportState.result?.serverError ? `<br>Gagal menyimpan ke server: ${escapeHtml(exportState.result.serverError)}` : ''}</p>
       <div class="ex-actions"><button class="btn" data-close>Tutup</button><button class="btn btn-primary" data-dl>${icon('download', 15)} Unduh</button></div>`;
     ov.querySelector('[data-dl]').onclick = () => downloadBlob(res.blob, res.filename);
     ov.querySelector('[data-close]').onclick = () => ov.remove();
@@ -411,10 +438,15 @@ bridge.start({
 // ---------------------------------------------------------------------------------------------
 // Boot
 (async function boot() {
-  const lastId = prefs.get('lastProject');
+  await storage.init();
+  let lastId = prefs.get('lastProject');
   let loaded = false;
+  if (storage.server) {
+    const list = await storage.listProjects().catch(() => []);
+    if (!list.some((p) => p.id === lastId)) lastId = list[0]?.id || null;
+  }
   if (lastId) {
-    const rec = await db.getProject(lastId);
+    const rec = await storage.getProject(lastId);
     if (rec) {
       delete rec.thumb;
       delete rec.duration;
