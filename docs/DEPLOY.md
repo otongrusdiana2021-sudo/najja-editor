@@ -33,6 +33,17 @@ Installer akan:
 
 Kalau Docker Hub membatasi unduhan (error 429), installer otomatis memakai mirror Google. Menjalankan installer lagi aman: token lama tetap dipakai.
 
+## VPS yang sudah punya website (aaPanel / nginx / apache)
+
+Installer otomatis mendeteksi kalau port 80/443 sudah dipakai web server lain. Kalau begitu, Najja **hanya berjalan di port lokal** (`127.0.0.1:3333`) dan website lain di VPS **tidak diubah**.
+
+- **nginx biasa:** installer menambahkan situs untuk domain kamu, mengecek `nginx -t` (dibatalkan otomatis kalau gagal), lalu memasang HTTPS dengan certbot.
+- **aaPanel:** konfigurasi nginx tidak disentuh. Lakukan 3 langkah ini sekali di panel:
+  1. **Website → Add site.** Domain: `editor.domainkamu.com`, PHP: Static/Pure static, lalu Submit.
+  2. Buka situs itu → **SSL → Let's Encrypt.** Centang domainnya, Apply, lalu nyalakan **Force HTTPS**.
+  3. **Reverse proxy → Add reverse proxy.** Name: `najja`, Target URL: `http://127.0.0.1:3333`, Sent Domain: `$host`, lalu Submit.
+- **Lainnya** (apache, Nginx Proxy Manager, Traefik, dll.): buat reverse proxy dari domain kamu ke `http://127.0.0.1:3333`. Teruskan header Host, matikan buffering, dan atur timeout baca minimal 1 jam.
+
 ## Cara A — Docker manual
 
 **1. Upload kode** dari laptop kamu:

@@ -67,12 +67,24 @@ else
   info "DNS OK: $DOMAIN → $DNS_IP"
 fi
 
-# 4. Port 80/443 harus bebas (bukan dipakai nginx/apache)
+# 4. Port 80/443: bebas → pakai Caddy (HTTPS otomatis). Sudah dipakai web server lain → pasang di belakangnya.
+MODE=caddy
+WEB=""
+PANEL=""
+PROJECT="$(basename "$APP_DIR" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9_-')"
 if command -v ss >/dev/null 2>&1; then
   BUSY="$(ss -ltnpH 2>/dev/null | awk '$4 ~ /:(80|443)$/' | grep -v -e docker-proxy -e '"caddy"' || true)"
-  [ -z "$BUSY" ] || die "Port 80/443 sedang dipakai program lain:
-$BUSY
-Hentikan dulu (mis. systemctl disable --now nginx apache2), lalu jalankan ulang skrip ini."
+  if [ -n "$BUSY" ]; then
+    MODE=proxy
+    WEB="$(printf '%s\n' "$BUSY" | grep -oE 'users:\(\("[^"]+' | head -1 | sed 's/.*"//')"
+  fi
+fi
+OTHER_DOCKER="$(docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -E ':(80|443)->' | grep -v "^${PROJECT}-caddy-" || true)"
+if [ -n "$OTHER_DOCKER" ]; then MODE=proxy; WEB="${WEB:-container $(printf '%s' "$OTHER_DOCKER" | awk 'NR==1{print $1}')}"; fi
+[ -d /www/server/panel ] && PANEL=aapanel
+[ -d /usr/local/CyberCP ] && PANEL=cyberpanel
+if [ "$MODE" = proxy ]; then
+  info "Port 80/443 sudah dipakai ${WEB:-web server lain}${PANEL:+ ($PANEL)}. Najja dipasang di belakangnya — situs lain di VPS ini tidak diubah."
 fi
 
 # 5. Firewall
@@ -83,33 +95,102 @@ fi
 
 # 6. Konfigurasi (.env) — token lama dipertahankan saat install ulang
 TOKEN=""
+OLD_LPORT=""
 [ -f .env ] && TOKEN="$(sed -n 's/^NAJJA_TOKEN=//p' .env | head -1)"
+[ -f .env ] && OLD_LPORT="$(sed -n 's/^NAJJA_LOCAL_PORT=//p' .env | head -1)"
 if [ -z "$TOKEN" ]; then
   TOKEN="$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   info "Token login baru dibuat"
 fi
 umask 077
 printf 'DOMAIN=%s\nNAJJA_TOKEN=%s\n' "$DOMAIN" "$TOKEN" > .env
+[ -n "$OLD_LPORT" ] && printf 'NAJJA_LOCAL_PORT=%s\n' "$OLD_LPORT" >> .env
 umask 022
 
 # 7. Jalankan
-info "Membangun dan menjalankan container (1–3 menit)…"
-if ! docker compose up -d --build; then
+pull_mirror() {
   # Docker Hub sering membatasi unduhan anonim dari IP VPS bersama (HTTP 429). Ambil image yang sama dari mirror Google.
   warn "Gagal mengunduh image dari Docker Hub. Mencoba mirror.gcr.io…"
-  for img in node:22-alpine caddy:2; do
-    docker pull -q "mirror.gcr.io/library/$img" >/dev/null && docker tag "mirror.gcr.io/library/$img" "$img"
-  done
-  docker compose up -d --build || die "Gagal menjalankan container. Cek pesan di atas."
+  for img in "$@"; do docker pull -q "mirror.gcr.io/library/$img" >/dev/null && docker tag "mirror.gcr.io/library/$img" "$img"; done
+}
+info "Membangun dan menjalankan container (1–3 menit)…"
+if [ "$MODE" = caddy ]; then
+  if ! docker compose up -d --build; then
+    pull_mirror node:22-alpine caddy:2
+    docker compose up -d --build || die "Gagal menjalankan container. Cek pesan di atas."
+  fi
+else
+  docker compose down --remove-orphans >/dev/null 2>&1 || true
+  LPORT="$(sed -n 's/^NAJJA_LOCAL_PORT=//p' .env 2>/dev/null | head -1)"
+  LPORT="${LPORT:-3333}"
+  while ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${LPORT}\$"; do LPORT=$((LPORT + 1)); done
+  sed -i '/^NAJJA_LOCAL_PORT=/d' .env
+  printf 'NAJJA_LOCAL_PORT=%s\n' "$LPORT" >> .env
+  COMPOSE=(docker compose -f docker-compose.yml -f deploy/compose.proxy.yml)
+  if ! "${COMPOSE[@]}" up -d --build najja; then
+    pull_mirror node:22-alpine
+    "${COMPOSE[@]}" up -d --build najja || die "Gagal menjalankan container. Cek pesan di atas."
+  fi
+  info "Najja berjalan di http://127.0.0.1:$LPORT (hanya lokal)"
+fi
+
+# 7b. Hubungkan ke web server yang sudah ada
+NGINX_DONE=0
+if [ "$MODE" = proxy ] && [ "$WEB" = nginx ] && [ -z "$PANEL" ] && [ -d /etc/nginx ]; then
+  if [ -d /etc/nginx/sites-enabled ]; then CONF="/etc/nginx/sites-available/najja-editor.conf"; LINK="/etc/nginx/sites-enabled/najja-editor.conf"; else CONF="/etc/nginx/conf.d/najja-editor.conf"; LINK=""; fi
+  if [ -f "$CONF" ] && grep -q "listen 443" "$CONF"; then
+    sed -i -E "s#proxy_pass http://127\.0\.0\.1:[0-9]+;#proxy_pass http://127.0.0.1:$LPORT;#" "$CONF"
+  else
+    info "Menambahkan situs $DOMAIN ke nginx"
+    V6=""
+    grep -rqs 'listen \[::\]' /etc/nginx/sites-enabled /etc/nginx/conf.d /etc/nginx/nginx.conf && V6="listen [::]:80;"
+    cat > "$CONF" <<NGINX
+# Najja Editor — dibuat oleh deploy/install.sh
+server {
+    listen 80;
+    $V6
+    server_name $DOMAIN;
+    client_max_body_size 2g;
+    location / {
+        proxy_pass http://127.0.0.1:$LPORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+NGINX
+    [ -n "$LINK" ] && ln -sf "$CONF" "$LINK"
+  fi
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx 2>/dev/null || nginx -s reload
+    NGINX_DONE=1
+    if ! grep -q "listen 443" "$CONF"; then
+      info "Memasang sertifikat HTTPS (Let's Encrypt) lewat certbot…"
+      command -v certbot >/dev/null 2>&1 || apt-get install -y -qq certbot python3-certbot-nginx >/dev/null 2>&1 || true
+      certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect --keep-until-expiring >/dev/null 2>&1 \
+        && info "Sertifikat HTTPS terpasang" \
+        || warn "Sertifikat belum bisa dibuat (biasanya DNS belum mengarah ke VPS ini). Jalankan ulang skrip ini setelah DNS benar."
+    fi
+  else
+    rm -f "$CONF" ${LINK:+"$LINK"}
+    warn "Konfigurasi nginx tidak lolos 'nginx -t', perubahan dibatalkan (situs lain tetap aman)."
+  fi
 fi
 
 # 8. Tunggu HTTPS siap
-info "Menunggu sertifikat HTTPS dari Let's Encrypt…"
 READY=0
-for _ in $(seq 1 "$WAIT_TRIES"); do
-  if curl -fsS -o /dev/null --max-time 6 "https://$DOMAIN/login" 2>/dev/null; then READY=1; break; fi
-  sleep 3
-done
+if [ "$MODE" = caddy ] || [ "$NGINX_DONE" = 1 ]; then
+  info "Mengecek https://$DOMAIN …"
+  for _ in $(seq 1 "$WAIT_TRIES"); do
+    if curl -fsS -o /dev/null --max-time 6 "https://$DOMAIN/login" 2>/dev/null; then READY=1; break; fi
+    sleep 3
+  done
+fi
 
 echo
 bold "──────────────────────────────────────────────────────"
@@ -124,9 +205,21 @@ echo "    claude mcp add --transport http najja-editor https://$DOMAIN/mcp --hea
 echo
 if [ "$READY" = 1 ]; then
   echo "  HTTPS aktif ✓"
+elif [ "$MODE" = proxy ] && [ "$NGINX_DONE" = 0 ]; then
+  bold "  Langkah terakhir: arahkan $DOMAIN ke Najja dari web server kamu"
+  if [ "$PANEL" = aapanel ]; then
+    echo "  Di aaPanel (sekali saja):"
+    echo "   1. Website → Add site → Domain: $DOMAIN → PHP: Static/Pure static → Submit"
+    echo "   2. Buka situs itu → SSL → Let's Encrypt → centang $DOMAIN → Apply → nyalakan Force HTTPS"
+    echo "   3. Reverse proxy → Add reverse proxy → Name: najja"
+    echo "      Target URL: http://127.0.0.1:$LPORT   Sent Domain: \$host   → Submit"
+  else
+    echo "  Tambahkan reverse proxy untuk $DOMAIN ke http://127.0.0.1:$LPORT"
+    echo "  (teruskan header Host, matikan buffering, timeout baca ≥ 1 jam). Contoh nginx ada di docs/DEPLOY.md."
+  fi
 else
   warn "HTTPS belum bisa dicek. Biasanya karena A record belum mengarah ke VPS ini atau port 80/443 diblokir provider."
-  warn "Setelah DNS benar, Caddy mencoba lagi otomatis. Cek log: cd $APP_DIR && docker compose logs caddy"
+  [ "$MODE" = caddy ] && warn "Setelah DNS benar, Caddy mencoba lagi otomatis. Cek log: cd $APP_DIR && docker compose logs caddy"
 fi
 echo "  Token tersimpan di $APP_DIR/.env (lihat lagi: sudo cat $APP_DIR/.env)"
 bold "──────────────────────────────────────────────────────"

@@ -1,0 +1,6 @@
+# Dipakai installer kalau port 80/443 sudah dipakai web server lain (nginx, aaPanel, apache, dll).
+# Najja hanya membuka port lokal; web server yang sudah ada meneruskan domain ke sini.
+services:
+  najja:
+    ports:
+      - "127.0.0.1:${NAJJA_LOCAL_PORT:-3333}:3333"
