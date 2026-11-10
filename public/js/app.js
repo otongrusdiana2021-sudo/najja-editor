@@ -2,6 +2,7 @@
 import { store, newProject } from './store.js';
 import { prefs } from './db.js';
 import { storage } from './storage.js';
+import { account } from './account.js';
 import { remote } from './remote.js';
 import { restoreMedia, importFile, detectType, uploadsPending } from './media.js';
 import { Engine } from './engine.js';
@@ -44,6 +45,7 @@ topbar.innerHTML = `
     <button class="mcp-pill" data-tb="mcp" title="AI · MCP">${icon('ai', 15)}<span>MCP</span><i></i></button>
     <button class="icon-btn" data-tb="keys" title="Pintasan keyboard (?)">${icon('keyboard', 18)}</button>
     <button class="icon-btn" data-tb="theme" title="Ganti tema">${icon('moon', 17)}</button>
+    <button class="avatar-btn" data-tb="account" hidden aria-label="Akun"></button>
     <button class="btn btn-export" data-tb="export">${icon('export', 16)} Ekspor</button>
   </div>`;
 
@@ -439,6 +441,7 @@ bridge.start({
 // Boot
 (async function boot() {
   await storage.init();
+  if (storage.status?.auth) account.init(topbar.querySelector('.avatar-btn'));
   let lastId = prefs.get('lastProject');
   let loaded = false;
   if (storage.server) {

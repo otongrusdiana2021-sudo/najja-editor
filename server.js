@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { createMcpHandler, formatToolResult } from './mcp/protocol.js';
 import { TOOLS } from './mcp/tools.js';
 import { createStorage } from './lib/storage.js';
+import { createAuth } from './lib/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -31,7 +32,6 @@ const INSECURE_PUBLIC = process.env.NAJJA_INSECURE_PUBLIC === '1';
 const ALLOW_ORIGINS = (process.env.NAJJA_ALLOW_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const EXTRA_HOSTS = (process.env.NAJJA_ALLOWED_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 const MEDIA_ROOT = process.env.NAJJA_MEDIA_DIR ? path.resolve(process.env.NAJJA_MEDIA_DIR) : (TOKEN ? path.join(DATA_DIR, 'media') : '');
-const SESSION = TOKEN ? crypto.createHmac('sha256', TOKEN).update('najja-session-v1').digest('base64url') : '';
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 // All logging goes to stderr so the stdio MCP transport (which reuses this module) keeps stdout clean.
@@ -213,28 +213,45 @@ function parseCookies(req) {
   }
   return out;
 }
-function isAuthed(req) {
-  if (!TOKEN) return true;
-  const auth = String(req.headers.authorization || '');
-  if (/^bearer\s+/i.test(auth) && safeEqual(auth.replace(/^bearer\s+/i, '').trim(), TOKEN)) return true;
-  return safeEqual(parseCookies(req).najja_session, SESSION);
+let accounts = null; // created in createNajjaServer when NAJJA_TOKEN is set
+/** Who is calling: the token (MCP/API clients), a logged-in email account, or local mode. */
+async function authenticate(req) {
+  if (!TOKEN) return { role: 'admin', via: 'local' };
+  const h = String(req.headers.authorization || '');
+  if (/^bearer\s+/i.test(h) && safeEqual(h.replace(/^bearer\s+/i, '').trim(), TOKEN)) return { role: 'admin', via: 'token' };
+  const user = await accounts.verifySession(parseCookies(req).najja_auth);
+  return user ? { email: user.email, role: user.role, via: 'session' } : null;
 }
+const httpErr = (status, message) => Object.assign(new Error(message), { status });
+const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const isHttps = (req) => req.socket.encrypted || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
 const clientIp = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
 const loginFailures = new Map();
 
-function loginPage(error = '') {
-  return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Masuk · Najja Editor</title>
+function loginPage(mode, { error = '', email = '' } = {}) {
+  const setup = mode === 'setup';
+  const field = (id, label, type, extra = '') => `<label for="${id}">${label}</label><input id="${id}" name="${id}" type="${type}" ${extra}>`;
+  return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${setup ? 'Buat akun' : 'Masuk'} · Najja Editor</title>
 <meta name="theme-color" content="#0b0b0d"><link rel="icon" href="/favicon.svg"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
-<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Poppins,system-ui,sans-serif;background:#0b0b0d;color:#f2f2f5;padding:16px}
-form{width:min(360px,100%);background:#141417;border:1px solid #2b2b31;border-radius:18px;padding:28px 24px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-.b{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600}.b span{background:linear-gradient(135deg,#7c6cff,#22d3c5);-webkit-background-clip:text;background-clip:text;color:transparent}
-p{margin:0;color:#9a9aa6;font-size:13px}label{font-size:12px;color:#b6b6c0}input{height:42px;border-radius:10px;border:1px solid #2b2b31;background:#1b1b1f;color:#fff;padding:0 12px;font:inherit}
-input:focus{outline:none;border-color:#7c6cff}button{height:42px;border:0;border-radius:10px;background:linear-gradient(135deg,#7c6cff,#22d3c5);color:#fff;font:600 14px Poppins,sans-serif;cursor:pointer}
-.e{color:#ff6b81;font-size:12.5px}</style></head><body>
+<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Poppins,system-ui,sans-serif;background:radial-gradient(1200px 600px at 50% -10%,#1d1838 0,#0b0b0d 60%);color:#f2f2f5;padding:16px}
+form{width:min(380px,100%);background:#141417;border:1px solid #2b2b31;border-radius:18px;padding:28px 24px;display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.b{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;margin-bottom:4px}.b span{background:linear-gradient(135deg,#7c6cff,#22d3c5);-webkit-background-clip:text;background-clip:text;color:transparent}
+h1{margin:4px 0 0;font-size:20px;font-weight:600}p{margin:0 0 6px;color:#9a9aa6;font-size:13px;line-height:1.5}label{font-size:12px;color:#b6b6c0;margin-top:4px}
+input{height:44px;border-radius:10px;border:1px solid #2b2b31;background:#1b1b1f;color:#fff;padding:0 12px;font:inherit;font-size:14px;transition:border-color .15s}
+input:focus{outline:none;border-color:#7c6cff}button{height:44px;margin-top:10px;border:0;border-radius:10px;background:linear-gradient(135deg,#7c6cff,#22d3c5);color:#fff;font:600 14px Poppins,sans-serif;cursor:pointer;transition:filter .15s}
+button:hover{filter:brightness(1.08)}.e{color:#ff6b81;font-size:12.5px;background:rgba(255,77,109,.1);border-radius:8px;padding:8px 10px}small{color:#75757f;font-size:11.5px;line-height:1.5}code{background:#232328;border-radius:5px;padding:1px 5px;font-size:11px}</style></head><body>
 <form method="post" action="/login"><div class="b"><svg viewBox="0 0 32 32" width="30" height="30"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7b6cff"/><stop offset="1" stop-color="#22d3c5"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="9" fill="url(#g)"/><path d="M10 22V10l7.2 8.4V10M21.5 10v12" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>Najja <span>Editor</span></div>
-<p>Masukkan token akses server ini.</p><label for="t">Token</label><input id="t" name="token" type="password" autocomplete="current-password" required autofocus>
-${error ? `<div class="e">${error}</div>` : ''}<button type="submit">Masuk</button></form></body></html>`;
+${setup
+    ? `<h1>Buat akun admin</h1><p>Sekali saja di awal. Setelah ini kamu masuk dengan email dan password.</p>
+${field('email', 'Email', 'email', `autocomplete="email" required autofocus value="${escHtml(email)}"`)}
+${field('password', 'Password (min. 8 karakter)', 'password', 'autocomplete="new-password" minlength="8" required')}
+${field('password2', 'Ulangi password', 'password', 'autocomplete="new-password" minlength="8" required')}
+${field('token', 'Token server', 'password', 'autocomplete="off" required')}
+<small>Token server ada di VPS: <code>grep NAJJA_TOKEN /opt/najja-editor/.env</code>. Ini memastikan hanya pemilik VPS yang bisa membuat akun admin.</small>`
+    : `<h1>Masuk</h1><p>Masuk ke editor dengan akun kamu.</p>
+${field('email', 'Email', 'email', `autocomplete="username" required ${email ? '' : 'autofocus'} value="${escHtml(email)}"`)}
+${field('password', 'Password', 'password', `autocomplete="current-password" required ${email ? 'autofocus' : ''}`)}`}
+${error ? `<div class="e">${escHtml(error)}</div>` : ''}<button type="submit">${setup ? 'Buat akun & masuk' : 'Masuk'}</button></form></body></html>`;
 }
 
 function readBody(req, limit = 64 * 1024 * 1024) {
@@ -326,6 +343,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
   const displayHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host === '127.0.0.1' ? 'localhost' : host;
   const publicUrl = (process.env.NAJJA_PUBLIC_URL || `http://${displayHost}:${port}`).replace(/\/$/, '');
   const bridge = new Bridge(publicUrl);
+  if (TOKEN && !accounts) accounts = createAuth(DATA_DIR);
   const localFiles = new Map(); // token -> absolute path (for import_media with a local path)
   let lastExport = null;
 
@@ -395,7 +413,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Expose-Headers': 'Mcp-Session-Id', Vary: 'Origin' }
       : {};
     if (!originAllowed(req)) return sendJson(res, 403, { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Forbidden origin' } });
-    if (req.method !== 'OPTIONS' && !isAuthed(req)) {
+    if (req.method !== 'OPTIONS' && !(await authenticate(req))) {
       return sendJson(res, 401, { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized: send "Authorization: Bearer <NAJJA_TOKEN>"' } }, { ...cors, 'WWW-Authenticate': 'Bearer realm="najja-editor"' });
     }
     if (req.method === 'OPTIONS') {
@@ -449,39 +467,78 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     }
     if (p === '/login') {
       if (!TOKEN) { res.writeHead(302, { Location: '/' }); return res.end(); }
-      const html = (status, err) => { res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(loginPage(err)); };
-      if (req.method !== 'POST') return html(200);
-      if (!originAllowed(req)) return html(403, 'Origin tidak diizinkan.');
+      const setupMode = !(await accounts.hasUsers());
+      const page = (status, error, email) => {
+        res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(loginPage(setupMode ? 'setup' : 'login', { error, email }));
+      };
+      if (req.method !== 'POST') return page(200);
+      if (!originAllowed(req)) return page(403, 'Origin tidak diizinkan.');
       const ip = clientIp(req);
       const f = loginFailures.get(ip);
-      if (f && f.n >= 10 && Date.now() < f.until) return html(429, 'Terlalu banyak percobaan. Coba lagi 15 menit lagi.');
+      if (f && f.n >= 10 && Date.now() < f.until) return page(429, 'Terlalu banyak percobaan. Coba lagi 15 menit lagi.');
       const form = new URLSearchParams((await readBody(req, 16 * 1024)).toString('utf8'));
-      if (!safeEqual(form.get('token'), TOKEN)) {
-        const n = (f && Date.now() < f.until ? f.n : 0) + 1;
-        loginFailures.set(ip, { n, until: Date.now() + 15 * 60_000 });
-        log(`login gagal dari ${ip}`);
-        return html(401, 'Token salah.');
+      const email = form.get('email') || '';
+      try {
+        let user;
+        if (setupMode) {
+          if (form.get('password') !== form.get('password2')) throw httpErr(400, 'Konfirmasi password tidak sama.');
+          await accounts.setup(email, form.get('password'), safeEqual(form.get('token'), TOKEN));
+          user = await accounts.login(email, form.get('password'));
+          log(`akun admin dibuat: ${user.email}`);
+        } else {
+          user = await accounts.login(email, form.get('password'));
+        }
+        loginFailures.delete(ip);
+        res.writeHead(303, {
+          Location: '/',
+          'Set-Cookie': `najja_auth=${await accounts.createSession(user)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${accounts.maxAge}${isHttps(req) ? '; Secure' : ''}`,
+        });
+        return res.end();
+      } catch (err) {
+        if (err.status === 401) {
+          loginFailures.set(ip, { n: (f && Date.now() < f.until ? f.n : 0) + 1, until: Date.now() + 15 * 60_000 });
+          log(`login gagal dari ${ip}`);
+        }
+        return page(err.status || 400, err.message, email);
       }
-      loginFailures.delete(ip);
-      res.writeHead(303, {
-        Location: '/',
-        'Set-Cookie': `najja_session=${SESSION}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${isHttps(req) ? '; Secure' : ''}`,
-      });
-      return res.end();
     }
     if (p === '/logout') {
-      res.writeHead(303, { Location: '/login', 'Set-Cookie': 'najja_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
+      res.writeHead(303, { Location: '/login', 'Set-Cookie': 'najja_auth=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
       return res.end();
     }
 
     if (p === '/mcp' || p === '/mcp/') return handleMcp(req, res);
 
-    if (!isAuthed(req)) {
+    const who = await authenticate(req);
+    if (!who) {
       if (req.method === 'GET' && String(req.headers.accept || '').includes('text/html')) { res.writeHead(302, { Location: '/login' }); return res.end(); }
       return sendJson(res, 401, { error: 'Unauthorized' });
     }
     if (p.startsWith('/api/') || p.startsWith('/bridge/')) {
       if (!originAllowed(req)) return sendJson(res, 403, { error: 'Forbidden origin' });
+    }
+
+    // ---- account (email login)
+    if (p === '/api/me' && req.method === 'GET') return sendJson(res, 200, { ...who, accounts: !!TOKEN });
+    if (p === '/api/me/password' && req.method === 'POST') {
+      if (who.via !== 'session') return sendJson(res, 400, { error: 'Masuk dengan email untuk mengganti password.' });
+      const body = await readJson(req);
+      const user = await accounts.changePassword(who.email, body.current, body.next);
+      return sendJson(res, 200, { ok: true }, {
+        'Set-Cookie': `najja_auth=${await accounts.createSession(user)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${accounts.maxAge}${isHttps(req) ? '; Secure' : ''}`,
+      });
+    }
+    if (p === '/api/users' || p.startsWith('/api/users/')) {
+      if (!TOKEN) return sendJson(res, 400, { error: 'Akun hanya tersedia di mode server (NAJJA_TOKEN).' });
+      if (who.role !== 'admin') return sendJson(res, 403, { error: 'Hanya admin.' });
+      if (p === '/api/users' && req.method === 'GET') return sendJson(res, 200, await accounts.listUsers());
+      if (p === '/api/users' && req.method === 'POST') {
+        const body = await readJson(req);
+        return sendJson(res, 200, await accounts.addUser(body.email, body.password, body.role));
+      }
+      const del = /^\/api\/users\/(.+)$/.exec(p);
+      if (del && req.method === 'DELETE') return sendJson(res, 200, await accounts.removeUser(del[1], who.email));
     }
 
     if (p === '/bridge/events' && req.method === 'GET') {
@@ -671,11 +728,17 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
 
 // Run directly: `node server.js` / `npm start`
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) {
+if (isMain && process.argv[2] === 'reset-login') {
+  // Forgot the password? `docker compose exec najja node server.js reset-login` → next visit shows first-time setup.
+  createAuth(DATA_DIR).reset().then(() => {
+    console.log('Semua akun dihapus. Buka editor lagi untuk membuat akun admin baru (perlu token server). Proyek & media tidak terhapus.');
+    process.exit(0);
+  });
+} else if (isMain) {
   const app = createNajjaServer();
   app.listen().then((url) => {
     const line = '─'.repeat(52);
-    console.log(`\n  ${line}\n   ✦ Najja Editor v${PKG.version}\n  ${line}\n   Editor      : ${url}\n   MCP (HTTP)  : ${url}/mcp\n   MCP (stdio) : node ${path.join(__dirname, 'mcp-stdio.js')}\n   Ekspor      : ${EXPORT_DIR}\n   Login token : ${TOKEN ? 'AKTIF' : 'mati (mode lokal)'}${MEDIA_ROOT ? `\n   Folder media: ${MEDIA_ROOT}` : ''}\n  ${line}\n`);
+    console.log(`\n  ${line}\n   ✦ Najja Editor v${PKG.version}\n  ${line}\n   Editor      : ${url}\n   MCP (HTTP)  : ${url}/mcp\n   MCP (stdio) : node ${path.join(__dirname, 'mcp-stdio.js')}\n   Ekspor      : ${EXPORT_DIR}\n   Login       : ${TOKEN ? 'email + password (token untuk MCP)' : 'tidak ada (mode lokal)'}${MEDIA_ROOT ? `\n   Folder media: ${MEDIA_ROOT}` : ''}\n  ${line}\n`);
     if (!TOKEN && !process.argv.includes('--no-open')) openBrowser(url);
   }).catch((err) => {
     if (err.code === 'EADDRINUSE') {

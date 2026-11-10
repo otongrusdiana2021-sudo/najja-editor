@@ -186,7 +186,20 @@ Folder volume itu juga bisa dimasukkan ke jadwal backup aaPanel.
 
 Buka editornya di Chrome atau Edge, lalu klik ikon **Install** di address bar, atau buka menu ☰ di kiri atas → **Pasang sebagai aplikasi**. Najja akan punya ikon sendiri dan terbuka di jendela terpisah seperti aplikasi biasa.
 
-## Ganti token login
+## Login dengan email
+
+Saat pertama kali membuka editor, muncul halaman **Buat akun admin**. Isi email, password, dan **token server** sekali saja (token ada di `/opt/najja-editor/.env`). Setelah itu kamu masuk dengan email dan password.
+
+- Menu akun ada di bulatan inisial di kanan atas: **Ganti password**, **Kelola pengguna** (admin bisa menambah atau menghapus pengguna), dan **Keluar**.
+- Semua pengguna memakai proyek dan media yang sama di server.
+
+**Lupa password?** Jalankan perintah di bawah. Akunnya terhapus, tapi proyek dan media tidak. Setelah itu buka editor dan buat akun admin lagi.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/otongrusdiana2021-sudo/najja-editor/main/deploy/install.sh | sudo bash -s editor.domainkamu.com --reset-login
+```
+
+## Ganti token server
 
 Jalankan installer lagi dengan `--token-baru`:
 
@@ -194,7 +207,7 @@ Jalankan installer lagi dengan `--token-baru`:
 curl -fsSL https://raw.githubusercontent.com/otongrusdiana2021-sudo/najja-editor/main/deploy/install.sh | sudo bash -s editor.domainkamu.com --token-baru
 ```
 
-Token lama langsung tidak berlaku. Semua perangkat perlu login ulang, dan perintah Claude Code perlu diperbarui. Data tidak berubah.
+Token server dipakai untuk Claude Code/MCP dan untuk membuat akun admin pertama. Token lama langsung tidak berlaku, jadi perintah Claude Code perlu diperbarui. Login email tidak terpengaruh, dan data tidak berubah.
 
 ## Hubungkan AI ke editor di VPS
 
