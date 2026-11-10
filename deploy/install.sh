@@ -14,6 +14,11 @@
 # website lain tidak diubah.
 set -euo pipefail
 
+# Seluruh skrip dibungkus main() dan dijalankan dengan stdin dari /dev/null: saat dipakai lewat
+# `curl | bash`, bash membaca SELURUH skrip dulu, sehingga perintah seperti `docker compose exec`
+# tidak bisa "menelan" sisa skrip dari stdin.
+main() {
+
 CHECK=0
 NEW_TOKEN=0
 RESET_LOGIN=0
@@ -38,7 +43,7 @@ die() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Jalankan sebagai root: sudo bash $0 $DOMAIN"
 
-if [ -z "$DOMAIN" ] && [ -t 0 ]; then read -rp "Domain untuk editor (mis. editor.domainkamu.com): " DOMAIN; fi
+if [ -z "$DOMAIN" ]; then { read -rp "Domain untuk editor (mis. editor.domainkamu.com): " DOMAIN </dev/tty; } 2>/dev/null || true; fi
 DOMAIN="$(printf '%s' "$DOMAIN" | tr 'A-Z' 'a-z' | sed -e 's#^https\?://##' -e 's#/.*$##')"
 [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] || die "Domain tidak valid: '$DOMAIN'"
 
@@ -335,3 +340,6 @@ elif [ -n "$PUBLIC_VERSION" ] || [ "$READY" = 1 ]; then
 fi
 echo "  Token tersimpan di $APP_DIR/.env (lihat lagi: sudo cat $APP_DIR/.env)"
 bold "──────────────────────────────────────────────────────"
+}
+
+main "$@" </dev/null
