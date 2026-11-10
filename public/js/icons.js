@@ -78,4 +78,6 @@ export function icon(name, size = 18, extra = '') {
   return `<svg class="ic ${extra}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 }
 
-export const LOGO = `<svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><defs><linearGradient id="nj-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7b6cff"/><stop offset="1" stop-color="#22d3c5"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="9" fill="url(#nj-g)"/><path d="M10 22V10l7.2 8.4V10M21.5 10v12" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`;
+// Najja brand mark: circle + looped "N" (teal #47C9D7). Same paths as public/favicon.svg.
+export const MARK_PATHS = '<circle cx="50" cy="50" r="45"/><path d="M18.2 18.2C22.5 14.2 28.5 12.6 33.5 13.8C37.4 14.8 39 18.5 39 24L39 61C39 70.5 35 77.5 28.5 80.4C25.4 81.8 21.8 82.2 18.2 81.8"/><path d="M81.8 81.8C77.5 85.8 71.5 87.4 66.5 86.2C62.6 85.2 61 81.5 61 76L61 39C61 29.5 65 22.5 71.5 19.6C74.6 18.2 78.2 17.8 81.8 18.2"/><path d="M18.2 18.2L81.8 81.8"/>';
+export const LOGO = `<svg class="nj-mark" viewBox="0 0 100 100" width="28" height="28" fill="none" stroke="#47C9D7" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MARK_PATHS}</svg>`;

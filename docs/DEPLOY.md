@@ -98,7 +98,7 @@ NAJJA_TOKEN=hasil-openssl-rand-tadi
 docker compose up -d --build
 ```
 
-**6.** Buka **https://editor.domainkamu.com**, lalu masukkan token.
+**6.** Buka **https://editor.domainkamu.com**, lalu buat akun admin (email, password, dan token dari `.env`).
 
 Caddy mengurus sertifikat Let's Encrypt secara otomatis. Percobaan pertama butuh beberapa detik.
 
@@ -247,8 +247,8 @@ Dengan `NAJJA_URL` terisi, `mcp-stdio.js` hanya meneruskan perintah ke VPS dan t
   - Login salah 10 kali dari satu IP akan diblokir selama 15 menit.
 - Impor file lokal lewat AI dibatasi ke folder `/data/media` di server.
 - **Ganti token:** edit `.env`, lalu jalankan `docker compose up -d`. Semua sesi lama otomatis keluar.
-- Proyek dan media yang kamu edit tersimpan di browser kamu, bukan di server. Server hanya menyimpan hasil ekspor AI dan cache unduhan di volume `najja-data`.
-- Tombol **Keluar** ada di panel AI · MCP (atau buka `/logout`).
+- Proyek, media, dan hasil ekspor tersimpan di server kamu sendiri (volume `najja-data`), tidak di layanan luar.
+- Tombol **Keluar** ada di menu akun (bulatan inisial di kanan atas), atau buka `/logout`.
 
 ## Masalah umum
 

@@ -9,6 +9,7 @@
   --border: #25252b;
   --border-2: #34343c;
   --text: #f2f2f5;
+  --wordmark: #ececf0;
   --text-2: #b6b6c0;
   --text-3: #74747e;
   --accent: #7c6cff;
@@ -47,6 +48,7 @@
   --border: #e0e2e9;
   --border-2: #cfd3dc;
   --text: #16171b;
+  --wordmark: #636363;
   --text-2: #4b4e59;
   --text-3: #8b8f9a;
   --accent: #6252f5;
@@ -84,7 +86,8 @@ input, textarea { user-select: text; }
 
 /* Boot splash */
 .boot { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; gap: 14px; background: var(--bg); z-index: 100; font-weight: 600; letter-spacing: 0.3px; transition: opacity 0.4s var(--ease), visibility 0.4s; }
-.boot-logo { width: 54px; height: 54px; border-radius: 16px; background: var(--grad); animation: bootPulse 1.2s ease-in-out infinite; }
+.boot-logo { width: 64px; height: 64px; animation: bootPulse 1.2s ease-in-out infinite; }
+.boot .wordmark { font-size: 18px; font-weight: 300; }
 @keyframes bootPulse { 50% { transform: scale(0.88); opacity: 0.7; } }
 body.ready .boot { opacity: 0; visibility: hidden; }
 
@@ -104,8 +107,11 @@ body.ready .boot { opacity: 0; visibility: hidden; }
 .tb-left, .tb-right { display: flex; align-items: center; gap: 8px; flex: 1; }
 .tb-right { justify-content: flex-end; }
 .tb-center { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.brand { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 500; letter-spacing: 0.2px; white-space: nowrap; }
-.brand b { font-weight: 700; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.brand { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.brand .nj-mark { flex: none; }
+/* Brand wordmark: Raleway is used only for "NAJJA"; the rest of the UI stays Poppins. */
+.wordmark { font-family: 'Raleway', var(--font); font-weight: 400; font-size: 15px; line-height: 1; letter-spacing: 0.3em; margin-right: -0.3em; color: var(--wordmark); }
+.brand-sub { font-size: 11px; font-weight: 500; color: var(--text-3); line-height: 14px; padding-left: 10px; border-left: 1px solid var(--border-2); }
 .proj-name { width: 260px; max-width: 34vw; text-align: center; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 10px; font-weight: 600; font-size: 14px; transition: background 0.15s, border-color 0.15s; }
 .proj-name:hover { background: var(--panel-2); }
 .proj-name:focus { background: var(--panel-2); border-color: var(--accent); outline: none; }
@@ -623,7 +629,7 @@ select { cursor: pointer; padding-right: 6px; }
   .topbar { flex-wrap: wrap; padding: 8px 12px; height: auto; }
   .tb-center { order: 3; width: 100%; justify-content: center; }
   .proj-name { width: 100%; max-width: none; }
-  .brand span { display: none; }
+  .brand-sub { display: none; }
   .mcp-pill span, .btn-export { font-size: 12px; }
   .workspace { grid-template-columns: 1fr; grid-template-rows: 46vh auto 320px; padding: 0 8px; gap: 8px; }
   .viewer { order: 1; }

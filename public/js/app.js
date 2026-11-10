@@ -35,7 +35,7 @@ const topbar = $('#topbar');
 topbar.innerHTML = `
   <div class="tb-left">
     <button class="icon-btn" data-tb="menu" title="Menu" aria-label="Menu">${icon('menu', 18)}</button>
-    <div class="brand">${LOGO}<span>Najja <b>Editor</b></span></div>
+    <div class="brand" title="Najja Editor">${LOGO}<span class="wordmark">NAJJA</span><span class="brand-sub">Editor</span></div>
   </div>
   <div class="tb-center">
     <input class="proj-name" aria-label="Nama proyek" spellcheck="false" maxlength="80">
@@ -411,7 +411,7 @@ function shortcutsDialog() {
 function aboutDialog() {
   modal({
     title: 'Tentang Najja Editor',
-    body: `<div class="about">${LOGO}<div><b>Najja Editor</b><p class="hint">Editor video berbasis web dengan server MCP bawaan. Semua proses berjalan di browser kamu — media tidak diunggah ke mana pun.</p>
+    body: `<div class="about">${LOGO}<div><b>Najja Editor</b><p class="hint">Editor video berbasis web dengan server MCP bawaan. Editing berjalan di browser kamu; proyek dan media tersimpan di server kamu sendiri.</p>
       <p class="hint">Format: MP4/WebM · Resolusi 480p–4K · Font antarmuka: Poppins</p></div></div>`,
   });
 }
