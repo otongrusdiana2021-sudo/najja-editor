@@ -14,5 +14,5 @@ ENV NODE_ENV=production \
 VOLUME /data
 EXPOSE 3333
 USER node
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD wget -qO- http://127.0.0.1:3333/favicon.svg >/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD wget -qO- http://127.0.0.1:3333/healthz >/dev/null || exit 1
 CMD ["node", "server.js", "--no-open"]

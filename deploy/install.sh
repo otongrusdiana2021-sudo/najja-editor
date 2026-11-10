@@ -93,20 +93,32 @@ fi
 bold "✦ Memasang Najja Editor untuk https://$DOMAIN"
 
 # 1. Kode aplikasi
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo /nonexistent)"
-if [ -f "$SCRIPT_DIR/../docker-compose.yml" ]; then
-  APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-elif [ -f "$INSTALL_DIR/docker-compose.yml" ] && [ -z "$REPO_URL" ]; then
-  APP_DIR="$INSTALL_DIR"
+# Dijalankan sebagai file (bash deploy/install.sh) → pakai folder kode itu apa adanya.
+# Dijalankan lewat curl | bash → SELALU pakai $INSTALL_DIR dan samakan persis dengan GitHub (folder terminal tidak berpengaruh).
+SELF="${BASH_SOURCE[0]:-}"
+GITREV=""
+if [ -n "$SELF" ] && [ -f "$SELF" ] && [ -f "$(dirname "$SELF")/../docker-compose.yml" ]; then
+  APP_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
 else
-  [ -n "$REPO_URL" ] || die "Kode Najja tidak ditemukan. Jalankan dari folder hasil ekstrak zip, atau set NAJJA_REPO_URL."
+  [ -n "$REPO_URL" ] || die "NAJJA_REPO_URL kosong."
   command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-remove git; }
-  if [ -d "$INSTALL_DIR/.git" ]; then info "Memperbarui kode di $INSTALL_DIR"; git -C "$INSTALL_DIR" pull --ff-only -q
-  else info "Mengunduh kode ke $INSTALL_DIR"; git clone -q --depth 1 "$REPO_URL" "$INSTALL_DIR"; fi
+  git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$INSTALL_DIR" || git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+  if [ -d "$INSTALL_DIR/.git" ]; then
+    info "Memperbarui kode di $INSTALL_DIR"
+    git -C "$INSTALL_DIR" fetch -q --depth 1 "$REPO_URL" main || die "Gagal mengunduh kode terbaru dari $REPO_URL (cek koneksi VPS ke GitHub)."
+    git -C "$INSTALL_DIR" reset -q --hard FETCH_HEAD || die "Gagal memperbarui kode di $INSTALL_DIR."
+  elif [ -d "$INSTALL_DIR" ] && [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
+    die "$INSTALL_DIR sudah ada tapi bukan folder git. Ganti namanya dulu (mv $INSTALL_DIR $INSTALL_DIR.lama), lalu jalankan ulang."
+  else
+    info "Mengunduh kode ke $INSTALL_DIR"
+    git clone -q --depth 1 "$REPO_URL" "$INSTALL_DIR" || die "Gagal mengunduh kode dari $REPO_URL."
+  fi
   APP_DIR="$INSTALL_DIR"
+  GITREV="$(git -C "$APP_DIR" log -1 --format='%h' 2>/dev/null || true)"
 fi
 cd "$APP_DIR"
-info "Folder aplikasi: $APP_DIR"
+EXPECTED_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
+info "Folder aplikasi: $APP_DIR — versi $EXPECTED_VERSION${GITREV:+ (commit $GITREV)}"
 
 # 2. Docker — Docker yang sudah ada TIDAK pernah dipasang ulang; apt dibatalkan kalau akan menghapus paket.
 export DEBIAN_FRONTEND=noninteractive
@@ -171,23 +183,53 @@ pull_mirror() {
 }
 info "Membangun dan menjalankan container (1–3 menit)…"
 if [ "$MODE" = caddy ]; then
-  if ! docker compose up -d --build; then
+  if ! docker compose up -d --build --force-recreate; then
     pull_mirror node:22-alpine caddy:2
-    docker compose up -d --build || die "Gagal menjalankan container. Cek pesan di atas."
+    docker compose up -d --build --force-recreate || die "Gagal menjalankan container. Cek pesan di atas."
   fi
 else
   docker compose down --remove-orphans >/dev/null 2>&1 || true
-  LPORT="$(sed -n 's/^NAJJA_LOCAL_PORT=//p' .env 2>/dev/null | head -1)"
-  LPORT="${LPORT:-3333}"
-  LPORT="$(free_port "$LPORT")"
+  WANT="$(sed -n 's/^NAJJA_LOCAL_PORT=//p' .env 2>/dev/null | head -1)"
+  WANT="${WANT:-3333}"
+  # Container Najja lama (mis. dari folder/proyek lain) yang masih memegang port → hentikan.
+  STALE="$(docker ps --format '{{.ID}} {{.Names}} {{.Ports}}' 2>/dev/null | grep -E "(127\.0\.0\.1|0\.0\.0\.0):${WANT}->" | grep -i najja | awk '{print $1}' || true)"
+  if [ -n "$STALE" ]; then warn "Menghentikan container Najja lama yang masih memakai port $WANT"; docker rm -f $STALE >/dev/null 2>&1 || true; fi
+  LPORT="$(free_port "$WANT")"
+  if [ "$LPORT" != "$WANT" ]; then
+    warn "Port $WANT dipakai program lain, Najja memakai port $LPORT."
+    warn "WAJIB: ubah Target URL reverse proxy di aaPanel menjadi http://127.0.0.1:$LPORT"
+  fi
   sed -i '/^NAJJA_LOCAL_PORT=/d' .env
   printf 'NAJJA_LOCAL_PORT=%s\n' "$LPORT" >> .env
   COMPOSE=(docker compose -f docker-compose.yml -f deploy/compose.proxy.yml)
-  if ! "${COMPOSE[@]}" up -d --build najja; then
+  if ! "${COMPOSE[@]}" up -d --build --force-recreate najja; then
     pull_mirror node:22-alpine
-    "${COMPOSE[@]}" up -d --build najja || die "Gagal menjalankan container. Cek pesan di atas."
+    "${COMPOSE[@]}" up -d --build --force-recreate najja || die "Gagal menjalankan container. Cek pesan di atas."
   fi
   info "Najja berjalan di http://127.0.0.1:$LPORT (hanya lokal)"
+fi
+
+# 7a. Pastikan versi yang BERJALAN sama dengan kode yang baru diunduh
+info "Memeriksa versi yang berjalan…"
+LIVE=""
+for _ in $(seq 1 40); do
+  LIVE="$(docker compose exec -T najja wget -qO- http://127.0.0.1:3333/healthz 2>/dev/null || true)"
+  [ -n "$LIVE" ] && break
+  sleep 1
+done
+LIVE_VERSION="$(printf '%s' "$LIVE" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+if [ "$LIVE_VERSION" = "$EXPECTED_VERSION" ]; then
+  info "Container menjalankan versi $LIVE_VERSION ✓"
+else
+  docker compose logs --tail 30 najja 2>&1 | sed 's/^/    /' || true
+  die "Container belum menjalankan versi $EXPECTED_VERSION (terdeteksi: ${LIVE_VERSION:-tidak merespons}). Kirim output ini untuk dicek."
+fi
+if [ "$MODE" = proxy ]; then
+  if curl -fsS --max-time 5 "http://127.0.0.1:$LPORT/healthz" 2>/dev/null | grep -q "\"version\":\"$EXPECTED_VERSION\""; then
+    info "Port lokal 127.0.0.1:$LPORT merespons versi $EXPECTED_VERSION ✓"
+  else
+    warn "Port lokal 127.0.0.1:$LPORT belum merespons versi $EXPECTED_VERSION"
+  fi
 fi
 
 if [ "$RESET_LOGIN" = 1 ]; then
@@ -252,6 +294,9 @@ if [ "$MODE" = caddy ] || [ "$NGINX_DONE" = 1 ]; then
   done
 fi
 
+PUBLIC_VERSION="$(curl -fsS --max-time 8 "https://$DOMAIN/healthz" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)"
+[ "$PUBLIC_VERSION" = "$EXPECTED_VERSION" ] && READY=1
+
 echo
 bold "──────────────────────────────────────────────────────"
 bold " ✦ Najja Editor terpasang"
@@ -281,6 +326,12 @@ elif [ "$MODE" = proxy ] && [ "$NGINX_DONE" = 0 ]; then
 else
   warn "HTTPS belum bisa dicek. Biasanya karena A record belum mengarah ke VPS ini atau port 80/443 diblokir provider."
   [ "$MODE" = caddy ] && warn "Setelah DNS benar, Caddy mencoba lagi otomatis. Cek log: cd $APP_DIR && docker compose logs caddy"
+fi
+if [ "$PUBLIC_VERSION" = "$EXPECTED_VERSION" ]; then
+  echo "  https://$DOMAIN menjalankan versi $PUBLIC_VERSION ✓"
+elif [ -n "$PUBLIC_VERSION" ] || [ "$READY" = 1 ]; then
+  warn "https://$DOMAIN masih menjawab versi ${PUBLIC_VERSION:-lama}, bukan $EXPECTED_VERSION."
+  warn "Cek Target URL reverse proxy di aaPanel: harus http://127.0.0.1:${LPORT:-3333}"
 fi
 echo "  Token tersimpan di $APP_DIR/.env (lihat lagi: sudo cat $APP_DIR/.env)"
 bold "──────────────────────────────────────────────────────"

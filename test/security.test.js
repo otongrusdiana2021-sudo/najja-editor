@@ -154,3 +154,11 @@ test('token mode: users and password change', async () => {
   assert.equal((await req(p, { method: 'DELETE', path: '/api/users/bos@najja.id', headers: { ...J, cookie: admin } })).status, 400, 'cannot delete yourself');
   assert.equal((await req(p, { method: 'DELETE', path: '/api/users/tim@najja.id', headers: { ...J, cookie: admin } })).status, 200);
 });
+
+test('healthz is public and reports the version and login mode', async () => {
+  const r = await req(secured.port, { path: '/healthz', headers: { host: 'editor.example.com' } });
+  assert.equal(r.status, 200);
+  const j = JSON.parse(r.body);
+  assert.equal(j.login, 'email');
+  assert.match(j.version, /^\d+\.\d+\.\d+$/);
+});

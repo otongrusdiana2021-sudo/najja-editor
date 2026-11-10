@@ -462,6 +462,9 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('Najja Editor berjalan tanpa NAJJA_TOKEN, jadi hanya bisa dibuka dari localhost. Untuk VPS/akses publik, jalankan dengan NAJJA_TOKEN (lihat docs/DEPLOY.md).');
     }
+    if (p === '/healthz') {
+      return sendJson(res, 200, { ok: true, name: PKG.name, version: PKG.version, login: TOKEN ? 'email' : 'local', storage: 'server' });
+    }
     if (p === '/favicon.svg' || p === '/manifest.webmanifest' || p === '/sw.js' || /^\/icons\/[\w.-]+\.png$/.test(p)) {
       return sendFile(req, res, path.join(PUBLIC_DIR, p), p === '/sw.js' ? { 'Service-Worker-Allowed': '/', 'Cache-Control': 'no-cache' } : {});
     }
