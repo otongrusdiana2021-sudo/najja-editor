@@ -1,0 +1,34 @@
+# Najja Editor + Caddy (HTTPS otomatis dari Let's Encrypt)
+# Isi DOMAIN dan NAJJA_TOKEN di file .env (lihat .env.example), lalu: docker compose up -d --build
+services:
+  najja:
+    build: .
+    restart: unless-stopped
+    environment:
+      NAJJA_TOKEN: ${NAJJA_TOKEN:?Isi NAJJA_TOKEN di file .env}
+      NAJJA_PUBLIC_URL: https://${DOMAIN:?Isi DOMAIN di file .env}
+    volumes:
+      - najja-data:/data
+    expose:
+      - "3333"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - najja
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  najja-data:
+  caddy-data:
+  caddy-config:

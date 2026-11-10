@@ -1,0 +1,204 @@
+# Deploy Najja Editor ke VPS
+
+```
+Browser kamu ──HTTPS──▶ Caddy (sertifikat otomatis) ──▶ Najja (Docker, port 3333 internal)
+Claude Code  ──HTTPS + token──▶ /mcp ┘
+```
+
+Editing tetap berjalan **di browser kamu**. VPS hanya menyajikan aplikasi, menjalankan server MCP, dan menyimpan hasil ekspor dari AI. Karena itu VPS kecil (1 vCPU, 1 GB RAM) sudah cukup.
+
+## Yang perlu disiapkan
+
+1. **VPS Ubuntu 22.04 atau 24.04** dengan akses SSH root/sudo.
+2. **Domain atau subdomain** yang **A record**-nya mengarah ke IP VPS, misalnya `editor.domainkamu.com`.
+   - HTTPS wajib: tanpa HTTPS, rekam mikrofon dan salin-tempel tidak jalan.
+   - Kalau domainnya di Cloudflare, set ke **DNS only** (awan abu-abu) dulu.
+3. **Port 80 dan 443** terbuka di firewall VPS dan di panel provider.
+
+## Cara tercepat — installer otomatis
+
+Setelah A record mengarah ke VPS dan kode sudah ada di VPS (folder hasil ekstrak zip), jalankan satu perintah:
+
+```bash
+sudo bash deploy/install.sh editor.domainkamu.com
+```
+
+Installer akan:
+- memasang Docker,
+- mengecek DNS,
+- membuka port 80/443,
+- membuat token,
+- menjalankan Najja + Caddy (HTTPS),
+- lalu menampilkan URL, token login, dan perintah untuk Claude Code.
+
+Kalau Docker Hub membatasi unduhan (error 429), installer otomatis memakai mirror Google. Menjalankan installer lagi aman: token lama tetap dipakai.
+
+## Cara A — Docker manual
+
+**1. Upload kode** dari laptop kamu:
+
+```bash
+scp najja-editor.zip root@IP_VPS:/opt/
+```
+
+**2. Masuk ke VPS** dan pasang Docker:
+
+```bash
+ssh root@IP_VPS
+```
+```bash
+apt update && apt install -y docker.io docker-compose-v2 unzip
+```
+
+**3. Ekstrak** kode lalu masuk ke foldernya:
+
+```bash
+cd /opt && unzip najja-editor.zip && cd najja-editor
+```
+
+**4. Buat file `.env`** dari contohnya:
+
+```bash
+cp .env.example .env
+```
+
+Buat token acak:
+
+```bash
+openssl rand -hex 24
+```
+
+Buka `.env`:
+
+```bash
+nano .env
+```
+
+Lalu isi dua baris ini:
+
+```
+DOMAIN=editor.domainkamu.com
+NAJJA_TOKEN=hasil-openssl-rand-tadi
+```
+
+**5. Jalankan:**
+
+```bash
+docker compose up -d --build
+```
+
+**6.** Buka **https://editor.domainkamu.com**, lalu masukkan token.
+
+Caddy mengurus sertifikat Let's Encrypt secara otomatis. Percobaan pertama butuh beberapa detik.
+
+Kalau firewall `ufw` aktif, buka port web:
+
+```bash
+ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443/tcp
+```
+
+### Perawatan
+
+| Keperluan | Perintah |
+|---|---|
+| Lihat log | `docker compose logs -f najja` |
+| Log sertifikat | `docker compose logs caddy` |
+| Update ke versi baru | upload zip baru, ekstrak ke folder yang sama, lalu `docker compose up -d --build` |
+| Restart | `docker compose restart` |
+| Stop | `docker compose down` |
+| Ambil semua hasil ekspor AI | `docker compose cp najja:/data/exports ./exports` |
+| Upload video ke server untuk AI | `docker compose cp video.mp4 najja:/data/media/` |
+
+Setelah video di-upload ke `/data/media/`, AI bisa mengimpornya dengan `import_media` dan `path: "video.mp4"`.
+
+## Cara B — tanpa Docker (Node + systemd + Caddy)
+
+**1. Pasang Node.js.**
+- Ubuntu 24.04: `apt install -y nodejs` (versinya sudah 18.19, cukup).
+- Ubuntu 22.04: versi bawaannya terlalu lama. Pasang Node 22 dari NodeSource (lihat nodesource.com).
+
+**2. Pasang Caddy** dengan mengikuti https://caddyserver.com/docs/install (bagian Debian/Ubuntu).
+
+**3. Siapkan aplikasi:**
+
+```bash
+useradd --system --home /var/lib/najja-editor --create-home najja
+```
+```bash
+cd /opt && unzip najja-editor.zip
+```
+```bash
+cp /opt/najja-editor/deploy/najja-editor.service /etc/systemd/system/
+```
+
+**4. Buat file konfigurasi** `/etc/najja-editor.env`:
+
+```bash
+printf 'NAJJA_TOKEN=%s\nNAJJA_PUBLIC_URL=https://editor.domainkamu.com\n' "$(openssl rand -hex 24)" > /etc/najja-editor.env && chmod 600 /etc/najja-editor.env
+```
+
+Tokennya bisa dilihat dengan `cat /etc/najja-editor.env`.
+
+**5. Nyalakan layanan:**
+
+```bash
+systemctl daemon-reload && systemctl enable --now najja-editor
+```
+
+**6. Arahkan Caddy ke Najja:** salin `deploy/Caddyfile.host` ke `/etc/caddy/Caddyfile`, ganti domainnya, lalu:
+
+```bash
+systemctl reload caddy
+```
+
+## Hubungkan AI ke editor di VPS
+
+> Perintah AI dijalankan oleh **tab editor yang sedang terbuka**. Buka editornya di browser dulu sebelum menyuruh AI.
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http najja-editor https://editor.domainkamu.com/mcp --header "Authorization: Bearer TOKEN_KAMU"
+```
+
+**Claude Desktop atau Cursor (stdio):** simpan salinan folder `najja-editor` di laptop (cukup untuk `mcp-stdio.js`), lalu isi konfigurasi MCP:
+
+```json
+{
+  "mcpServers": {
+    "najja-editor": {
+      "command": "node",
+      "args": ["/path/di/laptop/najja-editor/mcp-stdio.js"],
+      "env": {
+        "NAJJA_URL": "https://editor.domainkamu.com",
+        "NAJJA_TOKEN": "TOKEN_KAMU"
+      }
+    }
+  }
+}
+```
+
+Dengan `NAJJA_URL` terisi, `mcp-stdio.js` hanya meneruskan perintah ke VPS dan tidak menyalakan server lokal.
+
+## Keamanan
+
+- Tanpa `NAJJA_TOKEN`, server **menolak** diakses dari luar localhost dan menolak berjalan di `HOST=0.0.0.0`. Ini mencegah server MCP terbuka ke internet tanpa sengaja.
+- Dengan token:
+  - Halaman editor butuh login. Sesi disimpan di cookie HttpOnly + Secure selama 30 hari.
+  - `/mcp` butuh header `Authorization: Bearer`.
+  - Login salah 10 kali dari satu IP akan diblokir selama 15 menit.
+- Impor file lokal lewat AI dibatasi ke folder `/data/media` di server.
+- **Ganti token:** edit `.env`, lalu jalankan `docker compose up -d`. Semua sesi lama otomatis keluar.
+- Proyek dan media yang kamu edit tersimpan di browser kamu, bukan di server. Server hanya menyimpan hasil ekspor AI dan cache unduhan di volume `najja-data`.
+- Tombol **Keluar** ada di panel AI · MCP (atau buka `/logout`).
+
+## Masalah umum
+
+| Gejala | Penyebab / solusi |
+|---|---|
+| Sertifikat tidak terbit | A record belum mengarah ke IP VPS, atau port 80/443 tertutup. Cek `docker compose logs caddy`. |
+| `429 Too Many Requests` saat `docker compose up` | Batas unduhan Docker Hub. Tunggu sebentar, atau jalankan `docker login`. |
+| Setelah login kembali lagi ke halaman login | Buka lewat **https://**. Cookie aman tidak dikirim lewat http. |
+| AI menjawab "editor is not open" | Buka editor di browser dan pastikan sudah login. Titik di tombol **MCP** harus hijau. |
+| Ekspor berhenti | Ekspor berjalan real-time di tab browser. Biarkan tab terbuka dan terlihat. |
+| Pakai nginx, bukan Caddy | Tambahkan `proxy_set_header Host $host;`, `proxy_set_header X-Forwarded-Proto $scheme;`, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, `proxy_buffering off;`, `proxy_read_timeout 1h;`, dan `client_max_body_size 2g;`. |

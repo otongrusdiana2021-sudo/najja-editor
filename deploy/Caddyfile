@@ -1,0 +1,7 @@
+# Dipakai oleh docker-compose.yml. Caddy otomatis mengurus sertifikat HTTPS untuk {$DOMAIN}.
+{$DOMAIN} {
+	reverse_proxy najja:3333 {
+		# Kirim event SSE (perintah MCP ke editor) tanpa ditahan
+		flush_interval -1
+	}
+}

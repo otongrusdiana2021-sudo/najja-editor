@@ -1,0 +1,6 @@
+# Untuk instalasi tanpa Docker: salin ke /etc/caddy/Caddyfile, ganti domainnya, lalu: sudo systemctl reload caddy
+editor.domainkamu.com {
+	reverse_proxy 127.0.0.1:3333 {
+		flush_interval -1
+	}
+}

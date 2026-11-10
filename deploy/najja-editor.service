@@ -1,0 +1,28 @@
+# Untuk instalasi tanpa Docker: sudo cp deploy/najja-editor.service /etc/systemd/system/
+[Unit]
+Description=Najja Editor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=najja
+WorkingDirectory=/opt/najja-editor
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3333
+Environment=NAJJA_NO_OPEN=1
+Environment=NAJJA_DATA_DIR=/var/lib/najja-editor
+# Berisi NAJJA_TOKEN=... dan NAJJA_PUBLIC_URL=https://editor.domainkamu.com
+EnvironmentFile=/etc/najja-editor.env
+ExecStart=/usr/bin/node server.js --no-open
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/najja-editor
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
