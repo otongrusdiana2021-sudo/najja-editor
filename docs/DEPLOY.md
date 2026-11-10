@@ -162,6 +162,40 @@ systemctl daemon-reload && systemctl enable --now najja-editor
 systemctl reload caddy
 ```
 
+## Data tersimpan di mana?
+
+Semua data ada **di VPS kamu**, tidak di browser dan tidak di layanan luar (tidak memakai Supabase atau cloud lain):
+
+| Data | Lokasi di dalam container (volume Docker `najja-editor_najja-data`) |
+|---|---|
+| Proyek | `/data/projects/*.json` |
+| Media (file asli, thumbnail, waveform) | `/data/library/<id>/` |
+| Hasil ekspor | `/data/exports/` |
+
+Karena itu proyek bisa dibuka dari laptop, HP, atau browser mana pun setelah login. Upload video besar dipecah per 8 MB, jadi tidak terkena batas upload nginx/aaPanel.
+
+**Backup** satu file ke folder home:
+
+```bash
+tar czf ~/najja-backup-$(date +%F).tgz -C "$(docker volume inspect najja-editor_najja-data --format '{{.Mountpoint}}')" .
+```
+
+Folder volume itu juga bisa dimasukkan ke jadwal backup aaPanel.
+
+## Pasang sebagai aplikasi
+
+Buka editornya di Chrome atau Edge, lalu klik ikon **Install** di address bar, atau buka menu ☰ di kiri atas → **Pasang sebagai aplikasi**. Najja akan punya ikon sendiri dan terbuka di jendela terpisah seperti aplikasi biasa.
+
+## Ganti token login
+
+Jalankan installer lagi dengan `--token-baru`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/otongrusdiana2021-sudo/najja-editor/main/deploy/install.sh | sudo bash -s editor.domainkamu.com --token-baru
+```
+
+Token lama langsung tidak berlaku. Semua perangkat perlu login ulang, dan perintah Claude Code perlu diperbarui. Data tidak berubah.
+
 ## Hubungkan AI ke editor di VPS
 
 > Perintah AI dijalankan oleh **tab editor yang sedang terbuka**. Buka editornya di browser dulu sebelum menyuruh AI.

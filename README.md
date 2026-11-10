@@ -54,8 +54,10 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 - Bisa mengekspor seluruh video atau **hanya klip terpilih**.
 
 **Proyek**
-- Tersimpan otomatis di browser (IndexedDB), dengan daftar proyek dan thumbnail.
-- Bisa disimpan sebagai `.json`.
+- Tersimpan otomatis **di server** (VPS kamu): proyek, media, dan hasil ekspor. Bisa dibuka dari perangkat mana pun.
+- Kalau halaman dibuka tanpa server, tersimpan di browser (IndexedDB).
+- Ada daftar proyek dengan thumbnail, dan bisa disimpan sebagai `.json`.
+- Bisa dipasang sebagai aplikasi (PWA).
 
 **Tampilan**
 - Tema gelap dan terang, panel yang bisa diubah ukurannya, dan tata letak untuk layar kecil.
