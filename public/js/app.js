@@ -50,8 +50,9 @@ topbar.innerHTML = `
   </div>`;
 
 const engine = new Engine(document.createElement('canvas'));
-// Background downloads of media to this device pause while the preview plays (the player needs the bandwidth).
-setCacheGate(() => !engine.playing);
+// Background downloads of media to this device pause while the preview plays or a frame is being
+// captured (the player and the seek need the bandwidth).
+setCacheGate(() => !engine.playing && !engine.capturing);
 const player = new Player($('#viewer'), engine);
 engine.canvas = player.canvas;
 engine.ctx = player.canvas.getContext('2d', { alpha: false });

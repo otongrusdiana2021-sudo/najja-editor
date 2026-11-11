@@ -196,3 +196,9 @@ test/              npm test
 ```bash
 npm test
 ```
+
+Tes end-to-end di browser (butuh Playwright + Chromium dan ffmpeg; dilewati otomatis kalau tidak ada). Tes ini memastikan `get_frame` mengembalikan frame yang tepat pada panggilan pertama, walaupun videonya ber-GOP panjang dan di-stream dari server lewat koneksi 8 Mbps:
+
+```bash
+npm run test:e2e
+```

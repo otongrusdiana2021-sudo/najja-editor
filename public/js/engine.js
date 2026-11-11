@@ -228,8 +228,10 @@ export class Engine {
     }
     if (!E.src) el.volume = 0;
     const rr = () => this.requestRender();
-    el.addEventListener('loadeddata', rr);
-    el.addEventListener('seeked', rr);
+    // When the element last settled on a position (used to decide that no newer frame is coming).
+    const settled = () => { E.settledAt = performance.now(); rr(); };
+    el.addEventListener('loadeddata', settled);
+    el.addEventListener('seeked', settled);
     this.els.set(key, E);
     return E;
   }
@@ -248,7 +250,19 @@ export class Engine {
   }
   seekEl(E, t) {
     this.holdFrame(E);
-    E.el.currentTime = t;
+    const el = E.el;
+    el.currentTime = t;
+    // 'seeked' alone does not prove the decoder already shows the new picture (hardware decoders can
+    // lag a frame behind), so remember when a frame for this exact position is actually presented.
+    E.shownAt = null;
+    const at = el.currentTime;
+    el.requestVideoFrameCallback?.(() => { if (el.currentTime === at) E.shownAt = at; });
+  }
+  /** Position inside the source file that clip shows at timeline time t. */
+  localTime(clip, t) {
+    const speed = clip.speed || 1;
+    const srcEnd = clip.in + clip.duration * speed;
+    return clamp(clip.in + (t - clip.start) * speed, clip.in, Math.max(clip.in, srcEnd - 0.04));
   }
   disposeEl(id) {
     const E = this.els.get(id);
@@ -323,8 +337,7 @@ export class Engine {
       alive.add(key);
       const el = E.el;
       const speed = clip.speed || 1;
-      const srcEnd = clip.in + clip.duration * speed;
-      const local = clamp(clip.in + (t - clip.start) * speed, clip.in, Math.max(clip.in, srcEnd - 0.04));
+      const local = this.localTime(clip, t);
       const active = t >= clip.start && t < end;
       if (Math.abs(el.playbackRate - speed) > 0.001) el.playbackRate = speed;
       if (running && active && el.readyState >= 1) {
@@ -374,8 +387,27 @@ export class Engine {
     return el.readyState >= 4 || Engine.bufferedAhead(el) >= Math.min(3, el.duration - el.currentTime - 0.1);
   }
 
-  /** Wait until every media element needed at the current time has a decoded frame. */
-  async settle(timeout = 4000) {
+  /**
+   * Is this element showing the picture for the playhead? Needs: data for the current position, the
+   * position we asked for, and (where the browser can tell us) a frame actually presented there.
+   */
+  frameReady(E) {
+    const el = E.el;
+    const c = E.clip;
+    if (el.error) return true; // nothing better will come
+    if (el.readyState < 2 || el.seeking) return false;
+    if (c.type !== 'video') return true;
+    if (Math.abs(el.currentTime - this.localTime(c, this.time)) > 0.04) return false; // sync() seeks it there
+    if (E.shownAt === el.currentTime || !el.requestVideoFrameCallback) return true;
+    // No frame callback (e.g. the element sat on this position before we asked): accept shortly after it settled.
+    return performance.now() - (E.settledAt || 0) > 500;
+  }
+
+  /**
+   * Wait until every media element needed at the current time shows its frame for the playhead.
+   * Resolves with the ids of clips whose picture could not be confirmed before the timeout (empty when exact).
+   */
+  async settle(timeout = 15000) {
     const deadline = performance.now() + timeout;
     for (;;) {
       this.sync();
@@ -383,31 +415,41 @@ export class Engine {
       for (const E of this.els.values()) {
         const c = E.clip;
         if (!c) continue;
+        const onScreen = this.time >= c.start - 0.001 && this.time < c.start + c.duration;
         const near = this.time >= c.start - 1 && this.time <= c.start + c.duration + 1;
-        if (near && (E.el.readyState < 2 || E.el.seeking)) pending.push(E.el);
+        if (onScreen ? !this.frameReady(E) : near && (E.el.readyState < 2 || E.el.seeking)) pending.push(E);
       }
-      if (!pending.length || performance.now() > deadline) return;
+      if (!pending.length) return [];
+      if (performance.now() > deadline) return pending.filter((E) => E.clip.type === 'video').map((E) => E.clip.id);
       await Promise.race([
-        ...pending.map((el) => new Promise((r) => { el.addEventListener('seeked', r, { once: true }); el.addEventListener('loadeddata', r, { once: true }); el.addEventListener('error', r, { once: true }); })),
-        new Promise((r) => setTimeout(r, 250)),
+        ...pending.map(({ el }) => new Promise((r) => {
+          for (const ev of ['seeked', 'loadeddata', 'canplay', 'error']) el.addEventListener(ev, r, { once: true });
+        })),
+        new Promise((r) => setTimeout(r, 100)),
       ]);
     }
   }
 
   /** Render a still of the composition at time t (used by MCP get_frame, thumbnails, freeze frame). */
-  async capture(t, maxW = 960) {
+  async capture(t, maxW = 960, { timeout = 20000 } = {}) {
     const P = store.P;
     const wasPlaying = this.playing;
     if (wasPlaying) this.pause();
-    if (t != null) this.seek(t);
-    await preloadFonts(P);
-    await this.settle();
-    const w = Math.max(16, Math.min(maxW, P.width));
-    const c = document.createElement('canvas');
-    c.width = Math.round(w);
-    c.height = Math.round((w * P.height) / P.width);
-    renderFrame(c.getContext('2d', { alpha: false }), this.time, this.env(c.width / P.width));
-    return c;
+    this.capturing = (this.capturing || 0) + 1; // background downloads step aside while we seek
+    try {
+      if (t != null) this.seek(t);
+      await preloadFonts(P);
+      const stale = await this.settle(timeout);
+      const w = Math.max(16, Math.min(maxW, P.width));
+      const c = document.createElement('canvas');
+      c.width = Math.round(w);
+      c.height = Math.round((w * P.height) / P.width);
+      renderFrame(c.getContext('2d', { alpha: false }), this.time, this.env(c.width / P.width));
+      c.staleClips = stale; // video clips that were still loading: their picture may be from another time
+      return c;
+    } finally {
+      this.capturing--;
+    }
   }
 
   // Export rendering hook (see exporter.js)

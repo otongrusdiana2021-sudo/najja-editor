@@ -284,7 +284,7 @@ export const TOOLS = [
   {
     name: 'get_frame',
     title: 'Capture preview frame',
-    description: 'Render the composed video at a given time and return it as an image so you can check the result (layout, text, colors).',
+    description: 'Render the composed video at a given time and return it as an image so you can check the result (layout, text, colors). It waits until every visible video shows its frame for that exact time; if a video is still loading after about 20 seconds the result lists it in stale_video, and calling again gives the exact frame.',
     inputSchema: obj({
       time: num('Time in seconds (default: the playhead).'),
       max_width: num('Maximum image width in px (default 960).', { minimum: 64, maximum: 3840 }),

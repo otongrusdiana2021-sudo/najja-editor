@@ -344,7 +344,12 @@ export const tools = {
     const fmt = a.format === 'png' ? 'image/png' : 'image/jpeg';
     const url = canvas.toDataURL(fmt, 0.86);
     const visible = store.P.clips.filter((c) => t >= c.start && t < clipEnd(c)).map((c) => `${c.id} (${c.type})`);
-    return { data: { time: r3(t), width: canvas.width, height: canvas.height, visible_clips: visible }, image: { data: url.split(',')[1], mimeType: fmt } };
+    const data = { time: r3(t), width: canvas.width, height: canvas.height, visible_clips: visible };
+    if (canvas.staleClips?.length) {
+      data.stale_video = canvas.staleClips;
+      data.note = 'These video clips were still loading, so their picture may be from another moment. Call get_frame again for an exact frame.';
+    }
+    return { data, image: { data: url.split(',')[1], mimeType: fmt } };
   },
 
   async history(a) {
