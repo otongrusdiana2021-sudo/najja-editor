@@ -366,7 +366,7 @@ export const tools = {
     const opts = { resolution: a.resolution || '1080p', fps: Number(a.fps) || store.P.fps, format: a.format || 'mp4', quality: a.quality || 'recommended', filename: a.filename || store.P.name };
     actions.app.runExport(opts, { saveToServer: true, download: false, fromAI: true });
     await new Promise((r) => setTimeout(r, 300));
-    return { data: { started: true, estimated_seconds: Math.ceil(store.duration()) + 2, options: exportState.options, note: 'Rendering in real time. Poll get_export_status.' } };
+    return { data: { started: true, estimated_seconds: Math.ceil(store.duration()) + 2, options: exportState.options, note: 'Rendering: fast (WebCodecs) when this browser supports it, otherwise in real time. Poll get_export_status.' } };
   },
 
   async get_export_status() {
@@ -375,10 +375,11 @@ export const tools = {
       data: {
         state: s.state,
         phase: s.phase || undefined,
+        mode: s.mode || undefined,
         progress_percent: Math.round((s.progress || 0) * 100),
         error: s.error || undefined,
         options: s.options || undefined,
-        result: s.result ? { file: s.result.filename, path: s.result.serverPath, url: s.result.serverUrl, size_bytes: s.result.size, width: s.result.width, height: s.result.height, fps: s.result.fps, duration: r3(s.result.duration || 0), mime: s.result.mime } : undefined,
+        result: s.result ? { file: s.result.filename, path: s.result.serverPath, url: s.result.serverUrl, size_bytes: s.result.size, width: s.result.width, height: s.result.height, fps: s.result.fps, duration: r3(s.result.duration || 0), mime: s.result.mime, render_seconds: s.result.seconds != null ? r3(s.result.seconds) : undefined } : undefined,
       },
     };
   },

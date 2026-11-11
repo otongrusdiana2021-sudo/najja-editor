@@ -185,7 +185,7 @@ test/              npm test
 
 ## Catatan
 
-- **Ekspor berjalan real-time** (durasi ekspor ≈ durasi video). Biarkan tab editor tetap terbuka dan terlihat.
+- **Ekspor MP4 cepat** dengan WebCodecs (Chrome/Edge): frame di-decode, dirender, dan di-encode H.264 secepat kemampuan perangkat (GPU), lalu file langsung terunduh; salinan ke server diupload di background. Browser tanpa WebCodecs, atau format WebM, memakai perekaman real-time (durasi ekspor ≈ durasi video). Biarkan tab editor tetap terbuka.
 - MP4 dipakai jika browser bisa merekamnya (Chrome/Edge terbaru, Safari). Jika tidak, hasilnya WebM.
 - Proyek dan media disimpan di server (folder `data/`, atau `NAJJA_DATA_DIR`), bukan di browser, jadi bisa dibuka dari perangkat mana pun.
 - Belum tersedia: reverse video, stabilisasi, hapus latar dengan AI, dan text-to-speech.

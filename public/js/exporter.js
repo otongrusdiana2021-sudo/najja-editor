@@ -3,6 +3,7 @@ import { store } from './store.js';
 import { RESOLUTIONS } from './presets.js';
 import { preloadFonts } from './render.js';
 import { cacheProjectMedia } from './media.js';
+import { fastExport, fastExportAvailable } from './fastexport.js';
 
 const MP4_TYPES = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4'];
 const WEBM_TYPES = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
@@ -90,8 +91,10 @@ let cancelFlag = null;
 export function cancelExport() { if (cancelFlag) cancelFlag.cancelled = true; }
 
 /**
- * opts: { resolution, fps, format: 'mp4'|'webm', quality: 'low'|'recommended'|'high', filename, range?: [start,end] }
- * onProgress(p 0..1)
+ * opts: { resolution, fps, format: 'mp4'|'webm', quality: 'low'|'recommended'|'high', filename, range?: [start,end], realtime? }
+ * onProgress(p 0..1); onPrepare(p 0..1) while media is fetched to this device.
+ * MP4 is rendered with WebCodecs as fast as the device allows; when that is not possible (no WebCodecs,
+ * a source it cannot decode, WebM requested...) the timeline is played and recorded in real time.
  */
 export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare = () => {}) {
   if (exportState.state === 'running') throw new Error('Ekspor lain sedang berjalan');
@@ -99,18 +102,67 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
   const duration = store.duration();
   if (duration <= 0) throw new Error('Timeline masih kosong');
   const fmts = supportedFormats();
-  const format = opts.format === 'webm' ? 'webm' : (fmts.mp4 ? 'mp4' : 'webm');
-  const mimeType = format === 'mp4' ? fmts.mp4 : fmts.webm;
-  if (!mimeType) throw new Error('Browser ini tidak mendukung perekaman video (MediaRecorder). Gunakan Chrome/Edge terbaru.');
+  const wantMp4 = opts.format !== 'webm';
   const fps = Number(opts.fps) || P.fps || 30;
   const { width, height } = exportSize(P, opts.resolution || '1080p');
   const bpp = { low: 0.06, recommended: 0.1, high: 0.16 }[opts.quality || 'recommended'] || 0.1;
   const videoBitsPerSecond = Math.round(Math.min(60e6, Math.max(1.5e6, width * height * fps * bpp)));
   const [r0, r1] = opts.range || [0, duration];
+  const base = (opts.filename || P.name || 'najja-video').replace(/[\\/:*?"<>|]+/g, '').trim() || 'najja-video';
 
-  Object.assign(exportState, { state: 'running', progress: 0, error: null, result: null, startedAt: Date.now(), options: { ...opts, format, fps, width, height } });
+  Object.assign(exportState, { state: 'running', progress: 0, error: null, result: null, startedAt: Date.now(), mode: null, options: { ...opts, format: wantMp4 ? 'mp4' : 'webm', fps, width, height } });
   const flag = { cancelled: false };
   cancelFlag = flag;
+  const finish = (blob, ext, mode) => {
+    const result = { blob, mime: blob.type, ext, filename: `${base}.${ext}`, width, height, fps, size: blob.size, duration: r1 - r0, mode, seconds: (Date.now() - exportState.startedAt) / 1000 };
+    Object.assign(exportState, { state: 'done', progress: 1, phase: null, mode, result: { ...result, blob: undefined } });
+    cancelFlag = null;
+    onProgress(1);
+    return result;
+  };
+  const fail = (err) => {
+    Object.assign(exportState, { state: flag.cancelled ? 'cancelled' : 'error', error: err.message, phase: null });
+    cancelFlag = null;
+    return err;
+  };
+
+  engine.pause();
+  try {
+    // Every file is read from this device, so rendering never waits on the network.
+    exportState.phase = 'preparing';
+    await cacheProjectMedia(P, onPrepare);
+    if (flag.cancelled) throw new Error('Ekspor dibatalkan');
+    if (wantMp4 && !opts.realtime && fastExportAvailable()) {
+      exportState.phase = 'rendering';
+      exportState.mode = 'fast';
+      try {
+        await preloadFonts(P);
+        const blob = await fastExport({
+          engine, P, width, height, fps, bitrate: videoBitsPerSecond, r0, r1, flag,
+          onProgress: (p) => { exportState.progress = p; onProgress(p); },
+        });
+        return finish(blob, 'mp4', 'fast');
+      } catch (err) {
+        if (flag.cancelled) throw err;
+        console.warn('[najja] fast export not possible here, recording in real time:', err.message);
+        exportState.progress = 0;
+        onProgress(0);
+      }
+    }
+  } catch (err) {
+    throw fail(err);
+  }
+  return realtimeExport(engine, { P, wantMp4, fmts, fps, width, height, videoBitsPerSecond, r0, r1, flag, onProgress, finish, fail });
+}
+
+/** Play the timeline and record the canvas + audio mix with MediaRecorder (takes as long as the video). */
+async function realtimeExport(engine, { P, wantMp4, fmts, fps, width, height, videoBitsPerSecond, r0, r1, flag, onProgress, finish, fail }) {
+  const format = wantMp4 && fmts.mp4 ? 'mp4' : 'webm';
+  const mimeType = format === 'mp4' ? fmts.mp4 : fmts.webm;
+  if (!mimeType) throw fail(new Error('Browser ini tidak mendukung perekaman video (MediaRecorder). Gunakan Chrome/Edge terbaru.'));
+  exportState.mode = 'realtime';
+  exportState.phase = 'rendering';
+  exportState.options.format = format;
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -135,11 +187,6 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
 
   const wasLoop = engine.loop;
   engine.loop = false;
-  engine.pause();
-  // Play every file from this device so the real-time recording never waits on the network.
-  exportState.phase = 'preparing';
-  await cacheProjectMedia(P, onPrepare);
-  exportState.phase = 'rendering';
   engine.sync();
   engine.seek(r0);
   await preloadFonts(P);
@@ -170,24 +217,16 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
     await stopped;
   } catch (err) {
     try { if (rec.state !== 'inactive') rec.stop(); } catch { /* ignore */ }
-    Object.assign(exportState, { state: flag.cancelled ? 'cancelled' : 'error', error: err.message });
-    throw err;
+    throw fail(err);
   } finally {
-    exportState.phase = null;
     engine.exportTarget = null;
     engine.loop = wasLoop;
     if (dest) { try { engine.master.disconnect(dest); } catch { /* ignore */ } }
     if (engine.monitor) engine.monitor.gain.value = 1;
     vTrack.stop();
-    cancelFlag = null;
   }
 
   let blob = new Blob(chunks, { type: mimeType.split(';')[0] });
   if (format === 'webm') blob = await fixWebmDuration(blob, (r1 - r0) * 1000);
-  const ext = format === 'mp4' ? 'mp4' : 'webm';
-  const base = (opts.filename || P.name || 'najja-video').replace(/[\\/:*?"<>|]+/g, '').trim() || 'najja-video';
-  const result = { blob, mime: blob.type, ext, filename: `${base}.${ext}`, width, height, fps, size: blob.size, duration: r1 - r0 };
-  Object.assign(exportState, { state: 'done', progress: 1, result: { ...result, blob: undefined } });
-  onProgress(1);
-  return result;
+  return finish(blob, format === 'mp4' ? 'mp4' : 'webm', 'realtime');
 }

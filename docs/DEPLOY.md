@@ -267,6 +267,6 @@ Dengan `NAJJA_URL` terisi, `mcp-stdio.js` hanya meneruskan perintah ke VPS dan t
 | `429 Too Many Requests` saat `docker compose up` | Batas unduhan Docker Hub. Tunggu sebentar, atau jalankan `docker login`. |
 | Setelah login kembali lagi ke halaman login | Buka lewat **https://**. Cookie aman tidak dikirim lewat http. |
 | AI menjawab "editor is not open" | Buka editor di browser dan pastikan sudah login. Titik di tombol **MCP** harus hijau. |
-| Ekspor berhenti | Ekspor berjalan real-time di tab browser. Biarkan tab terbuka dan terlihat. |
+| Ekspor berhenti atau lambat | Ekspor berjalan di tab browser: biarkan tab terbuka dan terlihat. MP4 dirender cepat di Chrome/Edge (makin cepat dengan GPU; cek *Settings → System → Use graphics acceleration* aktif). File langsung terunduh; salinan ke server menyusul di background. |
 | Preview video hitam di PC lain (video iPhone) | Codec HEVC tidak didukung browser PC itu. Tunggu kartu media selesai **Konversi**; kalau muncul "Tidak bisa diputar", jalankan installer lagi agar ffmpeg terpasang. |
 | Pakai nginx, bukan Caddy | Tambahkan `proxy_set_header Host $host;`, `proxy_set_header X-Forwarded-Proto $scheme;`, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, `proxy_buffering off;`, `proxy_read_timeout 1h;`, dan `client_max_body_size 2g;`. |

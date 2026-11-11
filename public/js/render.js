@@ -334,6 +334,33 @@ function solidFill(ctx, solid, w, h) {
 
 // ---------------------------------------------------------------------------------------------
 // Layer canvases (for tint overlays / effects)
+/**
+ * Vignette mask (transparent centre → black edges). It has no detail, so it is drawn once at a small
+ * size per aspect ratio and scaled up, instead of rasterising a full-size radial gradient every frame.
+ */
+const vignettes = new Map();
+function vignetteMask(w, h) {
+  const k = 512 / Math.max(w, h, 1);
+  const vw = Math.max(2, Math.round(w * k));
+  const vh = Math.max(2, Math.round(h * k));
+  const key = `${vw}x${vh}`;
+  let c = vignettes.get(key);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = vw;
+    c.height = vh;
+    const g = c.getContext('2d');
+    const gr = g.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.25, vw / 2, vh / 2, Math.hypot(vw, vh) / 2);
+    gr.addColorStop(0, 'rgba(0,0,0,0)');
+    gr.addColorStop(1, 'rgba(0,0,0,1)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, vw, vh);
+    if (vignettes.size > 16) vignettes.clear();
+    vignettes.set(key, c);
+  }
+  return c;
+}
+
 const pool = {};
 function scratch(name, w, h) {
   let c = pool[name];
@@ -386,7 +413,26 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
     const filter = cssFilterFor(clip, blurUnits, pxPerUnit);
     const overlays = overlaysFor(clip);
     const chroma = clip.chroma?.enabled;
-    if (overlays.length || chroma) {
+    // An opaque video drawn normally covers its whole rectangle, so colour overlays and the vignette can go
+    // straight onto the frame — same result as the separate layer, without a full-size extra copy.
+    const direct = overlays.length && !chroma && clip.type === 'video' && alpha >= 0.999
+      && (clip.blend || 'source-over') === 'source-over' && !/blur\(/.test(filter);
+    if (direct) {
+      ctx.filter = filter;
+      ctx.drawImage(src.el, sx, sy, sw, sh, -size.w / 2, -size.h / 2, size.w, size.h);
+      ctx.filter = 'none';
+      for (const ov of overlays) {
+        ctx.globalAlpha = clamp(ov.alpha, 0, 1);
+        if (ov.vignette) {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.drawImage(vignetteMask(size.w, size.h), -size.w / 2, -size.h / 2, size.w, size.h);
+        } else {
+          ctx.globalCompositeOperation = ov.mode || 'soft-light';
+          ctx.fillStyle = ov.color;
+          ctx.fillRect(-size.w / 2, -size.h / 2, size.w, size.h);
+        }
+      }
+    } else if (overlays.length || chroma) {
       let lw = clamp(Math.round(size.w * pxPerUnit), 2, 4096);
       let lh = clamp(Math.round(size.h * pxPerUnit), 2, 4096);
       if (chroma && lw * lh > 1920 * 1080) { const r = Math.sqrt((1920 * 1080) / (lw * lh)); lw = Math.round(lw * r); lh = Math.round(lh * r); }
@@ -404,15 +450,12 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
         lc.globalAlpha = clamp(ov.alpha, 0, 1);
         if (ov.vignette) {
           lc.globalCompositeOperation = 'source-atop';
-          const g = lc.createRadialGradient(lw / 2, lh / 2, Math.min(lw, lh) * 0.25, lw / 2, lh / 2, Math.hypot(lw, lh) / 2);
-          g.addColorStop(0, 'rgba(0,0,0,0)');
-          g.addColorStop(1, 'rgba(0,0,0,1)');
-          lc.fillStyle = g;
+          lc.drawImage(vignetteMask(lw, lh), 0, 0, lw, lh);
         } else {
           lc.globalCompositeOperation = ov.mode || 'soft-light';
           lc.fillStyle = ov.color;
+          lc.fillRect(0, 0, lw, lh);
         }
-        lc.fillRect(0, 0, lw, lh);
       }
       if (clip.type === 'image' && !chroma) {
         lc.globalAlpha = 1;

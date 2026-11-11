@@ -14,6 +14,7 @@ import * as actions from './actions.js';
 import { tools } from './api.js';
 import { bridge } from './bridge.js';
 import { exportVideo, exportState, cancelExport, supportedFormats, exportSize } from './exporter.js';
+import { fastExportAvailable } from './fastexport.js';
 import { RESOLUTIONS, FPS_OPTIONS } from './presets.js';
 import { icon, LOGO } from './icons.js';
 import { toast, modal, contextMenu, confirmDialog } from './ui.js';
@@ -298,7 +299,9 @@ async function projectsDialog() {
 function exportDialog() {
   const P = store.P;
   if (store.duration() <= 0) { toast('Timeline masih kosong', { type: 'warn' }); return; }
-  const fmts = supportedFormats();
+  const rec = supportedFormats();
+  const fast = fastExportAvailable(); // WebCodecs: MP4 faster than real time, even where MediaRecorder lacks MP4
+  const fmts = { mp4: rec.mp4 || fast, webm: rec.webm };
   const sel = store.selected();
   const o = { resolution: prefs.get('exp.res', '1080p'), fps: P.fps, format: fmts.mp4 ? 'mp4' : 'webm', quality: 'recommended', range: 'all' };
   const est = () => {
@@ -320,7 +323,7 @@ function exportDialog() {
       </div>
       <div class="ctl"><label>Kualitas</label><div class="seg wide">${[['low', 'Rendah'], ['recommended', 'Rekomendasi'], ['high', 'Tinggi']].map(([q, n]) => `<button class="${o.quality === q ? 'on' : ''}" data-q="${q}">${n}</button>`).join('')}</div></div>
       <div class="ctl"><label>Rentang</label><div class="seg wide"><button class="on" data-range="all">Seluruh video</button><button data-range="sel" ${sel ? '' : 'disabled'}>Klip terpilih</button></div></div>
-      ${!fmts.mp4 && !fmts.webm ? '<p class="hint danger">Browser ini tidak mendukung perekaman video. Gunakan Chrome atau Edge terbaru.</p>' : '<p class="hint">Ekspor berjalan real-time di browser. Biarkan tab ini tetap terbuka.</p>'}`,
+      ${!fmts.mp4 && !fmts.webm ? '<p class="hint danger">Browser ini tidak mendukung perekaman video. Gunakan Chrome atau Edge terbaru.</p>' : `<p class="hint">${fast ? 'MP4 dirender secepat kemampuan perangkat ini (lebih cepat dari durasi video di PC dengan GPU). WebM direkam real-time.' : 'Ekspor berjalan real-time di browser.'} Biarkan tab ini tetap terbuka.</p>`}`,
     footer: `<button class="btn" data-x>Batal</button><button class="btn btn-export" data-go ${!fmts.mp4 && !fmts.webm ? 'disabled' : ''}>${icon('export', 15)} Ekspor</button>`,
   });
   const thumb = m.el.querySelector('.exp-thumb');
@@ -369,36 +372,35 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
       ov.querySelector('.ex-pct').textContent = `${Math.round(p * 100)}%`;
       fg.style.strokeDashoffset = `${C * (1 - p)}`;
       const el = (performance.now() - started) / 1000;
-      if (p > 0.03) ov.querySelector('.ex-sub').textContent = `Sisa ±${Math.max(0, Math.round(el / p - el))} detik · jangan tutup tab ini`;
+      if (p > 0.03) ov.querySelector('.ex-sub').textContent = `${exportState.mode === 'fast' ? 'Merender cepat' : 'Merender real-time'} · sisa ±${Math.max(0, Math.round(el / p - el))} detik · jangan tutup tab ini`;
     }, (p) => {
       ov.querySelector('.ex-sub').textContent = `Menyiapkan media di perangkat ini… ${Math.round(p * 100)}%`;
       started = performance.now();
     });
-    if ((saveToServer || storage.server) && storage.server) {
+    const toServer = (saveToServer || storage.server) && storage.server;
+    const saveCopy = () => remote.upload(res.blob, {
+      target: 'export', filename: res.filename, mime: res.mime,
+      onProgress: (p) => { const el = ov.querySelector('.ex-srv'); if (el) el.textContent = `Menyimpan salinan ke server… ${Math.round(p * 100)}%`; },
+    }).then((j) => { exportState.result.serverPath = j.path; exportState.result.serverUrl = j.url; }, (err) => { exportState.result.serverError = err.message; });
+    const srvLine = () => (exportState.result?.serverPath ? 'Salinan tersimpan di server ✓'
+      : exportState.result?.serverError ? `Gagal menyimpan salinan ke server: ${escapeHtml(exportState.result.serverError)}` : '');
+    if (toServer && !download) {
+      // AI export: the agent needs the server path, so report "done" only once the file is on the server.
       ov.querySelector('.ex-sub').textContent = 'Menyimpan hasil ekspor ke server…';
-      // Report "done" (e.g. to an AI polling get_export_status) only once the file is really on the server.
       Object.assign(exportState, { state: 'running', phase: 'saving' });
-      try {
-        const j = await remote.upload(res.blob, {
-          target: 'export', filename: res.filename, mime: res.mime,
-          onProgress: (p) => { ov.querySelector('.ex-pct').textContent = `${Math.round(p * 100)}%`; },
-        });
-        exportState.result.serverPath = j.path;
-        exportState.result.serverUrl = j.url;
-      } catch (err) {
-        exportState.result.serverError = err.message;
-      } finally {
-        Object.assign(exportState, { state: 'done', phase: null });
-      }
+      try { await saveCopy(); } finally { Object.assign(exportState, { state: 'done', phase: null }); }
     }
+    // Your own export: the file is yours right away; the server copy uploads in the background.
     if (download) downloadBlob(res.blob, res.filename);
+    const took = `${res.mode === 'fast' ? 'Dirender cepat' : 'Dirender real-time'} dalam ${Math.max(1, Math.round(res.seconds))} detik`;
     ov.querySelector('.export-card').innerHTML = `
       <div class="ex-done">${icon('check', 34)}</div>
       <h3>Ekspor selesai</h3>
-      <p class="hint">${escapeHtml(res.filename)} · ${res.width}×${res.height} · ${fmtBytes(res.size)}${exportState.result?.serverPath ? `<br>Tersimpan di server ✓` : ''}${exportState.result?.serverError ? `<br>Gagal menyimpan ke server: ${escapeHtml(exportState.result.serverError)}` : ''}</p>
+      <p class="hint">${escapeHtml(res.filename)} · ${res.width}×${res.height} · ${fmtBytes(res.size)}<br>${took}<br><span class="ex-srv">${toServer && download ? 'Menyimpan salinan ke server…' : srvLine()}</span></p>
       <div class="ex-actions"><button class="btn" data-close>Tutup</button><button class="btn btn-primary" data-dl>${icon('download', 15)} Unduh</button></div>`;
     ov.querySelector('[data-dl]').onclick = () => downloadBlob(res.blob, res.filename);
     ov.querySelector('[data-close]').onclick = () => ov.remove();
+    if (toServer && download) saveCopy().then(() => { const el = ov.querySelector('.ex-srv'); if (el) el.innerHTML = srvLine(); });
     if (fromAI) setTimeout(() => ov.isConnected && ov.remove(), 6000);
     return res;
   } catch (err) {

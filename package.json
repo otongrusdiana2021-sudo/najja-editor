@@ -1,6 +1,6 @@
 {
   "name": "najja-editor",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "Najja Editor — editor video berbasis web (gaya CapCut) dengan server MCP bawaan agar AI agent bisa mengedit video.",
   "type": "module",
   "main": "server.js",

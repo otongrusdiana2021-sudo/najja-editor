@@ -301,7 +301,7 @@ export const TOOLS = [
   {
     name: 'export_video',
     title: 'Export video',
-    description: 'Render the project to a video file in the browser (in real time) and save it into the server exports folder. Returns right away; poll get_export_status for progress and the saved file path. Keep the editor tab visible while it renders.',
+    description: 'Render the project to a video file in the browser and save it into the server exports folder. MP4 renders faster than real time where the browser supports WebCodecs (Chrome/Edge), otherwise in real time. Returns right away; poll get_export_status for progress and the saved file path. Keep the editor tab open while it renders.',
     inputSchema: obj({
       resolution: enm(Object.keys(RESOLUTIONS), 'Short-side resolution (default 1080p).'),
       fps: { type: 'integer', enum: [24, 25, 30, 50, 60], description: 'Frame rate (default: the project fps).' },
