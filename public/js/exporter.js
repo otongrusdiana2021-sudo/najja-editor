@@ -2,6 +2,7 @@
 import { store } from './store.js';
 import { RESOLUTIONS } from './presets.js';
 import { preloadFonts } from './render.js';
+import { cacheProjectMedia } from './media.js';
 
 const MP4_TYPES = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4'];
 const WEBM_TYPES = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
@@ -92,7 +93,7 @@ export function cancelExport() { if (cancelFlag) cancelFlag.cancelled = true; }
  * opts: { resolution, fps, format: 'mp4'|'webm', quality: 'low'|'recommended'|'high', filename, range?: [start,end] }
  * onProgress(p 0..1)
  */
-export async function exportVideo(engine, opts, onProgress = () => {}) {
+export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare = () => {}) {
   if (exportState.state === 'running') throw new Error('Ekspor lain sedang berjalan');
   const P = store.P;
   const duration = store.duration();
@@ -135,6 +136,11 @@ export async function exportVideo(engine, opts, onProgress = () => {}) {
   const wasLoop = engine.loop;
   engine.loop = false;
   engine.pause();
+  // Play every file from this device so the real-time recording never waits on the network.
+  exportState.phase = 'preparing';
+  await cacheProjectMedia(P, onPrepare);
+  exportState.phase = 'rendering';
+  engine.sync();
   engine.seek(r0);
   await preloadFonts(P);
   await engine.settle(6000);
@@ -167,6 +173,7 @@ export async function exportVideo(engine, opts, onProgress = () => {}) {
     Object.assign(exportState, { state: flag.cancelled ? 'cancelled' : 'error', error: err.message });
     throw err;
   } finally {
+    exportState.phase = null;
     engine.exportTarget = null;
     engine.loop = wasLoop;
     if (dest) { try { engine.master.disconnect(dest); } catch { /* ignore */ } }

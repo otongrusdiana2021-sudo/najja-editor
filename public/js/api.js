@@ -369,6 +369,7 @@ export const tools = {
     return {
       data: {
         state: s.state,
+        phase: s.phase || undefined,
         progress_percent: Math.round((s.progress || 0) * 100),
         error: s.error || undefined,
         options: s.options || undefined,

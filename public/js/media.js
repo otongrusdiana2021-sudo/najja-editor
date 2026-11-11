@@ -97,6 +97,7 @@ function useProxy(id, v) {
   rt.playError = null;
   if (rt.status !== 'missing') rt.status = 'ready';
   changed(id);
+  cacheLocally(id);
 }
 
 /** Apply a proxy state from the server; start watching while it converts. Returns true once usable. */
@@ -171,13 +172,121 @@ async function ensurePreview(id, fallback) {
 /** Check that a server video plays here; if not, ask the server for an H.264 copy. */
 async function checkPlayable(id, entry) {
   const rt = mediaRT.get(id);
-  if (!rt?.url || await canPlayVideo(rt.url)) return;
+  if (!rt?.url) return;
+  if (await canPlayVideo(rt.url)) { cacheLocally(id); return; }
   try {
     if (applyProxyState(id, await remote.requestProxy(id, true), { announce: true, entry })) await ensurePreview(id, entry);
   } catch (err) {
     rt.playError = err.message;
     changed(id);
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Device cache: each server media file is downloaded once (one request, in the background) and then
+// played from memory. Streaming the same file to several players at once over a home connection is
+// what made video drop out mid-way; after the download, playback and export never wait on the network.
+const DEVICE_FILE_MAX = 1024 ** 3; // larger files keep streaming
+const DEVICE_TOTAL_MAX = 2 * 1024 ** 3;
+let deviceBytes = 0;
+let cacheChain = Promise.resolve();
+const caching = new Map(); // id -> promise<boolean>
+
+/** Download a server media file to this device (queued, one at a time). Resolves true once it plays locally. */
+export function cacheLocally(id) {
+  const rt = mediaRT.get(id);
+  if (!remote.enabled || !rt?.url || rt.status === 'missing') return Promise.resolve(false);
+  if (rt.url.startsWith('blob:')) return Promise.resolve(true);
+  if (caching.has(id)) return caching.get(id);
+  const job = cacheChain.then(() => downloadToDevice(id)).catch(() => false);
+  cacheChain = job;
+  caching.set(id, job);
+  job.finally(() => caching.delete(id));
+  return job;
+}
+
+/** Downloads yield to playback: while the preview plays, the player gets the whole connection. */
+let cacheGate = () => true;
+export function setCacheGate(fn) { cacheGate = fn; }
+let forceCache = 0; // > 0 while an export waits for its media
+const gateOpen = () => forceCache > 0 || cacheGate();
+async function waitGate() { while (!gateOpen()) await new Promise((r) => setTimeout(r, 400)); }
+
+async function downloadToDevice(id) {
+  const rt = mediaRT.get(id);
+  if (!rt?.url) return false;
+  if (rt.url.startsWith('blob:')) return true;
+  const src = rt.url;
+  const stillWanted = () => mediaRT.get(id) === rt && rt.url === src;
+  const parts = [];
+  let got = 0;
+  let total = 0;
+  let type = '';
+  let last = 0;
+  try {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await waitGate();
+      if (!stillWanted()) return false;
+      let r;
+      try {
+        r = await fetch(src, { credentials: 'same-origin', headers: got ? { Range: `bytes=${got}-` } : {} });
+      } catch {
+        await new Promise((res) => setTimeout(res, 2000));
+        continue;
+      }
+      if (!r.ok || !r.body) return false;
+      if (got && r.status !== 206) { parts.length = 0; got = 0; } // no range support: start over
+      if (!total) {
+        total = Number((r.headers.get('content-range') || '').split('/')[1]) || Number(r.headers.get('content-length')) || 0;
+        type = r.headers.get('content-type') || '';
+        if (total > DEVICE_FILE_MAX || deviceBytes + total > DEVICE_TOTAL_MAX) { r.body.cancel().catch(() => {}); return false; }
+        rt.cache = { progress: 0 };
+        changed(id);
+      }
+      const reader = r.body.getReader();
+      let paused = false;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parts.push(value);
+          got += value.length;
+          if (!stillWanted()) { reader.cancel().catch(() => {}); return false; }
+          if (total && performance.now() - last > 400) { last = performance.now(); rt.cache = { progress: got / total }; changed(id); }
+          if (!gateOpen()) { paused = true; reader.cancel().catch(() => {}); break; } // resume later from `got`
+        }
+      } catch {
+        paused = true; // connection dropped: retry from where it stopped
+      }
+      if (!paused && (!total || got >= total)) break;
+    }
+  } finally {
+    rt.cache = null;
+  }
+  if (!stillWanted() || (total && got !== total)) { changed(id); return false; }
+  const blob = new Blob(parts, { type });
+  deviceBytes += blob.size;
+  rt.remoteUrl = src;
+  rt.url = URL.createObjectURL(blob);
+  changed(id);
+  return true;
+}
+
+/** Make sure every audio/video file used in the project plays from this device (export calls this first). */
+export async function cacheProjectMedia(P, onProgress = () => {}) {
+  if (!remote.enabled) return;
+  const ids = [...new Set(P.clips.filter((c) => c.type === 'video' || c.type === 'audio').map((c) => c.mediaId))]
+    .filter((id) => mediaRT.get(id)?.url && !mediaRT.get(id).url.startsWith('blob:') && !mediaRT.get(id).convert);
+  forceCache++;
+  try {
+    for (let i = 0; i < ids.length; i++) {
+      const timer = setInterval(() => onProgress((i + (mediaRT.get(ids[i])?.cache?.progress || 0)) / ids.length), 300);
+      try { await cacheLocally(ids[i]); } finally { clearInterval(timer); }
+    }
+  } finally {
+    forceCache--;
+  }
+  onProgress(1);
 }
 
 async function seekTo(v, t) {
@@ -397,8 +506,9 @@ export async function restoreMedia(P) {
         mediaRT.set(m.id, rt);
         if (m.type === 'video' || m.type === 'audio') {
           if (pr?.state === 'pending' || pr?.state === 'running') applyProxyState(m.id, pr, { announce: true, entry: m });
-          else if (pr?.state === 'ready') ensurePreview(m.id, m);
+          else if (pr?.state === 'ready') { ensurePreview(m.id, m); cacheLocally(m.id); }
           else if (m.type === 'video') checkPlayable(m.id, m);
+          else cacheLocally(m.id);
         }
       } catch {
         missing.push(m.id);

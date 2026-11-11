@@ -53,6 +53,7 @@ export class Player {
     store.on('selection', () => this.updateBox());
     engine.on((kind) => {
       if (kind === 'time') this.updateTC();
+      if (kind === 'buffer') this.stage.classList.toggle('buffering', engine.buffering);
       if (kind === 'render') this.updateBox();
       if (kind === 'play' || kind === 'pause') this.playBtn.innerHTML = icon(engine.playing ? 'pause' : 'play', 20);
     });

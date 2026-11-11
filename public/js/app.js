@@ -4,7 +4,7 @@ import { prefs } from './db.js';
 import { storage } from './storage.js';
 import { account } from './account.js';
 import { remote } from './remote.js';
-import { restoreMedia, importFile, detectType, uploadsPending } from './media.js';
+import { restoreMedia, importFile, detectType, uploadsPending, setCacheGate } from './media.js';
 import { Engine } from './engine.js';
 import { Player } from './player.js';
 import { Timeline } from './timeline.js';
@@ -50,6 +50,8 @@ topbar.innerHTML = `
   </div>`;
 
 const engine = new Engine(document.createElement('canvas'));
+// Background downloads of media to this device pause while the preview plays (the player needs the bandwidth).
+setCacheGate(() => !engine.playing);
 const player = new Player($('#viewer'), engine);
 engine.canvas = player.canvas;
 engine.ctx = player.canvas.getContext('2d', { alpha: false });
@@ -360,16 +362,21 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
   fg.style.strokeDasharray = `${C}`;
   fg.style.strokeDashoffset = `${C}`;
   ov.querySelector('[data-cancel]').onclick = () => cancelExport();
-  const started = performance.now();
+  let started = performance.now();
   try {
     const res = await exportVideo(engine, opts, (p) => {
       ov.querySelector('.ex-pct').textContent = `${Math.round(p * 100)}%`;
       fg.style.strokeDashoffset = `${C * (1 - p)}`;
       const el = (performance.now() - started) / 1000;
       if (p > 0.03) ov.querySelector('.ex-sub').textContent = `Sisa ±${Math.max(0, Math.round(el / p - el))} detik · jangan tutup tab ini`;
+    }, (p) => {
+      ov.querySelector('.ex-sub').textContent = `Menyiapkan media di perangkat ini… ${Math.round(p * 100)}%`;
+      started = performance.now();
     });
     if ((saveToServer || storage.server) && storage.server) {
       ov.querySelector('.ex-sub').textContent = 'Menyimpan hasil ekspor ke server…';
+      // Report "done" (e.g. to an AI polling get_export_status) only once the file is really on the server.
+      Object.assign(exportState, { state: 'running', phase: 'saving' });
       try {
         const j = await remote.upload(res.blob, {
           target: 'export', filename: res.filename, mime: res.mime,
@@ -379,6 +386,8 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
         exportState.result.serverUrl = j.url;
       } catch (err) {
         exportState.result.serverError = err.message;
+      } finally {
+        Object.assign(exportState, { state: 'done', phase: null });
       }
     }
     if (download) downloadBlob(res.blob, res.filename);
