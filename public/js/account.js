@@ -1,7 +1,9 @@
 // Account menu (VPS mode): who is logged in, change password, manage users, log out.
 import { icon } from './icons.js';
 import { modal, toast, contextMenu, confirmDialog } from './ui.js';
-import { escapeHtml } from './util.js';
+import { escapeHtml, fmtBytes } from './util.js';
+import { deviceCache } from './devicecache.js';
+import { clearDeviceCache } from './media.js';
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { credentials: 'same-origin', headers: { 'content-type': 'application/json' }, ...opts });
@@ -32,9 +34,41 @@ export const account = {
       'sep',
       { label: 'Ganti password', icon: 'lock', run: () => this.changePassword() },
       ...(this.me.role === 'admin' ? [{ label: 'Kelola pengguna', icon: 'layers', run: () => this.users() }] : []),
+      { label: 'Penyimpanan perangkat', icon: 'download', run: () => this.storage() },
       'sep',
       { label: 'Keluar', icon: 'x', danger: true, run: () => { location.href = '/logout'; } },
     ]);
+  },
+
+  /** Videos kept on this device so a refresh does not download them again (max 5 GB). */
+  async storage() {
+    const m = modal({ title: 'Penyimpanan perangkat', body: '<div class="dc-body"><p class="hint">Memuat…</p></div>' });
+    const body = m.el.querySelector('.dc-body');
+    const render = async () => {
+      if (!(await deviceCache.available())) {
+        body.innerHTML = '<p class="hint">Browser ini tidak menyediakan penyimpanan permanen (misalnya jendela penyamaran). Video diputar langsung dari server.</p>';
+        return;
+      }
+      const list = (await deviceCache.list()).sort((a, b) => b.lastUsed - a.lastUsed);
+      const used = list.reduce((a, e) => a + e.size, 0);
+      const limit = deviceCache.limit();
+      const persisted = await deviceCache.persisted();
+      const ago = (t) => (t ? new Date(t).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '—');
+      body.innerHTML = `
+        <p class="hint">Video dari server disimpan di perangkat ini supaya saat refresh atau buka ulang tidak perlu diunduh lagi. File asli tetap aman di server; menghapus salinan ini tidak menghilangkan apa pun.</p>
+        <div class="dc-bar"><i style="width:${Math.min(100, (used / limit) * 100).toFixed(1)}%"></i></div>
+        <div class="dc-meta"><b>${fmtBytes(used)}</b> dari ${fmtBytes(limit)} · ${persisted ? 'tersimpan permanen ✓' : 'bisa dibersihkan browser saat disk penuh'}</div>
+        <div class="dc-list">${list.length ? list.map((e) => `<div class="user-row"><div><b>${escapeHtml(e.name || e.id)}</b><span>${fmtBytes(e.size)}${e.complete ? '' : ` · terunduh ${Math.round((e.size / Math.max(1, e.total)) * 100)}%`} · dipakai ${ago(e.lastUsed)}</span></div></div>`).join('') : '<p class="hint">Belum ada video tersimpan.</p>'}</div>
+        ${list.length ? `<button class="btn" data-clear>${icon('x', 14)} Hapus semua salinan</button>` : ''}`;
+      const btn = body.querySelector('[data-clear]');
+      if (btn) btn.onclick = async () => {
+        if (!(await confirmDialog('Hapus salinan video?', 'Video akan diunduh lagi dari server saat dibutuhkan.', 'Hapus', true))) return;
+        await clearDeviceCache();
+        toast('Salinan video di perangkat ini dihapus');
+        render();
+      };
+    };
+    render();
   },
 
   changePassword() {

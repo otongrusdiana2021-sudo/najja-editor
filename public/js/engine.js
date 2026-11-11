@@ -212,7 +212,9 @@ export class Engine {
     const rt = mediaRT.get(clip.mediaId);
     if (!rt?.url) return null;
     const el = document.createElement(clip.type === 'audio' ? 'audio' : 'video');
-    el.preload = 'auto';
+    // A local copy can buffer freely. A file still on the server is being saved to this device in the
+    // background; the player then only fetches what it shows (play, seek), so it is not downloaded twice.
+    el.preload = rt.url.startsWith('blob:') ? 'auto' : 'metadata';
     el.playsInline = true;
     el.crossOrigin = 'anonymous';
     el.src = rt.url;

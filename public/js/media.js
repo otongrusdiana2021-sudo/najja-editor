@@ -5,6 +5,7 @@ import { store } from './store.js';
 import { SFX } from './presets.js';
 import { remote } from './remote.js';
 import { toast } from './ui.js';
+import { deviceCache } from './devicecache.js';
 
 /** Runtime data per media id (not serialized): { url, img, sprite, spriteN, spriteW, spriteH, poster, peaks, status, error } */
 export const mediaRT = new Map();
@@ -141,6 +142,7 @@ async function watchProxy(id) {
       }
       if (st.state === 'ready') {
         useProxy(id, st.v);
+        await cacheLocally(id); // thumbnails are then made from the local copy
         await ensurePreview(id);
         toast(`"${entryOf(id)?.name || 'Video'}" siap diputar`, { type: 'success', timeout: 3500 });
       } else applyProxyState(id, st);
@@ -170,12 +172,15 @@ async function ensurePreview(id, fallback) {
 }
 
 /** Check that a server video plays here; if not, ask the server for an H.264 copy. */
-async function checkPlayable(id, entry) {
+async function checkPlayable(id, entry, { cacheFirst = false } = {}) {
   const rt = mediaRT.get(id);
   if (!rt?.url) return;
+  // The server already judged this codec browser-safe: save it to this device first, then check the local
+  // copy (no extra download just to probe it).
+  if (cacheFirst && !rt.url.startsWith('blob:')) await cacheLocally(id);
   if (await canPlayVideo(rt.url)) { cacheLocally(id); return; }
   try {
-    if (applyProxyState(id, await remote.requestProxy(id, true), { announce: true, entry })) await ensurePreview(id, entry);
+    if (applyProxyState(id, await remote.requestProxy(id, true), { announce: true, entry })) { await cacheLocally(id); await ensurePreview(id, entry); }
   } catch (err) {
     rt.playError = err.message;
     changed(id);
@@ -212,12 +217,59 @@ let forceCache = 0; // > 0 while an export waits for its media
 const gateOpen = () => forceCache > 0 || cacheGate();
 async function waitGate() { while (!gateOpen()) await new Promise((r) => setTimeout(r, 400)); }
 
+/** Media ids of the open project: never evicted from the device cache to make room. */
+const projectIds = () => new Set((store.P?.media || []).map((m) => m.id));
+
+/** Play `id` from a local copy: a disk-backed blob: URL (persistent cache) or an in-memory one. */
+function useLocal(id, rt, url, src, key = null) {
+  rt.remoteUrl = src;
+  rt.cacheKey = key;
+  rt.url = url;
+  changed(id);
+}
+
 async function downloadToDevice(id) {
   const rt = mediaRT.get(id);
   if (!rt?.url) return false;
   if (rt.url.startsWith('blob:')) return true;
   const src = rt.url;
   const stillWanted = () => mediaRT.get(id) === rt && rt.url === src;
+
+  // Persistent copy on this device (survives refresh and browser restarts), limited to 5 GB.
+  const key = deviceCache.keyFor(id, src);
+  if (key && await deviceCache.available()) {
+    let last = 0;
+    try {
+      const url = (await deviceCache.open(key)) || await (async () => {
+        rt.cache = { progress: 0 };
+        changed(id);
+        return deviceCache.download(key, {
+          id,
+          name: entryOf(id)?.name || '',
+          fetchFrom: (off) => fetch(src, { credentials: 'same-origin', headers: off ? { Range: `bytes=${off}-` } : {} }),
+          shouldPause: () => !gateOpen(),
+          waitResume: waitGate,
+          stillWanted,
+          protect: projectIds(),
+          onProgress: (p) => { if (performance.now() - last > 400) { last = performance.now(); rt.cache = { progress: p }; changed(id); } },
+        });
+      })();
+      if (url) {
+        rt.cache = null;
+        if (!stillWanted()) { URL.revokeObjectURL(url); changed(id); return false; }
+        useLocal(id, rt, url, src, key);
+        return true;
+      }
+    } catch { /* fall through to the in-memory copy */ }
+    rt.cache = null;
+    changed(id);
+    if (!stillWanted()) return false;
+  }
+  return downloadToMemory(id, rt, src, stillWanted);
+}
+
+/** Fallback when the browser has no persistent storage (or no room): keep a copy in memory for this tab. */
+async function downloadToMemory(id, rt, src, stillWanted) {
   const parts = [];
   let got = 0;
   let total = 0;
@@ -266,10 +318,22 @@ async function downloadToDevice(id) {
   if (!stillWanted() || (total && got !== total)) { changed(id); return false; }
   const blob = new Blob(parts, { type });
   deviceBytes += blob.size;
-  rt.remoteUrl = src;
-  rt.url = URL.createObjectURL(blob);
-  changed(id);
+  useLocal(id, rt, URL.createObjectURL(blob), src);
   return true;
+}
+
+/** Remove every copy kept on this device; media in use goes back to streaming from the server. */
+export async function clearDeviceCache() {
+  for (const [id, rt] of mediaRT) {
+    if (rt.cacheKey && rt.remoteUrl) {
+      const local = rt.url;
+      rt.url = rt.remoteUrl;
+      rt.cacheKey = null;
+      changed(id);
+      setTimeout(() => URL.revokeObjectURL(local), 2000);
+    }
+  }
+  await deviceCache.clear();
 }
 
 /** Make sure every audio/video file used in the project plays from this device (export calls this first). */
@@ -419,7 +483,7 @@ async function importViaServer(file, entry, rt, { silent, adoptFrom }) {
     rt.peaks = await computePeaks(file);
     await remote.putMeta(id, { entry, hasPeaks: !!rt.peaks });
     if (rt.peaks) await remote.putPeaks(id, rt.peaks);
-    if (applyProxyState(id, st, { announce: true, entry })) await ensurePreview(id, entry);
+    if (applyProxyState(id, st, { announce: true, entry })) { await cacheLocally(id); await ensurePreview(id, entry); }
     changed(id);
     if (!silent) store.scheduleSave();
     return entry;
@@ -501,13 +565,17 @@ export async function restoreMedia(P) {
         const pr = meta.proxy;
         const url = pr?.state === 'ready' && m.type !== 'image' ? remote.proxyUrl(m.id, pr.v) : remote.mediaUrl(m.id);
         const rt = { url, status: 'ready', sprite: meta.sprite, spriteN: meta.spriteN, spriteW: meta.spriteW, spriteH: meta.spriteH, poster: meta.poster, peaks: null };
+        // Already on this device? Play it from disk: nothing is downloaded again after a refresh.
+        const key = m.type !== 'image' ? deviceCache.keyFor(m.id, url) : null;
+        const local = key ? await deviceCache.open(key).catch(() => null) : null;
+        if (local) Object.assign(rt, { url: local, remoteUrl: url, cacheKey: key });
         if (meta.hasPeaks) rt.peaks = await remote.getPeaks(m.id).catch(() => null);
         if (m.type === 'image') rt.img = await loadImage(url).catch(() => { rt.status = 'error'; return null; });
         mediaRT.set(m.id, rt);
         if (m.type === 'video' || m.type === 'audio') {
           if (pr?.state === 'pending' || pr?.state === 'running') applyProxyState(m.id, pr, { announce: true, entry: m });
-          else if (pr?.state === 'ready') { ensurePreview(m.id, m); cacheLocally(m.id); }
-          else if (m.type === 'video') checkPlayable(m.id, m);
+          else if (pr?.state === 'ready') cacheLocally(m.id).then(() => ensurePreview(m.id, m));
+          else if (m.type === 'video') checkPlayable(m.id, m, { cacheFirst: pr?.state === 'none' });
           else cacheLocally(m.id);
         }
       } catch {
@@ -546,7 +614,8 @@ export async function removeMedia(id) {
   if (rt?.url) setTimeout(() => URL.revokeObjectURL(rt.url), 2000);
   mediaRT.delete(id);
   if (remote.enabled) {
-    remote.deleteMedia(id, P.id).catch(() => {}); // the server keeps it if another project still uses it
+    // the server keeps it if another project still uses it; then the device copy stays too
+    remote.deleteMedia(id, P.id).then((r) => { if (!r?.kept) deviceCache.removeMedia(id); }).catch(() => {});
   } else {
     // Keep the blob if another saved project still references it.
     const projects = await db.listProjects();

@@ -164,7 +164,7 @@ systemctl reload caddy
 
 ## Data tersimpan di mana?
 
-Semua data ada **di VPS kamu**, tidak di browser dan tidak di layanan luar (tidak memakai Supabase atau cloud lain):
+Semua data ada **di VPS kamu**, tidak di layanan luar (tidak memakai Supabase atau cloud lain):
 
 | Data | Lokasi di dalam container (volume Docker `najja-editor_najja-data`) |
 |---|---|
@@ -173,6 +173,16 @@ Semua data ada **di VPS kamu**, tidak di browser dan tidak di layanan luar (tida
 | Hasil ekspor | `/data/exports/` |
 
 Karena itu proyek bisa dibuka dari laptop, HP, atau browser mana pun setelah login. Upload video besar dipecah per 8 MB, jadi tidak terkena batas upload nginx/aaPanel.
+
+### Salinan video di perangkat (maks. 5 GB)
+
+Supaya refresh atau buka ulang browser tidak mengunduh video lagi, tiap perangkat menyimpan **salinan** video yang pernah dibuka di penyimpanan browser (OPFS), maksimal 5 GB per browser. VPS tetap sumber utama: salinan hanya cache.
+
+- Unduhan pertama berjalan di background (kartu media: **Memuat xx%**), dijeda saat video diputar, dan dilanjutkan dari posisi terakhir kalau terputus.
+- Kalau video di VPS dikonversi ulang, perangkat mengunduh versi baru sekali dan membuang yang lama.
+- Kalau penuh, video yang paling lama tidak dibuka dihapus duluan (video di proyek yang sedang dibuka tidak ikut dihapus).
+- Lihat atau hapus salinan: menu akun (bulatan inisial) → **Penyimpanan perangkat**. Salinan tetap ada setelah *Keluar*.
+- Pasang editor sebagai aplikasi (PWA) supaya Chrome menandai penyimpanannya permanen dan tidak membersihkannya saat disk penuh.
 
 ### Video iPhone (HEVC) dan format lain
 
