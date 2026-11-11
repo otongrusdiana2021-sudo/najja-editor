@@ -25,7 +25,7 @@ export class Engine {
     onFontsLoaded(() => this.requestRender());
     store.on('project', () => { this.clampTime(); this.sync(); this.requestRender(); });
     store.on('live', () => { this.sync(); this.requestRender(); });
-    store.on('media', () => this.requestRender());
+    store.on('media', () => { if (store.P) this.sync(); this.requestRender(); });
     const resume = () => { if (this.audioCtx?.state === 'suspended') this.audioCtx.resume().catch(() => {}); };
     window.addEventListener('pointerdown', resume, true);
     window.addEventListener('keydown', resume, true);
@@ -157,7 +157,7 @@ export class Engine {
     el.playsInline = true;
     el.crossOrigin = 'anonymous';
     el.src = rt.url;
-    const E = { el, mediaId: clip.mediaId, gain: null, src: null, vol: -1 };
+    const E = { el, mediaId: clip.mediaId, url: rt.url, gain: null, src: null, vol: -1 };
     const ctx = this.ensureAudio();
     if (ctx) {
       try {
@@ -220,7 +220,8 @@ export class Engine {
         continue;
       }
       let E = this.els.get(clip.id);
-      if (E && E.mediaId !== clip.mediaId) { this.disposeEl(clip.id); E = null; }
+      // A different media, or the same media switched to its H.264 copy: reload the element.
+      if (E && (E.mediaId !== clip.mediaId || E.url !== mediaRT.get(clip.mediaId)?.url)) { this.disposeEl(clip.id); E = null; }
       if (!E) E = this.createEl(clip);
       if (!E) continue;
       alive.add(clip.id);

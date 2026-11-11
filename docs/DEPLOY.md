@@ -125,7 +125,7 @@ Setelah video di-upload ke `/data/media/`, AI bisa mengimpornya dengan `import_m
 ## Cara B — tanpa Docker (Node + systemd + Caddy)
 
 **1. Pasang Node.js.**
-- Ubuntu 24.04: `apt install -y nodejs` (versinya sudah 18.19, cukup).
+- Ubuntu 24.04: `apt install -y nodejs ffmpeg` (Node 18.19 sudah cukup; ffmpeg untuk konversi video iPhone/HEVC).
 - Ubuntu 22.04: versi bawaannya terlalu lama. Pasang Node 22 dari NodeSource (lihat nodesource.com).
 
 **2. Pasang Caddy** dengan mengikuti https://caddyserver.com/docs/install (bagian Debian/Ubuntu).
@@ -169,10 +169,19 @@ Semua data ada **di VPS kamu**, tidak di browser dan tidak di layanan luar (tida
 | Data | Lokasi di dalam container (volume Docker `najja-editor_najja-data`) |
 |---|---|
 | Proyek | `/data/projects/*.json` |
-| Media (file asli, thumbnail, waveform) | `/data/library/<id>/` |
+| Media (file asli, salinan H.264, thumbnail, waveform) | `/data/library/<id>/` |
 | Hasil ekspor | `/data/exports/` |
 
 Karena itu proyek bisa dibuka dari laptop, HP, atau browser mana pun setelah login. Upload video besar dipecah per 8 MB, jadi tidak terkena batas upload nginx/aaPanel.
+
+### Video iPhone (HEVC) dan format lain
+
+Video iPhone `.MOV` biasanya memakai codec HEVC (H.265). Tidak semua PC bisa memutarnya di browser: preview jadi hitam walaupun filenya ada. Karena itu server otomatis membuat **salinan MP4 H.264** untuk video seperti ini (juga AVI, video 10-bit/HDR, ProRes), lalu editor memakai salinan itu untuk preview dan ekspor.
+
+- File asli tetap disimpan dan tidak diubah.
+- Konversi berjalan sekali per video di VPS (±1,5× durasi video di 1 vCPU) dengan prioritas rendah, jadi aplikasi lain di VPS tidak terganggu. Selama proses, kartu media menampilkan **Konversi xx%**.
+- Video yang sudah ada sebelum fitur ini dikonversi otomatis saat proyeknya dibuka.
+- Butuh `ffmpeg`. Image Docker sudah memasangnya; installer menampilkan *Konversi video otomatis … aktif ✓*. Untuk Cara B (tanpa Docker), pasang dengan `apt install -y ffmpeg` lalu `systemctl restart najja-editor`.
 
 **Backup** satu file ke folder home:
 
@@ -259,4 +268,5 @@ Dengan `NAJJA_URL` terisi, `mcp-stdio.js` hanya meneruskan perintah ke VPS dan t
 | Setelah login kembali lagi ke halaman login | Buka lewat **https://**. Cookie aman tidak dikirim lewat http. |
 | AI menjawab "editor is not open" | Buka editor di browser dan pastikan sudah login. Titik di tombol **MCP** harus hijau. |
 | Ekspor berhenti | Ekspor berjalan real-time di tab browser. Biarkan tab terbuka dan terlihat. |
+| Preview video hitam di PC lain (video iPhone) | Codec HEVC tidak didukung browser PC itu. Tunggu kartu media selesai **Konversi**; kalau muncul "Tidak bisa diputar", jalankan installer lagi agar ffmpeg terpasang. |
 | Pakai nginx, bukan Caddy | Tambahkan `proxy_set_header Host $host;`, `proxy_set_header X-Forwarded-Proto $scheme;`, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, `proxy_buffering off;`, `proxy_read_timeout 1h;`, dan `client_max_body_size 2g;`. |

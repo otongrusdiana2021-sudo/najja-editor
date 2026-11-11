@@ -93,7 +93,9 @@ export class Library {
     return `<div class="media-card ${status} type-${m.type} ${rt.upload ? 'uploading' : ''}" draggable="${status === 'ready'}" data-media="${m.id}" title="${escapeHtml(m.name)}">
       <div class="mc-thumb">${thumb}
         ${m.type !== 'image' && m.duration ? `<span class="mc-dur">${fmtDur(m.duration)}</span>` : ''}
-        ${status === 'processing' ? '<span class="mc-spin"></span>' : ''}
+        ${status === 'processing' && !rt.upload ? '<span class="mc-spin"></span>' : ''}
+        ${rt.convert ? `<span class="mc-up conv" title="Server sedang membuat salinan MP4 (H.264) supaya video bisa diputar di semua perangkat"><i style="width:${Math.round((rt.convert.progress || 0) * 100)}%"></i><b>${icon('rotate', 11)} Konversi ${Math.round((rt.convert.progress || 0) * 100)}%</b></span>` : ''}
+        ${rt.playError && !rt.convert ? `<span class="mc-up err" title="${escapeHtml(rt.playError)}"><b>${icon('help', 11)} Tidak bisa diputar</b></span>` : ''}
         ${status === 'missing' ? `<span class="mc-missing">${icon('help', 14)} Hilang</span>` : ''}
         ${rt.upload?.state === 'uploading' ? `<span class="mc-up" title="Mengunggah ke server"><i style="width:${Math.round((rt.upload.progress || 0) * 100)}%"></i><b>${icon('upload', 11)} ${Math.round((rt.upload.progress || 0) * 100)}%</b></span>` : ''}
         ${rt.upload?.state === 'error' ? `<button class="mc-up err" data-retry="${m.id}" title="${escapeHtml(rt.upload.error || '')}"><b>${icon('rotate', 11)} Gagal unggah · coba lagi</b></button>` : ''}

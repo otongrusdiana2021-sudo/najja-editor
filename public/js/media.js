@@ -60,6 +60,126 @@ async function probeAudio(url) {
   return a.duration;
 }
 
+/** Can this browser actually decode the video track? (Some decode the audio of an HEVC file but show no picture.) */
+async function canPlayVideo(url) {
+  const v = document.createElement('video');
+  v.preload = 'auto';
+  v.muted = true;
+  v.playsInline = true;
+  v.src = url;
+  try {
+    const ok = await Promise.race([
+      waitEvent(v, 'loadeddata', 20000),
+      new Promise((r) => v.addEventListener('error', () => r(false), { once: true })),
+    ]);
+    return !!ok && v.videoWidth > 0;
+  } catch {
+    return false;
+  } finally {
+    v.removeAttribute('src');
+    v.load();
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Server playback proxies: when a browser cannot decode a file (e.g. iPhone HEVC .MOV on many PCs),
+// the server makes an H.264 copy and the editor switches to it. The original stays on the server.
+const watching = new Set();
+/** The library entry for a media id; during project load the project is not installed yet, so callers pass it. */
+const entryOf = (id, fallback) => store.P?.media?.find((m) => m.id === id) || fallback;
+const NO_CONVERTER = 'Video ini (mis. HEVC dari iPhone) tidak bisa diputar di browser ini, dan server belum bisa mengonversinya. Jalankan ulang installer Najja di VPS agar konversi otomatis aktif.';
+
+function useProxy(id, v) {
+  const rt = mediaRT.get(id);
+  if (!rt) return;
+  rt.url = remote.proxyUrl(id, v);
+  rt.convert = null;
+  rt.playError = null;
+  if (rt.status !== 'missing') rt.status = 'ready';
+  changed(id);
+}
+
+/** Apply a proxy state from the server; start watching while it converts. Returns true once usable. */
+function applyProxyState(id, st, { announce = false, entry } = {}) {
+  const rt = mediaRT.get(id);
+  if (!rt || !st) return false;
+  const name = entryOf(id, entry)?.name || 'video';
+  if (st.state === 'ready') { useProxy(id, st.v); return true; }
+  if (st.state === 'pending' || st.state === 'running') {
+    rt.convert = { progress: st.progress || 0 };
+    changed(id);
+    if (announce) toast(`"${name}" sedang dikonversi ke MP4 (H.264) supaya bisa diputar di perangkat ini. Cukup sekali.`, { timeout: 6000 });
+    watchProxy(id);
+    return false;
+  }
+  rt.convert = null;
+  if (st.state === 'unavailable') {
+    rt.playError = NO_CONVERTER;
+    toast(`"${name}": ${NO_CONVERTER}`, { type: 'warn', timeout: 12000 });
+  } else if (st.state === 'error') {
+    rt.playError = st.error || 'Konversi gagal';
+    toast(`Konversi "${name}" gagal: ${rt.playError}`, { type: 'error', timeout: 10000 });
+  }
+  changed(id);
+  return false;
+}
+
+async function watchProxy(id) {
+  if (watching.has(id)) return;
+  watching.add(id);
+  try {
+    for (let i = 0; i < 1800; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      if (!mediaRT.has(id)) return;
+      let st;
+      try { st = await remote.proxyStatus(id); } catch { continue; }
+      const rt = mediaRT.get(id);
+      if (st.state === 'pending' || st.state === 'running') {
+        if (rt && Math.abs((rt.convert?.progress || 0) - (st.progress || 0)) > 0.005) { rt.convert = { progress: st.progress || 0 }; changed(id); }
+        continue;
+      }
+      if (st.state === 'ready') {
+        useProxy(id, st.v);
+        await ensurePreview(id);
+        toast(`"${entryOf(id)?.name || 'Video'}" siap diputar`, { type: 'success', timeout: 3500 });
+      } else applyProxyState(id, st);
+      return;
+    }
+  } finally {
+    watching.delete(id);
+  }
+}
+
+/** Filmstrip/poster for media whose original could not be decoded here (made from the proxy once it exists). */
+async function ensurePreview(id, fallback) {
+  const rt = mediaRT.get(id);
+  const entry = entryOf(id, fallback);
+  if (!rt || !entry || entry.type !== 'video' || (rt.sprite && rt.poster)) return;
+  try {
+    const v = await probeVideo(rt.url);
+    if (!entry.duration && Number.isFinite(v.duration)) entry.duration = v.duration;
+    if (!entry.width) { entry.width = v.videoWidth; entry.height = v.videoHeight; }
+    Object.assign(rt, await makeSprite(v, entry.duration || v.duration));
+    v.removeAttribute('src');
+    v.load();
+    changed(id);
+    await remote.putMeta(id, { entry, sprite: rt.sprite, spriteN: rt.spriteN, spriteW: rt.spriteW, spriteH: rt.spriteH, poster: rt.poster, hasPeaks: !!rt.peaks });
+    if (store.P) store.scheduleSave();
+  } catch { /* the preview is optional */ }
+}
+
+/** Check that a server video plays here; if not, ask the server for an H.264 copy. */
+async function checkPlayable(id, entry) {
+  const rt = mediaRT.get(id);
+  if (!rt?.url || await canPlayVideo(rt.url)) return;
+  try {
+    if (applyProxyState(id, await remote.requestProxy(id, true), { announce: true, entry })) await ensurePreview(id, entry);
+  } catch (err) {
+    rt.playError = err.message;
+    changed(id);
+  }
+}
+
 async function seekTo(v, t) {
   if (Math.abs(v.currentTime - t) < 0.001 && v.readyState >= 2) return;
   v.currentTime = t;
@@ -158,6 +278,53 @@ async function persistMedia(entry, file, rt, { adoptFrom } = {}) {
 }
 export const uploadsPending = () => [...mediaRT.values()].some((rt) => rt.upload?.state === 'uploading');
 
+/** Import a video this browser cannot decode: store the original on the server, which converts it to H.264. */
+async function importViaServer(file, entry, rt, { silent, adoptFrom }) {
+  const id = entry.id;
+  store.P.media.push(entry);
+  rt.upload = { state: 'uploading', progress: 0 };
+  changed(id);
+  let last = 0;
+  try {
+    if (adoptFrom) await remote.adopt(id, adoptFrom, file.name, file.type);
+    else {
+      await remote.upload(file, {
+        target: 'media', mediaId: id, filename: file.name, mime: file.type,
+        onProgress: (p) => {
+          rt.upload.progress = p;
+          if (performance.now() - last > 200) { last = performance.now(); changed(id); }
+        },
+      });
+    }
+    rt.upload = null;
+    const st = await remote.requestProxy(id, true);
+    if (st.state === 'unavailable') throw new Error(NO_CONVERTER);
+    if (st.state === 'error') throw new Error(`Konversi gagal: ${st.error || 'tidak diketahui'}`);
+    const p = st.probe || {};
+    if (!p.hasVideo) throw new Error('File ini tidak berisi video');
+    entry.duration = p.duration || 0;
+    entry.width = p.width || 0;
+    entry.height = p.height || 0;
+    entry.hasAudio = !!p.hasAudio;
+    rt.status = 'ready';
+    rt.peaks = await computePeaks(file);
+    await remote.putMeta(id, { entry, hasPeaks: !!rt.peaks });
+    if (rt.peaks) await remote.putPeaks(id, rt.peaks);
+    if (applyProxyState(id, st, { announce: true, entry })) await ensurePreview(id, entry);
+    changed(id);
+    if (!silent) store.scheduleSave();
+    return entry;
+  } catch (err) {
+    mediaRT.delete(id);
+    URL.revokeObjectURL(rt.url);
+    const idx = store.P.media.findIndex((m) => m.id === id);
+    if (idx >= 0) store.P.media.splice(idx, 1);
+    changed(id);
+    remote.deleteMedia(id, store.P.id).catch(() => {});
+    throw err;
+  }
+}
+
 export async function importFile(file, { name, silent = false, adoptFrom } = {}) {
   const type = detectType(file);
   if (!type) throw new Error(`Jenis file tidak didukung: ${file.name || file.type}`);
@@ -168,7 +335,13 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
   mediaRT.set(id, rt);
   try {
     if (type === 'video') {
-      const v = await probeVideo(url);
+      let v;
+      try {
+        v = await probeVideo(url);
+      } catch (err) {
+        if (!remote.enabled) throw err;
+        return await importViaServer(file, entry, rt, { silent, adoptFrom });
+      }
       entry.duration = v.duration && Number.isFinite(v.duration) ? v.duration : 0;
       entry.width = v.videoWidth;
       entry.height = v.videoHeight;
@@ -216,11 +389,17 @@ export async function restoreMedia(P) {
       try {
         const meta = await remote.getMeta(m.id);
         if (!meta.file) throw new Error('upload belum selesai');
-        const url = remote.mediaUrl(m.id);
+        const pr = meta.proxy;
+        const url = pr?.state === 'ready' && m.type !== 'image' ? remote.proxyUrl(m.id, pr.v) : remote.mediaUrl(m.id);
         const rt = { url, status: 'ready', sprite: meta.sprite, spriteN: meta.spriteN, spriteW: meta.spriteW, spriteH: meta.spriteH, poster: meta.poster, peaks: null };
         if (meta.hasPeaks) rt.peaks = await remote.getPeaks(m.id).catch(() => null);
         if (m.type === 'image') rt.img = await loadImage(url).catch(() => { rt.status = 'error'; return null; });
         mediaRT.set(m.id, rt);
+        if (m.type === 'video' || m.type === 'audio') {
+          if (pr?.state === 'pending' || pr?.state === 'running') applyProxyState(m.id, pr, { announce: true, entry: m });
+          else if (pr?.state === 'ready') ensurePreview(m.id, m);
+          else if (m.type === 'video') checkPlayable(m.id, m);
+        }
       } catch {
         missing.push(m.id);
         mediaRT.set(m.id, { status: 'missing' });

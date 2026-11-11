@@ -225,6 +225,11 @@ done
 LIVE_VERSION="$(printf '%s' "$LIVE" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
 if [ "$LIVE_VERSION" = "$EXPECTED_VERSION" ]; then
   info "Container menjalankan versi $LIVE_VERSION ✓"
+  if printf '%s' "$LIVE" | grep -q '"convert":true'; then
+    info "Konversi video otomatis (HEVC/iPhone → MP4 H.264) aktif ✓"
+  else
+    warn "Konversi video nonaktif (ffmpeg gagal terpasang). Video HEVC dari iPhone hanya bisa diputar di perangkat yang mendukungnya. Jalankan installer lagi nanti."
+  fi
 else
   docker compose logs --tail 30 najja 2>&1 | sed 's/^/    /' || true
   die "Container belum menjalankan versi $EXPECTED_VERSION (terdeteksi: ${LIVE_VERSION:-tidak merespons}). Kirim output ini untuk dicek."

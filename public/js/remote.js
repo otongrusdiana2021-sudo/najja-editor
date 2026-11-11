@@ -40,6 +40,10 @@ export const remote = {
   async deleteProject(id) { return (await api(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })).json(); },
 
   mediaUrl: (id) => `/api/media/${encodeURIComponent(id)}/file`,
+  /** H.264 playback copy made by the server for files a browser may not decode (e.g. HEVC). */
+  proxyUrl: (id, v) => `/api/media/${encodeURIComponent(id)}/proxy${v ? `?v=${v}` : ''}`,
+  async proxyStatus(id) { return (await api(`/api/media/${encodeURIComponent(id)}/proxy-status`)).json(); },
+  async requestProxy(id, force = false) { return (await api(`/api/media/${encodeURIComponent(id)}/proxy`, { method: 'POST', ...json({ force }) })).json(); },
   async getMeta(id) { return (await api(`/api/media/${encodeURIComponent(id)}/meta`)).json(); },
   async putMeta(id, meta) { return (await api(`/api/media/${encodeURIComponent(id)}/meta`, { method: 'PUT', ...json(meta) })).json(); },
   async getPeaks(id) {

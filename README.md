@@ -24,6 +24,7 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 - **Keyframe** untuk posisi, skala, rotasi, dan opasitas.
 - **Chroma key** untuk menghapus latar hijau.
 - Kecepatan 0.1x sampai 10x.
+- Video iPhone (HEVC) dan format lain yang tidak didukung browser otomatis dikonversi server ke MP4 H.264 (butuh ffmpeg di server).
 - Volume hingga 200%, fade in/out.
 
 **Teks**
@@ -174,7 +175,8 @@ public/
   js/library.js    Panel aset (media, audio, teks, subtitle, stiker, efek, transisi, filter, AI)
   js/api.js        Implementasi tool MCP di dalam editor
   js/store.js      Model proyek, undo/redo, autosave
-  js/media.js      Impor, thumbnail, waveform, audio sintetis
+  js/media.js      Impor, thumbnail, waveform, audio sintetis, salinan H.264 dari server
+lib/               Penyimpanan server, akun login, konversi video (ffmpeg)
 Dockerfile, docker-compose.yml, deploy/   Deploy VPS (Docker + Caddy, atau systemd)
 docs/DEPLOY.md            Panduan deploy
 docs/capcut-analysis.md   Hasil analisis CapCut Web (REA) yang memandu desain
@@ -185,7 +187,7 @@ test/              npm test
 
 - **Ekspor berjalan real-time** (durasi ekspor ≈ durasi video). Biarkan tab editor tetap terbuka dan terlihat.
 - MP4 dipakai jika browser bisa merekamnya (Chrome/Edge terbaru, Safari). Jika tidak, hasilnya WebM.
-- Proyek dan media disimpan di browser (IndexedDB). Menghapus data situs berarti menghapus proyek.
+- Proyek dan media disimpan di server (folder `data/`, atau `NAJJA_DATA_DIR`), bukan di browser, jadi bisa dibuka dari perangkat mana pun.
 - Belum tersedia: reverse video, stabilisasi, hapus latar dengan AI, dan text-to-speech.
 - Najja Editor meniru **tata letak dan alur kerja** editor video populer, tetapi seluruh kode, ikon, dan desainnya dibuat sendiri. Tidak ada kode, aset, atau merek CapCut yang dipakai. Lihat `docs/capcut-analysis.md`.
 

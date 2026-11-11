@@ -205,6 +205,7 @@ body.ready .boot { opacity: 0; visibility: hidden; }
 .mc-up b { position: relative; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
 .media-card.uploading .mc-dur, .media-card.uploading .mc-used { display: none; }
 .mc-up.err { background: rgba(255, 77, 109, 0.85); cursor: pointer; }
+.mc-up.conv i { background: linear-gradient(90deg, #22d3c5, #47c9d7); }
 .mc-spin { position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; border: 2.5px solid rgba(255, 255, 255, 0.85); border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
 .mc-add, .mc-del { position: absolute; display: grid; place-items: center; border-radius: 50%; opacity: 0; transform: scale(0.8); transition: all 0.18s var(--ease); }
 .mc-add { right: 6px; top: 6px; width: 26px; height: 26px; background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); }

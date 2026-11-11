@@ -111,7 +111,7 @@ function projectInfo() {
 function listMedia() {
   return store.P.media.map((m) => ({
     id: m.id, name: m.name, type: m.type, duration: m.duration ? r3(m.duration) : undefined, width: m.width || undefined, height: m.height || undefined,
-    status: mediaRT.get(m.id)?.status || 'ready',
+    status: mediaRT.get(m.id)?.convert ? 'converting' : (mediaRT.get(m.id)?.playError ? 'unplayable' : (mediaRT.get(m.id)?.status || 'ready')),
   }));
 }
 

@@ -15,6 +15,7 @@ import { createMcpHandler, formatToolResult } from './mcp/protocol.js';
 import { TOOLS } from './mcp/tools.js';
 import { createStorage } from './lib/storage.js';
 import { createAuth } from './lib/auth.js';
+import { createProxyManager, capabilities as mediaTools } from './lib/media-proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -59,6 +60,8 @@ function extFor(filename, mime) {
 const storage = createStorage(DATA_DIR, { exportDir: EXPORT_DIR, extFor });
 storage.cleanupUploads().catch(() => {});
 setInterval(() => storage.cleanupUploads().catch(() => {}), 6 * 3600 * 1000).unref();
+// H.264 playback copies for media some browsers cannot decode (e.g. iPhone HEVC .MOV on many PCs).
+const proxies = createProxyManager({ mediaDir: storage.mediaDir, mediaFile: (id) => storage.mediaFile(id), log: (...a) => log(...a) });
 
 const TOOL_TIMEOUTS = { import_media: 180_000, get_frame: 45_000, export_video: 20_000, new_project: 20_000 };
 
@@ -282,6 +285,14 @@ async function readJson(req) {
   }
 }
 
+/** Proxy state as sent to the browser (probe details only when asked for). */
+function publicProxy(st, withProbe = false) {
+  if (!st) return null;
+  const out = { state: st.state, progress: st.progress ?? (st.state === 'ready' ? 1 : 0), error: st.error || null, v: st.updatedAt || 0 };
+  if (withProbe && st.probe) out.probe = { duration: st.probe.duration, width: st.probe.width, height: st.probe.height, hasVideo: !!st.probe.video, hasAudio: !!st.probe.audio };
+  return out;
+}
+
 function sendJson(res, status, data, headers = {}) {
   const body = JSON.stringify(data);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
@@ -463,7 +474,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       return res.end('Najja Editor berjalan tanpa NAJJA_TOKEN, jadi hanya bisa dibuka dari localhost. Untuk VPS/akses publik, jalankan dengan NAJJA_TOKEN (lihat docs/DEPLOY.md).');
     }
     if (p === '/healthz') {
-      return sendJson(res, 200, { ok: true, name: PKG.name, version: PKG.version, login: TOKEN ? 'email' : 'local', storage: 'server' });
+      return sendJson(res, 200, { ok: true, name: PKG.name, version: PKG.version, login: TOKEN ? 'email' : 'local', storage: 'server', convert: (await mediaTools()).ffmpeg });
     }
     if (p === '/favicon.svg' || p === '/manifest.webmanifest' || p === '/sw.js' || /^\/icons\/[\w.-]+\.png$/.test(p)) {
       return sendFile(req, res, path.join(PUBLIC_DIR, p), p === '/sw.js' ? { 'Service-Worker-Allowed': '/', 'Cache-Control': 'no-cache' } : {});
@@ -579,6 +590,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
         storage: 'server',
         mcp: { http: `${publicUrl}/mcp`, stdio: { command: 'node', args: [path.join(__dirname, 'mcp-stdio.js')] } },
         editors: bridge.clients.size,
+        convert: (await mediaTools()).ffmpeg,
         mcpClients: bridge.mcpClients,
         exportsDir: EXPORT_DIR,
         lastExport,
@@ -608,9 +620,21 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       }
       if (req.method === 'DELETE') return sendJson(res, 200, await storage.deleteProject(m[1]));
     }
-    if ((m = /^\/api\/media\/([\w-]+)\/(meta|peaks|file|adopt)$/.exec(p))) {
+    if ((m = /^\/api\/media\/([\w-]+)\/(meta|peaks|file|adopt|proxy|proxy-status)$/.exec(p))) {
       const [, id, part] = m;
-      if (part === 'meta' && req.method === 'GET') return sendJson(res, 200, await storage.getMeta(id));
+      if (part === 'meta' && req.method === 'GET') {
+        const meta = await storage.getMeta(id);
+        return sendJson(res, 200, { ...meta, proxy: meta.file ? publicProxy(await proxies.status(id)) : null });
+      }
+      if (part === 'proxy-status' && req.method === 'GET') return sendJson(res, 200, publicProxy(await proxies.status(id)));
+      if (part === 'proxy' && req.method === 'POST') {
+        const body = await readJson(req).catch(() => ({}));
+        storage.mediaDir(id);
+        return sendJson(res, 200, publicProxy(await proxies.ensure(id, { force: !!body.force }), true));
+      }
+      if (part === 'proxy' && (req.method === 'GET' || req.method === 'HEAD')) {
+        return sendFile(req, res, proxies.proxyPath(id), { 'Content-Type': 'video/mp4', 'Cache-Control': 'private, max-age=31536000, immutable' });
+      }
       if (part === 'meta' && req.method === 'PUT') return sendJson(res, 200, await storage.putMeta(id, JSON.parse((await readBody(req, 8 * 1024 * 1024)).toString('utf8'))));
       if (part === 'peaks' && req.method === 'GET') return sendFile(req, res, storage.peaksPath(id), { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'private, max-age=31536000, immutable' });
       if (part === 'peaks' && req.method === 'PUT') return sendJson(res, 200, await storage.putPeaks(id, await readBody(req, 8 * 1024 * 1024)));
@@ -626,7 +650,9 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
         if (local) file = localFiles.get(local[1]);
         else if (src.startsWith('/media-cache/')) { file = path.join(CACHE_DIR, path.basename(decodeURIComponent(src))); move = true; }
         if (!file || !fs.existsSync(file)) return sendJson(res, 404, { error: 'Source file not found on server' });
-        return sendJson(res, 200, await storage.adoptFile(id, file, { filename: body.filename, mime: body.mime, move }));
+        const adopted = await storage.adoptFile(id, file, { filename: body.filename, mime: body.mime, move });
+        proxies.ensure(id).catch(() => {});
+        return sendJson(res, 200, adopted);
       }
     }
     if ((m = /^\/api\/media\/([\w-]+)$/.exec(p)) && req.method === 'DELETE') {
@@ -639,6 +665,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       const body = await readJson(req);
       const done = await storage.finishUpload(m[1], body);
       if (body.target === 'export') done.url = `/exports/${encodeURIComponent(done.file)}`;
+      if (body.target === 'media') proxies.ensure(body.mediaId).catch(() => {});
       return sendJson(res, 200, done);
     }
 
