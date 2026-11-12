@@ -1,40 +1,30 @@
-// Preview player: canvas sizing, transport controls, aspect ratio menu, on-canvas transform handles.
-import { store, sortedClips, clipEnd, kfValue, upsertKeyframe } from './store.js';
+// Preview: canvas sizing, the control row under it (fullscreen · play · keyframe · undo · redo) and on-canvas
+// editing of the selected clip (drag to move, corner handles or a two-finger pinch to scale and rotate).
+import { store, sortedClips, clipEnd, kfValue, upsertKeyframe, keyframeAt } from './store.js';
+import * as actions from './actions.js';
 import { ASPECTS } from './presets.js';
 import { icon } from './icons.js';
-import { fmtTC, clamp } from './util.js';
-import { contextMenu } from './ui.js';
+import { clamp } from './util.js';
 
 export class Player {
   constructor(root, engine) {
     this.root = root;
     this.engine = engine;
     root.innerHTML = `
-      <div class="panel-head viewer-head">
-        <span class="panel-title">Pemutar</span>
-        <div class="viewer-head-right">
-          <button class="chip-btn" data-act="ratio" title="Rasio kanvas"><span class="ratio-label">16:9</span>${icon('chevronDown', 14)}</button>
-        </div>
-      </div>
       <div class="stage" tabindex="-1">
         <div class="stage-inner">
           <canvas class="preview-canvas"></canvas>
           <div class="overlay"><div class="guide gv"></div><div class="guide gh"></div><div class="sel-box"><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i><i class="h rot">${icon('rotate', 12)}</i></div></div>
         </div>
-        <div class="stage-empty">${icon('media', 30)}<b>Mulai berkreasi</b><span>Impor video, foto, atau audio dari panel Media — atau minta AI lewat MCP.</span></div>
+        <button class="stage-empty" data-act="addMedia">${icon('plus', 30)}<b>Mulai berkreasi</b><span>Ketuk untuk menambah video atau foto — atau minta AI lewat MCP.</span></button>
       </div>
-      <div class="transport">
-        <div class="tc"><span class="tc-cur">00:00:00:00</span><span class="tc-sep">/</span><span class="tc-dur">00:00:00:00</span></div>
-        <div class="transport-mid">
-          <button class="icon-btn" data-act="start" title="Ke awal (Home)">${icon('skipBack', 16)}</button>
-          <button class="icon-btn" data-act="prev" title="Frame sebelumnya (←)">${icon('stepBack', 18)}</button>
-          <button class="play-btn" data-act="play" title="Putar/Jeda (Spasi)">${icon('play', 20)}</button>
-          <button class="icon-btn" data-act="next" title="Frame berikutnya (→)">${icon('stepForward', 18)}</button>
-          <button class="icon-btn" data-act="end" title="Ke akhir (End)">${icon('skipForward', 16)}</button>
-        </div>
-        <div class="transport-right">
-          <button class="icon-btn toggle" data-act="loop" title="Ulangi putar">${icon('rotate', 16)}</button>
-          <button class="icon-btn" data-act="fullscreen" title="Layar penuh">${icon('fullscreen', 16)}</button>
+      <div class="ctrlbar">
+        <div class="cb-left"><button class="icon-btn" data-act="fullscreen" title="Layar penuh" aria-label="Layar penuh">${icon('fullscreen', 20)}</button></div>
+        <div class="cb-mid"><button class="play-btn" data-act="play" title="Putar/Jeda (Spasi)" aria-label="Putar">${icon('play', 26)}</button></div>
+        <div class="cb-right">
+          <button class="icon-btn kf-main" data-act="kf" title="Tambah/hapus keyframe di playhead" aria-label="Keyframe">${icon('keyframe', 21)}</button>
+          <button class="icon-btn" data-act="undo" title="Urungkan (Ctrl+Z)" aria-label="Urungkan">${icon('undo', 21)}</button>
+          <button class="icon-btn" data-act="redo" title="Ulangi (Ctrl+Shift+Z)" aria-label="Ulangi">${icon('redo', 21)}</button>
         </div>
       </div>`;
     this.canvas = root.querySelector('.preview-canvas');
@@ -45,17 +35,18 @@ export class Player {
     this.gv = root.querySelector('.gv');
     this.gh = root.querySelector('.gh');
     this.playBtn = root.querySelector('[data-act="play"]');
-    this.tcCur = root.querySelector('.tc-cur');
-    this.tcDur = root.querySelector('.tc-dur');
+    this.kfBtn = root.querySelector('[data-act="kf"]');
+    this.undoBtn = root.querySelector('[data-act="undo"]');
+    this.redoBtn = root.querySelector('[data-act="redo"]');
     this.bind();
     new ResizeObserver(() => this.layout()).observe(this.stage);
-    store.on('project', () => { this.layout(); this.updateTC(); });
-    store.on('selection', () => this.updateBox());
+    store.on('project', () => { this.layout(); this.updateCtrls(); });
+    store.on('selection', () => { this.updateBox(); this.updateCtrls(); });
     engine.on((kind) => {
-      if (kind === 'time') this.updateTC();
+      if (kind === 'time' && !engine.playing) this.updateCtrls();
       if (kind === 'buffer') this.stage.classList.toggle('buffering', engine.buffering);
       if (kind === 'render') this.updateBox();
-      if (kind === 'play' || kind === 'pause') this.playBtn.innerHTML = icon(engine.playing ? 'pause' : 'play', 20);
+      if (kind === 'play' || kind === 'pause') this.playBtn.innerHTML = icon(engine.playing ? 'pause' : 'play', 26);
     });
   }
 
@@ -78,15 +69,19 @@ export class Player {
       this.canvas.height = ph;
     }
     this.cssScale = cssW / P.width;
-    this.root.querySelector('.ratio-label').textContent = P.aspect;
     this.root.classList.toggle('is-empty', !P.clips.length);
     this.engine.requestRender();
   }
 
-  updateTC() {
-    const fps = store.P.fps || 30;
-    this.tcCur.textContent = fmtTC(this.engine.time, fps);
-    this.tcDur.textContent = fmtTC(store.duration(), fps);
+  /** Undo/redo availability and whether the playhead sits on a keyframe of the selected clip. */
+  updateCtrls() {
+    this.undoBtn.disabled = !store.past.length;
+    this.redoBtn.disabled = !store.future.length;
+    const c = store.selected();
+    const ok = c && 'x' in c;
+    this.kfBtn.disabled = !ok;
+    const local = ok ? this.engine.time - c.start : -1;
+    this.kfBtn.classList.toggle('on', !!(ok && keyframeAt(c, local)));
   }
 
   selectedVisual() {
@@ -107,6 +102,7 @@ export class Player {
     this.box.style.height = `${Math.abs(b.h) * k}px`;
     this.box.style.transform = `translate(${b.cx * k}px, ${b.cy * k}px) translate(-50%, -50%) rotate(${b.rot}rad)`;
     this.box.classList.toggle('locked', !!store.track(c.trackId)?.locked);
+    this.box.classList.toggle('main', c.trackId === 'main');
   }
 
   /** Topmost visual clip under a point (project units). */
@@ -138,17 +134,16 @@ export class Player {
       const E = this.engine;
       switch (b.dataset.act) {
         case 'play': E.toggle(); break;
-        case 'prev': E.step(-1); break;
-        case 'next': E.step(1); break;
-        case 'start': E.pause(); E.seek(0); break;
-        case 'end': E.pause(); E.seek(store.duration()); break;
-        case 'loop': E.loop = !E.loop; b.classList.toggle('on', E.loop); break;
-        case 'fullscreen': this.stage.requestFullscreen?.().catch(() => {}); break;
-        case 'ratio': {
-          const r = b.getBoundingClientRect();
-          contextMenu(r.left, r.bottom + 6, Object.entries(ASPECTS).map(([k, a]) => ({
-            label: `${k}  ·  ${a.hint}`, icon: store.P.aspect === k ? 'check' : null, run: () => setAspect(k),
-          })));
+        case 'undo': store.undo(); break;
+        case 'redo': store.redo(); break;
+        case 'kf': if (actions.toggleKeyframe()) this.updateCtrls(); break;
+        case 'addMedia': this.app?.openSheet?.('media', { mode: 'append' }); break;
+        case 'fullscreen': {
+          const el = this.stage;
+          if (document.fullscreenElement) document.exitFullscreen?.();
+          else if (el.requestFullscreen) el.requestFullscreen().catch(() => this.root.classList.toggle('pseudo-full'));
+          else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+          else this.root.classList.toggle('pseudo-full'); // iPhone Safari: no element fullscreen
           break;
         }
         default: break;
@@ -159,9 +154,14 @@ export class Player {
       if (!e.target.closest('.stage-inner')) this.engine.toggle();
     });
 
-    // Select / move / scale / rotate on the canvas
+    // Select / move / scale / rotate on the canvas. One finger or the mouse moves (corner handles scale,
+    // the round handle rotates); a second finger turns the gesture into a pinch that scales and rotates.
+    this.touches = new Map();
     this.overlay.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
+      if (e.pointerType === 'touch') this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.touches.size === 2 && this.gesture) { this.startPinch(); return; }
+      if (this.gesture) return;
       const rect = this.inner.getBoundingClientRect();
       const k = this.cssScale || 1;
       const toP = (ev) => ({ x: (ev.clientX - rect.left) / k, y: (ev.clientY - rect.top) / k });
@@ -171,7 +171,7 @@ export class Player {
       if (!handle) {
         const hit = this.hitTest(p0.x, p0.y);
         if (hit && hit.id !== c?.id) { store.select(hit.id); c = hit; }
-        if (!hit) { store.select(null); return; }
+        if (!hit) { store.select(null); this.touches.delete(e.pointerId); return; }
       }
       if (!c || store.track(c.trackId)?.locked) return;
       this.engine.pause();
@@ -181,15 +181,36 @@ export class Player {
       const local = this.engine.time - c.start;
       const hasKf = !!c.keyframes?.length;
       const start = { x: kfValue(c, 'x', local), y: kfValue(c, 'y', local), scale: kfValue(c, 'scale', local), rotation: kfValue(c, 'rotation', local) };
-      const setProp = (k, v) => { if (hasKf) upsertKeyframe(c, local, { [k]: v }); else c[k] = v; };
+      const setProp = (key, v) => { if (hasKf) upsertKeyframe(c, local, { [key]: v }); else c[key] = v; };
       const d0 = Math.hypot(p0.x - b.cx, p0.y - b.cy) || 1;
       const a0 = Math.atan2(p0.y - b.cy, p0.x - b.cx);
       const mode = handle ? (handle.classList.contains('rot') ? 'rotate' : 'scale') : 'move';
-      let moved = false;
       e.preventDefault();
+      const g = { c, b, start, setProp, moved: false, pinch: null, pointerId: e.pointerId };
+      this.gesture = g;
+      const snapRot = (deg) => {
+        deg = ((deg + 540) % 360) - 180;
+        for (const sn of [-180, -90, 0, 90, 180]) if (Math.abs(deg - sn) < 4) deg = sn;
+        return Math.round(deg * 10) / 10;
+      };
       const move = (ev) => {
+        if (this.touches.has(ev.pointerId)) this.touches.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+        if (g.pinch) {
+          const [t1, t2] = [...this.touches.values()];
+          if (!t2) return;
+          const d = Math.hypot(t2.x - t1.x, t2.y - t1.y) || 1;
+          const ang = Math.atan2(t2.y - t1.y, t2.x - t1.x);
+          g.moved = true;
+          store.live(() => {
+            setProp('scale', clamp(g.pinch.scale * (d / g.pinch.d), 0.02, 20));
+            setProp('rotation', snapRot(g.pinch.rotation + ((ang - g.pinch.a) * 180) / Math.PI));
+          }, 'transform');
+          this.engine.requestRender();
+          return;
+        }
+        if (ev.pointerId !== g.pointerId) return;
         const p = toP(ev);
-        moved = true;
+        g.moved = true;
         store.live(() => {
           if (mode === 'move') {
             let nx = start.x + (p.x - p0.x) / P.width;
@@ -206,28 +227,47 @@ export class Player {
             const d = Math.hypot(p.x - b.cx, p.y - b.cy);
             setProp('scale', clamp(start.scale * (d / d0), 0.02, 20));
           } else {
-            let deg = start.rotation + ((Math.atan2(p.y - b.cy, p.x - b.cx) - a0) * 180) / Math.PI;
-            deg = ((deg + 540) % 360) - 180;
-            for (const snap of [-180, -90, 0, 90, 180]) if (Math.abs(deg - snap) < 4) deg = snap;
-            setProp('rotation', Math.round(deg * 10) / 10);
+            setProp('rotation', snapRot(start.rotation + ((Math.atan2(p.y - b.cy, p.x - b.cx) - a0) * 180) / Math.PI));
           }
         }, 'transform');
         this.engine.requestRender();
       };
-      const up = () => {
+      const up = (ev) => {
+        this.touches.delete(ev.pointerId);
+        if (g.pinch && this.touches.size) return; // one finger still down: keep pinching until both lift
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        this.touches.clear();
+        this.gesture = null;
         this.gv.style.display = 'none';
         this.gh.style.display = 'none';
-        if (moved) store.commitLive('Transformasi');
+        if (g.moved) store.commitLive('Transformasi');
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
     });
     this.overlay.addEventListener('dblclick', (e) => {
-      if (store.selected()?.type === 'text') this.app?.inspector?.focusPrimary();
+      if (store.selected()?.type === 'text') this.app?.openSheet?.('text', { tab: 'style', focus: true });
       e.stopPropagation();
     });
+  }
+
+  /** Second finger down during a gesture on the selected clip: from now on, scale and rotate with two fingers. */
+  startPinch() {
+    const g = this.gesture;
+    const [t1, t2] = [...this.touches.values()];
+    if (!g || !t2) return;
+    const local = this.engine.time - g.c.start;
+    g.pinch = {
+      d: Math.hypot(t2.x - t1.x, t2.y - t1.y) || 1,
+      a: Math.atan2(t2.y - t1.y, t2.x - t1.x),
+      scale: kfValue(g.c, 'scale', local),
+      rotation: kfValue(g.c, 'rotation', local),
+    };
+    this.gv.style.display = 'none';
+    this.gh.style.display = 'none';
   }
 }
 

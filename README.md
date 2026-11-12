@@ -2,22 +2,37 @@
 
 Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehingga AI agent (Claude Code, Claude Desktop, Cursor, dan lainnya) bisa mengedit video kamu secara langsung. Semua proses berjalan di browser kamu dan media tidak diunggah ke mana pun. Antarmukanya memakai font **Poppins** di semua bagian.
 
-![Najja Editor](docs/screenshots/editor-dark.png)
+![Najja Editor di iPad](docs/screenshots/editor-ipad.png)
 
 ## Fitur
 
-**Timeline multi-track**
-- Track utama yang magnetis (klip otomatis menempel tanpa celah), ditambah track overlay, teks, audio, dan efek.
-- Seret untuk memindah klip antar-track, tarik tepi klip untuk memangkas, dan snapping ke playhead serta tepi klip.
-- Zoom (Ctrl + scroll), filmstrip thumbnail, dan waveform audio.
-- Kunci, sembunyikan, dan bisukan per track.
-- Pisah, hapus, duplikat, salin/tempel, bekukan frame, cermin, putar 90°, dan ekstrak audio. Undo/redo hingga 150 langkah.
+**Tata letak ramah iPad** (juga jalan di laptop dan HP)
+- Atas: tutup proyek, logo NAJJA, nama proyek, cari fitur, AI · MCP, pilihan resolusi (`1080p ▾`), dan tombol **Ekspor** yang langsung merender.
+- Tengah: pratinjau besar, lalu baris kontrol: layar penuh · putar · keyframe · urungkan · ulangi.
+- Bawah: timeline dengan **playhead tetap di tengah**, lalu toolbar ikon besar yang berganti sesuai konteks:
+  - Menu utama: Edit · Audio · Teks · Efek · Overlay · Keterangan · Filter · Sesuaikan.
+  - Sub-menu per kategori, misalnya Audio → Ekstrak · Suara · Efek suara · Rekam.
+  - Alat klip saat klip dipilih, misalnya Bagi · Volume · Animasi · Efek · Hapus · Kecepatan · Pangkas · Duplikat · Ganti · Overlay · Sesuaikan · Filter · Hapus Latar Belakang · Transformasi · Beku.
+- Panel muncul sebagai **sheet dari bawah**; pratinjau tetap terlihat. Tombol ✓ menutupnya.
+- Alat yang direncanakan tampil abu-abu dengan label *Segera*: Video AI, Retouch, Lipsync, Tiru gerakan, Ubah ekspresi, Stabilkan, Pelacakan kamera, Pisah suara, Kurangi kebisingan, Efek audio, Sempurnakan suara, Putar mundur, Tutupi (mask), dan Efek tubuh.
+
+**Timeline**
+- Playhead diam di tengah dan videonya yang bergeser:
+  - Geser dengan jari (atau seret / scroll mouse) untuk scrub.
+  - **Cubit dua jari** (atau Ctrl + scroll) untuk zoom.
+- Track utama magnetis dengan filmstrip besar, plus tombol **Bisukan audio klip** dan **Sampul** di kirinya.
+- Tombol **transisi** di antara dua klip, dan tombol **+** di kanan untuk menambah media ke akhir video.
+- Lapisan lain ada di lane berwarna di bawah track utama: overlay (hijau), audio (biru kehijauan), teks (oranye), efek (ungu), filter/penyesuaian (magenta).
+  - Saat tidak sedang diedit, tiap kategori diringkas jadi satu lane.
+  - Saat kategorinya dibuka, semua lapisannya tampil, lengkap dengan tombol **+ Tambah**.
+- Ketuk klip untuk memilih. Tarik pegangan putih di kedua ujung untuk memangkas. **Tekan lama** lalu geser untuk memindah (dengan mouse: langsung seret).
+- Snapping ke playhead dan tepi klip. Undo/redo hingga 150 langkah.
 
 **Pemutar**
 - Pratinjau real-time di kanvas.
-- Pilih, geser, ubah ukuran, dan putar objek langsung di kanvas, dengan garis bantu tengah.
-- 8 rasio: 16:9, 9:16, 1:1, 4:5, 4:3, 3:4, 21:9, 2:1.
-- Latar kanvas berupa warna atau **blur**.
+- Geser objek terpilih langsung di layar. Pegangan sudut atau **cubit dua jari** untuk memperbesar dan memutar. Garis bantu muncul di tengah.
+- Rasio kanvas dipilih saat membuat proyek: 16:9, 9:16, 1:1, 4:5, 4:3, 3:4, 21:9, atau 2:1.
+- Latar kanvas berupa warna atau **blur** (menu ⋯ → Pengaturan proyek).
 
 **Video dan foto**
 - Skala, posisi, rotasi, opasitas, 10 mode campuran, dan potong (crop).
@@ -29,40 +44,49 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 - Volume hingga 200%, fade in/out.
 
 **Teks**
-- 18 gaya, 12 template judul beranimasi, dan 12 font Google.
-- Garis tepi, latar kotak, bayangan, dan gradien.
+- Panel teks dengan kolom ketik dan tab **Gaya** (18 gaya), **Font**, **Warna**, dan **Animasi**.
+- 19 font Google dalam 4 kelompok: Dasar, Tebal, Serif, dan Tulisan tangan. Font baru: Inter, Roboto, Instrument Serif, DM Serif Display, Righteous, Space Grotesk, dan Satisfy.
+- 12 template judul beranimasi.
+- Warna cepat, garis tepi, latar kotak, gradien, serta bayangan dengan geser X/Y (bisa jadi bayangan keras).
 
-**Teks Otomatis**
+**Keterangan (subtitle)**
 - Subtitle dibuat dari naskah (dibagi rata) atau dari file `.srt`.
+- Teks otomatis dari suara masih *segera*.
 
 **Animasi**
 - 14 animasi masuk, 13 animasi keluar, dan 9 animasi kombo (loop).
 
 **Stiker**
-- 80 emoji dan 9 label, misalnya SUBSCRIBE, SALE, dan LIVE.
+- 80 emoji dan 9 label (SUBSCRIBE, SALE, LIVE…) tetap bisa dipakai AI lewat MCP dan diedit di timeline. Menunya disembunyikan dari toolbar.
 
 **Efek, transisi, dan filter**
 - 20 efek layar penuh: glitch, VHS, getar, konfeti, salju, cinta, kilau, sinematik, dan lainnya.
 - 17 transisi.
 - 18 filter dengan pengaturan intensitas.
 - 10 penyesuaian warna: kecerahan, kontras, saturasi, eksposur, suhu, rona, hue, pudar, vinyet, dan blur.
+- **Lapisan filter dan penyesuaian**: Filter atau Sesuaikan dari menu utama mewarnai semua lapisan di bawahnya selama durasinya, dan ikut terekspor. Pada klip terpilih, filter hanya berlaku untuk klip itu.
+- Efek dari toolbar klip langsung dipasang sepanjang klip tersebut.
 
 **Audio**
 - 8 efek suara dan 3 musik yang dibuat langsung di browser, tanpa file aset.
+- Impor audio sendiri (MP3, WAV, M4A).
+- **Ekstrak**: ambil suara dari video di pustaka.
 - Rekam **voiceover** dari mikrofon.
 
 **Ekspor**
-- Resolusi 480p hingga 4K, 24–60 fps, format MP4 (jika browser mendukung) atau WebM, dengan 3 pilihan kualitas.
-- Bisa mengekspor seluruh video atau **hanya klip terpilih**.
+- Pilih resolusi (480p–4K), frame rate (24–60), dan kualitas di `1080p ▾`, lalu ketuk **Ekspor**: video langsung dirender dan terunduh.
+- Lewat menu ⋯ → Ekspor lanjutan: nama file, format MP4 atau WebM, dan opsi **hanya klip terpilih**.
 
 **Proyek**
 - Tersimpan otomatis **di server** (VPS kamu): proyek, media, dan hasil ekspor. Bisa dibuka dari perangkat mana pun.
 - Kalau halaman dibuka tanpa server, tersimpan di browser (IndexedDB).
-- Ada daftar proyek dengan thumbnail, dan bisa disimpan sebagai `.json`.
-- Bisa dipasang sebagai aplikasi (PWA).
+- Daftar proyek (tombol ✕ di kiri atas) menampilkan **sampul** pilihanmu sebagai thumbnail.
+- Bisa disimpan sebagai `.json`, dan bisa dipasang sebagai aplikasi (PWA). Di iPad: Safari → Bagikan → Tambahkan ke Layar Utama.
 
 **Tampilan**
-- Tema gelap dan terang, panel yang bisa diubah ukurannya, dan tata letak untuk layar kecil.
+- Tema gelap dengan aksen cyan dari logo NAJJA. Font antarmuka Poppins.
+- Tombol berukuran jari, tanpa aksi yang hanya muncul saat hover.
+- Tata letak menyesuaikan iPad (landscape dan potret), laptop, dan HP.
 
 **AI · MCP**
 - 24 tool, log aktivitas AI langsung di editor, dan klip yang diubah AI berkedip di timeline.
@@ -155,8 +179,11 @@ Caddy otomatis memasang HTTPS, dan editor dilindungi login token. Panduan lengka
 | Ctrl+D / Ctrl+C / Ctrl+V | Duplikat / salin / tempel |
 | Ctrl+Z / Ctrl+Shift+Z | Urungkan / ulangi |
 | ← → (Shift: 1 detik) | Geser 1 frame |
+| Scroll / seret area kosong | Geser timeline (scrub) |
 | Ctrl + scroll, Ctrl+= / Ctrl+-, Ctrl+0 | Zoom timeline / sesuaikan |
-| Ctrl+E / Ctrl+I / Ctrl+O | Ekspor / impor / buka proyek |
+| Ctrl+K | Cari fitur |
+| Ctrl+E / Ctrl+I / Ctrl+O | Ekspor lanjutan / tambah media / proyek saya |
+| Esc | Tutup panel / kembali ke menu sebelumnya |
 | ? | Daftar pintasan |
 
 ## Struktur
@@ -167,13 +194,15 @@ mcp-stdio.js       Entry MCP stdio (Claude Desktop, Cursor)
 mcp/               Protokol MCP dan definisi tool
 public/
   index.html, css/app.css
-  js/app.js        Kerangka aplikasi, pintasan, ekspor, proyek
+  js/app.js        Kerangka aplikasi (topbar, pintasan, cari fitur, ekspor, proyek)
   js/engine.js     Jam pemutaran, sinkronisasi media, mixer Web Audio
-  js/render.js     Compositor kanvas: animasi, filter, transisi, efek, teks, chroma key
-  js/timeline.js   Timeline multi-track
-  js/player.js     Pemutar + pegangan transformasi di kanvas
-  js/inspector.js  Panel properti
-  js/library.js    Panel aset (media, audio, teks, subtitle, stiker, efek, transisi, filter, AI)
+  js/render.js     Compositor kanvas: animasi, filter, lapisan penyesuaian, transisi, efek, teks, chroma key
+  js/timeline.js   Timeline playhead-tengah: scrub, cubit-zoom, lane per kategori, tekan-lama-pindah
+  js/toolbar.js    Toolbar bawah: menu utama, sub-menu kategori, alat per jenis klip
+  js/sheet.js      Sheet bawah + pemilih media (tambah/overlay/ganti/ekstrak) + sampul
+  js/player.js     Pratinjau, baris kontrol, geser/cubit objek di kanvas
+  js/inspector.js  Properti klip per bagian (Volume, Animasi, Teks, Pangkas, Transformasi, …)
+  js/library.js    Panel aset (musik, efek suara, rekam, template teks, keterangan, efek, transisi, filter, AI)
   js/api.js        Implementasi tool MCP di dalam editor
   js/store.js      Model proyek, undo/redo, autosave
   js/media.js      Impor, thumbnail, waveform, audio sintetis, salinan H.264 dari server
@@ -191,7 +220,10 @@ test/              npm test
 - **Ekspor MP4 cepat** dengan WebCodecs (Chrome/Edge): frame di-decode, dirender, dan di-encode H.264 secepat kemampuan perangkat (GPU), lalu file langsung terunduh; salinan ke server diupload di background. Browser tanpa WebCodecs, atau format WebM, memakai perekaman real-time (durasi ekspor ≈ durasi video). Biarkan tab editor tetap terbuka.
 - MP4 dipakai jika browser bisa merekamnya (Chrome/Edge terbaru, Safari). Jika tidak, hasilnya WebM.
 - Proyek dan media disimpan di server (folder `data/`, atau `NAJJA_DATA_DIR`), bukan di browser, jadi bisa dibuka dari perangkat mana pun.
-- Belum tersedia: reverse video, stabilisasi, hapus latar dengan AI, dan text-to-speech.
+- Belum tersedia (tampil abu-abu *Segera* di toolbar):
+  - Butuh pemrosesan di server: putar mundur, stabilkan, pisah suara, kurangi kebisingan.
+  - Butuh model AI: hapus latar otomatis, retouch, lipsync, teks otomatis dari suara.
+  - Mask (Tutupi), efek audio, efek tubuh, dan pelacakan kamera.
 - Najja Editor meniru **tata letak dan alur kerja** editor video populer, tetapi seluruh kode, ikon, dan desainnya dibuat sendiri. Tidak ada kode, aset, atau merek CapCut yang dipakai. Lihat `docs/capcut-analysis.md`.
 
 ## Tes
@@ -205,3 +237,10 @@ Tes end-to-end di browser (butuh Playwright + Chromium dan ffmpeg; dilewati otom
 ```bash
 npm run test:e2e
 ```
+
+Tes yang sama juga menjalankan `test/e2e/ipad-ui.mjs`. Tes ini membuka editor di ukuran iPad dengan input sentuh, lalu mengecek:
+- playhead di tengah, geser = scrub, dan cubit dua jari = zoom;
+- toolbar 3 tingkat, sheet Volume dan Teks, serta tekan-lama-geser;
+- tombol transisi, Ganti, Ekstrak, dan Sampul;
+- lapisan filter yang benar-benar mewarnai frame;
+- tata letak iPad potret.

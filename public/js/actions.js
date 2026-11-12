@@ -1,13 +1,14 @@
 // Editing actions shared by the UI (toolbar, shortcuts, menus, panels) and the MCP API.
 import {
-  store, makeClip, placeClip, splitClip, sortedClips, insertIntoMain, findFreeStart, MIN_CLIP, TRACK_KIND_FOR, clipEnd,
+  store, makeClip, placeClip, splitClip, sortedClips, insertIntoMain, findFreeStart, MIN_CLIP, TRACK_KIND_FOR, clipEnd, packMain,
+  upsertKeyframe, removeKeyframe,
 } from './store.js';
 import { mediaRT, importCanvasAsImage } from './media.js';
-import { TEXT_PRESETS, TEXT_TEMPLATES, DEFAULT_TEXT, FILTERS, TRANSITIONS, EFFECTS, BADGES } from './presets.js';
+import { TEXT_PRESETS, TEXT_TEMPLATES, DEFAULT_TEXT, FILTERS, TRANSITIONS, EFFECTS, BADGES, ADJUSTMENTS } from './presets.js';
 import { clone, deepMerge, uid } from './util.js';
 import { toast } from './ui.js';
 
-export const app = { engine: null, timeline: null, library: null, inspector: null, player: null };
+export const app = { engine: null, timeline: null, library: null, inspector: null, player: null, toolbar: null, openSheet: null };
 
 const now = () => app.engine?.time ?? 0;
 
@@ -93,7 +94,7 @@ export function mainClipAt(t) {
 /** The selected visual clip, or the main-track clip under the playhead. */
 export function targetVisual() {
   const sel = store.selected();
-  if (sel && !['audio', 'effect'].includes(sel.type)) return sel;
+  if (sel && (!['audio', 'effect'].includes(sel.type) || sel.effect?.type === 'adjust')) return sel;
   return mainClipAt(now());
 }
 
@@ -355,4 +356,92 @@ export function addSubtitles(items, { preset = 'subtitle', y = 0.36, size, font,
     }
     return ids;
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// iPad toolbar actions
+/** Add or remove a keyframe at the playhead on a clip. */
+export function toggleKeyframe(clipId = store.selection) {
+  const c = store.clip(clipId);
+  if (!c || !('x' in c)) return toast('Pilih klip video, foto, atau teks dulu', { type: 'warn' });
+  const local = now() - c.start;
+  if (local < 0 || local > c.duration) return toast('Letakkan playhead di dalam klip untuk menambah keyframe', { type: 'warn' });
+  store.mutate('Keyframe', () => { if (!removeKeyframe(c, local)) upsertKeyframe(c, local); });
+  return true;
+}
+
+/** Swap the media of a clip, keeping its place, length (when the new media is long enough) and settings. */
+export function replaceMedia(clipId, mediaId) {
+  const c = store.clip(clipId);
+  const m = store.media(mediaId);
+  if (!c || !m) throw new Error('Klip atau media tidak ditemukan');
+  if (!['video', 'image'].includes(c.type) || !['video', 'image'].includes(m.type)) throw new Error('Ganti hanya untuk klip video atau foto');
+  return store.mutate('Ganti klip', (P) => {
+    c.type = m.type;
+    c.mediaId = m.id;
+    c.name = m.name;
+    c.in = 0;
+    if (m.type === 'video') {
+      c.duration = Math.min(c.duration, Math.max(MIN_CLIP, (m.duration || c.duration) / (c.speed || 1)));
+      if (!('volume' in c)) Object.assign(c, { volume: 1, fadeIn: 0, fadeOut: 0, muted: false });
+      if (!c.chroma) c.chroma = { enabled: false, color: '#00ff00', similarity: 0.4, smoothness: 0.08 };
+    } else c.speed = 1;
+    if (c.trackId === 'main') packMain(P);
+    return c;
+  });
+}
+
+/** Main track → its own overlay lane at the same time (the main track closes the gap), and back. */
+export function moveToOverlay(clipId) {
+  const c = store.clip(clipId);
+  if (!c || c.trackId !== 'main') return null;
+  return store.mutate('Pindah ke overlay', (P) => {
+    const s = c.start;
+    placeClip(P, c, 'overlay', s);
+    packMain(P);
+    return c;
+  });
+}
+export function moveToMain(clipId) {
+  const c = store.clip(clipId);
+  if (!c || !['video', 'image', 'solid'].includes(c.type) || c.trackId === 'main') return null;
+  return store.mutate('Pindah ke utama', (P) => {
+    Object.assign(c, { x: 0, y: 0, scale: 1 });
+    insertIntoMain(P, c, c.start);
+    return c;
+  });
+}
+
+/** A filter / adjustment layer: colours everything under it for its duration (purple lane). */
+export function addAdjustLayer({ kind = 'adjust', start, duration } = {}) {
+  const t = start ?? now();
+  const main = mainClipAt(t);
+  const dur = duration ?? Math.max(1, main ? clipEnd(main) - t : 3);
+  const n = store.P.clips.filter((c) => c.effect?.type === 'adjust' && (c.name || '').startsWith(kind === 'filter' ? 'Filter' : 'Sesuaikan')).length + 1;
+  const clip = makeClip('effect', {
+    effect: { type: 'adjust', intensity: 1 },
+    filter: { name: 'none', intensity: 1 },
+    adjust: Object.fromEntries(ADJUSTMENTS.map((a) => [a.id, 0])),
+    duration: Math.max(MIN_CLIP, dur),
+    name: `${kind === 'filter' ? 'Filter' : 'Sesuaikan'} ${n}`,
+  });
+  const created = store.mutate(kind === 'filter' ? 'Tambah filter' : 'Tambah penyesuaian', (P) => placeClip(P, clip, 'effect', t));
+  store.select(created.id);
+  return created;
+}
+
+/** Use the frame at the playhead as the project cover (shown in the project list). */
+export function setCover(thumb) {
+  store.mutate('Sampul', (P) => { P.cover = thumb ? { t: now(), thumb } : null; });
+}
+
+/** Audio of a video in the library, placed on an audio lane at the playhead. */
+export function addAudioFromMedia(mediaId, start = now()) {
+  const m = store.media(mediaId);
+  if (!m || m.type !== 'video') throw new Error('Pilih video untuk diambil audionya');
+  if (m.hasAudio === false) throw new Error('Video ini tidak punya audio');
+  const a = makeClip('audio', { mediaId: m.id, in: 0, duration: Math.max(MIN_CLIP, m.duration || 3), name: `Audio · ${m.name}` });
+  const created = store.mutate('Ekstrak audio', (P) => placeClip(P, a, 'audio', start));
+  store.select(created.id);
+  return created;
 }

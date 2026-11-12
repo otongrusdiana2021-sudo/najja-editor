@@ -15,18 +15,25 @@ export const RESOLUTIONS = { '480p': 480, '720p': 720, '1080p': 1080, '2k': 1440
 export const FPS_OPTIONS = [24, 25, 30, 50, 60];
 
 export const FONTS = [
-  { name: 'Poppins', weights: [300, 400, 500, 600, 700, 800, 900], italic: true },
-  { name: 'Montserrat', weights: [400, 700, 900], italic: true },
-  { name: 'Bebas Neue', weights: [400] },
-  { name: 'Anton', weights: [400] },
-  { name: 'Oswald', weights: [400, 700] },
-  { name: 'Archivo Black', weights: [400] },
-  { name: 'Playfair Display', weights: [400, 700], italic: true },
-  { name: 'Pacifico', weights: [400] },
-  { name: 'Lobster', weights: [400] },
-  { name: 'Caveat', weights: [400, 700] },
-  { name: 'Dancing Script', weights: [700] },
-  { name: 'Permanent Marker', weights: [400] },
+  { name: 'Poppins', weights: [300, 400, 500, 600, 700, 800, 900], italic: true, cat: 'Dasar' },
+  { name: 'Inter', weights: [400, 500, 600, 700, 800, 900], cat: 'Dasar' },
+  { name: 'Roboto', weights: [400, 500, 700, 900], italic: true, cat: 'Dasar' },
+  { name: 'Montserrat', weights: [400, 700, 900], italic: true, cat: 'Dasar' },
+  { name: 'Bebas Neue', weights: [400], cat: 'Tebal' },
+  { name: 'Anton', weights: [400], cat: 'Tebal' },
+  { name: 'Oswald', weights: [400, 700], cat: 'Tebal' },
+  { name: 'Archivo Black', weights: [400], cat: 'Tebal' },
+  { name: 'Righteous', weights: [400], cat: 'Tebal' },
+  { name: 'Space Grotesk', weights: [400, 700], cat: 'Tebal' },
+  { name: 'Playfair Display', weights: [400, 700], italic: true, cat: 'Serif' },
+  { name: 'Instrument Serif', weights: [400], italic: true, cat: 'Serif' },
+  { name: 'DM Serif Display', weights: [400], italic: true, cat: 'Serif' },
+  { name: 'Pacifico', weights: [400], cat: 'Tulisan tangan' },
+  { name: 'Lobster', weights: [400], cat: 'Tulisan tangan' },
+  { name: 'Caveat', weights: [400, 700], cat: 'Tulisan tangan' },
+  { name: 'Dancing Script', weights: [700], cat: 'Tulisan tangan' },
+  { name: 'Permanent Marker', weights: [400], cat: 'Tulisan tangan' },
+  { name: 'Satisfy', weights: [400], cat: 'Tulisan tangan' },
 ];
 
 export const FILTERS = [

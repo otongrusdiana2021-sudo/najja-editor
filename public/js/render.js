@@ -710,6 +710,38 @@ function particles(ctx, kind, t, k) {
   ctx.restore();
 }
 
+/** Filter / adjustment layer: recolours everything drawn so far (the whole frame). */
+export function applyAdjustLayer(ctx, clip, pxPerUnit = 1) {
+  const k = clamp(clip.effect?.intensity ?? 1, 0, 1);
+  if (k <= 0) return;
+  const filter = cssFilterFor(clip, 0, pxPerUnit);
+  const overlays = overlaysFor(clip);
+  if (filter === 'none' && !overlays.length) return;
+  const W = ctx.canvas.width;
+  const H = ctx.canvas.height;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (filter !== 'none') {
+    const src = copyFrame(ctx);
+    ctx.globalAlpha = k;
+    ctx.filter = filter;
+    ctx.drawImage(src, 0, 0);
+    ctx.filter = 'none';
+  }
+  for (const ov of overlays) {
+    ctx.globalAlpha = clamp(ov.alpha * k, 0, 1);
+    if (ov.vignette) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(vignetteMask(W, H), 0, 0, W, H);
+    } else {
+      ctx.globalCompositeOperation = ov.mode || 'soft-light';
+      ctx.fillStyle = ov.color;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+  ctx.restore();
+}
+
 export function applyEffect(ctx, fx, t, local, dur) {
   const W = ctx.canvas.width;
   const H = ctx.canvas.height;
@@ -908,7 +940,9 @@ export function renderFrame(ctx, t, env) {
   const fxTracks = P.tracks.filter((tr) => tr.kind === 'effect' && !tr.hidden).reverse();
   for (const tr of fxTracks) {
     for (const c of sortedClips(P, tr.id)) {
-      if (t >= c.start && t < c.start + c.duration) applyEffect(ctx, c.effect, t, t - c.start, c.duration);
+      if (t < c.start || t >= c.start + c.duration) continue;
+      if (c.effect?.type === 'adjust') applyAdjustLayer(ctx, c, env.s);
+      else applyEffect(ctx, c.effect, t, t - c.start, c.duration);
     }
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);

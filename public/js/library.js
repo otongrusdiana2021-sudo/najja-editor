@@ -1,4 +1,5 @@
-// Left side: category rail + asset panels (media, audio, text, captions, stickers, effects, transitions, filters, AI/MCP).
+// Asset panels for the bottom sheet: music, sound effects, voiceover, text templates, captions, effects, transitions,
+// filters and the AI/MCP panel. Media cards are shared with the media picker (sheet.js).
 import { store, sortedClips, clipEnd } from './store.js';
 import {
   importFile, mediaRT, onMediaChange, removeMedia, ensureStockAudio, synthAudio, importFromServerUrl,
@@ -14,74 +15,73 @@ import * as actions from './actions.js';
 import { toast, modal, confirmDialog } from './ui.js';
 import { bridge } from './bridge.js';
 
-const TABS = [
-  ['media', 'Media', 'media'],
-  ['audio', 'Audio', 'audio'],
-  ['text', 'Teks', 'text'],
-  ['caption', 'Teks Otomatis', 'subtitle'],
-  ['sticker', 'Stiker', 'sticker'],
-  ['effect', 'Efek', 'effects'],
-  ['transition', 'Transisi', 'transition'],
-  ['filter', 'Filter', 'filter'],
-  ['ai', 'AI · MCP', 'ai'],
-];
+const TITLES = {
+  music: 'Suara', sfx: 'Efek suara', record: 'Rekam suara', templates: 'Template teks', caption: 'Keterangan',
+  effect: 'Efek video', transition: 'Transisi', filter: 'Filter', ai: 'AI · MCP',
+};
 
+/** Asset panels (music, sound effects, text templates, captions, effects, transitions, filters, AI), shown in a bottom sheet. */
 export class Library {
-  constructor(rail, panel, engine) {
-    this.rail = rail;
-    this.panel = panel;
+  constructor(engine) {
+    this.panel = null;
     this.engine = engine;
-    this.tab = 'media';
-    this.mediaFilter = 'all';
+    this.tab = null;
+    this.opts = {};
     this.fxCat = 'Semua';
     this.trDuration = 0.6;
     this.preview = null;
-    this.filterThumbs = null;
-    rail.innerHTML = TABS.map(([id, name, ic]) => `<button class="rail-btn" data-tab="${id}" title="${name}">${icon(ic, 20)}<span>${name}</span>${id === 'ai' ? '<i class="rail-dot"></i>' : ''}</button>`).join('');
-    rail.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-tab]');
-      if (b) this.open(b.dataset.tab);
-    });
     this.fileInput = document.createElement('input');
     this.fileInput.type = 'file';
     this.fileInput.multiple = true;
     this.fileInput.accept = 'video/*,image/*,audio/*,.mkv,.mov';
     this.fileInput.onchange = () => { this.importFiles([...this.fileInput.files]); this.fileInput.value = ''; };
-    panel.addEventListener('click', (e) => this.onClick(e));
-    panel.addEventListener('dragstart', (e) => this.onDragStart(e));
-    panel.addEventListener('dragend', () => setDragPayload(null));
-    onMediaChange(() => { if (this.tab === 'media' || this.tab === 'audio') this.render(); });
+    this.onClickH = (e) => this.onClick(e);
+    this.onDragStartH = (e) => this.onDragStart(e);
+    this.onDragEndH = () => setDragPayload(null);
+    onMediaChange(() => { if (this.tab === 'music') this.render(); });
     store.on('selection', () => { if (['filter', 'transition'].includes(this.tab)) this.render(); });
-    store.on('project', (label) => { if (label === 'load' || (['filter', 'transition'].includes(this.tab) && !store._live)) this.render(); });
-    bridge.on(() => { this.updateRailDot(); if (this.tab === 'ai') this.render(); });
-    this.open('media');
+    store.on('project', () => { if (['filter', 'transition'].includes(this.tab) && !store._live) this.render(); });
+    bridge.on(() => { if (this.tab === 'ai') this.render(); });
   }
 
-  open(tab) {
+  static title(tab) { return TITLES[tab] || ''; }
+
+  /** Show one panel inside `el`. Returns a function that removes it. */
+  mount(el, tab, opts = {}) {
+    this.unmount();
+    this.panel = el;
     this.tab = tab;
-    for (const b of this.rail.querySelectorAll('.rail-btn')) b.classList.toggle('on', b.dataset.tab === tab);
+    this.opts = opts;
+    el.addEventListener('click', this.onClickH);
+    el.addEventListener('dragstart', this.onDragStartH);
+    el.addEventListener('dragend', this.onDragEndH);
     this.render();
-    this.panel.scrollTop = 0;
+    return () => this.unmount(el);
   }
-  updateRailDot() {
-    const dot = this.rail.querySelector('.rail-dot');
-    if (dot) dot.className = `rail-dot ${bridge.state.connected ? 'on' : ''} ${bridge.state.activeAt && Date.now() - bridge.state.activeAt < 4000 ? 'busy' : ''}`;
+  unmount(el = this.panel) {
+    if (!el) return;
+    el.removeEventListener('click', this.onClickH);
+    el.removeEventListener('dragstart', this.onDragStartH);
+    el.removeEventListener('dragend', this.onDragEndH);
+    if (this.panel === el) {
+      this.panel = null;
+      this.tab = null;
+      this.opts = {};
+      if (this.preview) { this.preview.audio.pause(); this.preview = null; }
+    }
   }
+  /** Legacy entry point (menus, MCP pill): open a panel in the bottom sheet. */
+  open(tab) { actions.app.openSheet?.(tab); }
 
   render() {
+    if (!this.panel) return;
     const fn = {
-      media: this.mediaPanel, audio: this.audioPanel, text: this.textPanel, caption: this.captionPanel, sticker: this.stickerPanel,
+      music: this.musicPanel, sfx: this.sfxPanel, record: this.recordPanel, templates: this.templatePanel, caption: this.captionPanel,
       effect: this.effectPanel, transition: this.transitionPanel, filter: this.filterPanel, ai: this.aiPanel,
     }[this.tab];
-    const title = TABS.find((t) => t[0] === this.tab)[1];
-    this.panel.innerHTML = `<div class="lib-head"><h2>${title}</h2>${this.headActions()}</div><div class="lib-body">${fn.call(this)}</div>`;
-    if (this.tab === 'filter') this.paintFilterThumbs();
-    this.updateRailDot();
-  }
-
-  headActions() {
-    if (this.tab === 'media') return `<div class="lib-head-actions"><button class="btn sm ghost" data-do="url" title="Impor dari URL">${icon('link', 15)}</button><button class="btn sm btn-primary" data-do="import">${icon('plus', 15)} Impor</button></div>`;
-    return '';
+    if (!fn) return;
+    this.panel.innerHTML = `<div class="lib-body tab-${this.tab}">${fn.call(this)}</div>`;
+    if (this.tab === 'filter' || this.tab === 'transition') this.paintFilterThumbs();
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -108,46 +108,42 @@ export class Library {
     </div>`;
   }
 
-  mediaPanel() {
-    const P = store.P;
-    const list = P.media.filter((m) => !m.stock && (this.mediaFilter === 'all' || m.type === this.mediaFilter)).slice().reverse();
-    const chips = [['all', 'Semua'], ['video', 'Video'], ['image', 'Foto'], ['audio', 'Audio']]
-      .map(([id, n]) => `<button class="chip ${this.mediaFilter === id ? 'on' : ''}" data-mfilter="${id}">${n}</button>`).join('');
-    const empty = `<button class="dropzone" data-do="import">${icon('upload', 28)}<b>Impor media</b><span>Klik atau tarik file video, foto, dan audio ke sini</span></button>`;
-    return `
-      <div class="chip-row">${chips}</div>
-      ${list.length ? `<div class="media-grid">${list.map((m) => this.mediaCard(m)).join('')}</div>` : empty}
-      <div class="lib-section"><h4>Warna solid</h4><div class="swatch-grid">${SOLIDS.map((c) => `<button class="swatch" draggable="true" data-solid="${c}" style="background:${c}" title="Tambah latar ${c}"></button>`).join('')}</div></div>
-      <div class="lib-section"><h4>Gradien</h4><div class="swatch-grid">${GRADIENTS.map(([a, b, ang], i) => `<button class="swatch" draggable="true" data-grad="${i}" style="background:linear-gradient(${ang}deg,${a},${b})" title="Tambah gradien"></button>`).join('')}</div></div>`;
-  }
-
-  audioPanel() {
-    const mine = store.P.media.filter((m) => m.type === 'audio' && !m.stock);
-    const row = (s) => `<div class="audio-row" draggable="true" data-sfx="${s.id}">
-        <button class="ar-play" data-play="${s.id}" title="Dengarkan">${icon(this.preview?.id === s.id ? 'pause' : 'play', 14)}</button>
+  audioRow(s) {
+    return `<div class="audio-row" draggable="true" data-sfx="${s.id}">
+        <button class="ar-play" data-play="${s.id}" title="Dengarkan" aria-label="Dengarkan">${icon(this.preview?.id === s.id ? 'pause' : 'play', 14)}</button>
         <div class="ar-info"><b>${s.name}</b><span>${fmtDur(s.dur)} · ${s.kind === 'music' ? 'Musik' : 'Efek suara'}</span></div>
-        <button class="ar-add" data-addsfx="${s.id}" title="Tambah di playhead">${icon('plus', 15)}</button></div>`;
-    return `
-      <div class="rec-card">
-        <button class="btn ${this.recorder ? 'btn-danger' : 'btn-primary'} wide" data-do="record">${icon(this.recorder ? 'pause' : 'audio', 16)} ${this.recorder ? 'Berhenti merekam' : 'Rekam voiceover'}</button>
-        <span class="hint">${this.recorder ? '<i class="rec-dot"></i> Merekam… timeline ikut diputar' : 'Rekam suara dari mikrofon langsung di posisi playhead.'}</span>
-      </div>
-      <div class="lib-section"><h4>Efek suara</h4>${SFX.filter((s) => s.kind === 'sfx').map(row).join('')}</div>
-      <div class="lib-section"><h4>Musik</h4>${SFX.filter((s) => s.kind === 'music').map(row).join('')}</div>
-      <div class="lib-section"><h4>Audio saya</h4>${mine.length ? `<div class="media-grid">${mine.map((m) => this.mediaCard(m)).join('')}</div>` : '<p class="hint">Audio yang kamu impor akan muncul di sini.</p>'}
-        <button class="btn sm ghost" data-do="extract">${icon('detach', 14)} Ekstrak audio dari klip terpilih</button></div>`;
+        <button class="ar-add" data-addsfx="${s.id}" title="Tambah di playhead" aria-label="Tambah">${icon('plus', 16)}</button></div>`;
   }
 
-  textPanel() {
+  musicPanel() {
+    const mine = store.P.media.filter((m) => m.type === 'audio' && !m.stock);
     return `
-      <button class="add-text-card" draggable="true" data-text="default">${icon('plus', 18)}<span>Tambah teks default</span></button>
-      <div class="lib-section"><h4>Gaya teks</h4><div class="tstyle-grid">${TEXT_PRESETS.map((p) => `<button class="tstyle" draggable="true" data-text="${p.id}" title="${p.name}"><span class="tp-prev tp-${p.id}">Teks</span><em>${p.name}</em></button>`).join('')}</div></div>
-      <div class="lib-section"><h4>Template judul</h4><div class="ttpl-grid">${TEXT_TEMPLATES.map((t) => `<button class="ttpl" draggable="true" data-template="${t.id}"><span class="tp-prev tp-${t.preset}">${escapeHtml(t.text.split('\n')[0])}</span><em>${t.name}</em></button>`).join('')}</div></div>`;
+      <div class="lib-section"><h4>Musik bawaan</h4>${SFX.filter((s) => s.kind === 'music').map((s) => this.audioRow(s)).join('')}</div>
+      <div class="lib-section"><h4>Audio saya <button class="btn sm ghost" data-do="importAudio">${icon('upload', 14)} Impor audio</button></h4>
+        ${mine.length ? `<div class="media-grid">${mine.map((m) => this.mediaCard(m)).join('')}</div>` : '<p class="hint">Audio yang kamu impor (MP3, WAV, M4A) muncul di sini. Ketuk untuk menambah di playhead.</p>'}</div>`;
+  }
+
+  sfxPanel() {
+    return `<div class="lib-section">${SFX.filter((s) => s.kind === 'sfx').map((s) => this.audioRow(s)).join('')}</div>
+      <p class="hint">Ketuk ▶ untuk mendengar, + untuk menaruh di playhead.</p>`;
+  }
+
+  recordPanel() {
+    return `<div class="rec-card">
+        <button class="btn ${this.recorder ? 'btn-danger' : 'btn-primary'} wide big" data-do="record">${icon(this.recorder ? 'pause' : 'mic', 18)} ${this.recorder ? 'Berhenti merekam' : 'Mulai merekam'}</button>
+        <span class="hint">${this.recorder ? '<i class="rec-dot"></i> Merekam… timeline ikut diputar' : 'Rekam suara dari mikrofon mulai dari posisi playhead. Hasilnya masuk ke lane audio.'}</span>
+      </div>`;
+  }
+
+  templatePanel() {
+    return `
+      <div class="lib-section"><h4>Template judul</h4><div class="ttpl-grid">${TEXT_TEMPLATES.map((t) => `<button class="ttpl" draggable="true" data-template="${t.id}"><span class="tp-prev tp-${t.preset}">${escapeHtml(t.text.split('\n')[0])}</span><em>${t.name}</em></button>`).join('')}</div></div>
+      <div class="lib-section"><h4>Gaya teks</h4><div class="tstyle-grid">${TEXT_PRESETS.map((p) => `<button class="tstyle" draggable="true" data-text="${p.id}" title="${p.name}"><span class="tp-prev tp-${p.id}">Teks</span><em>${p.name}</em></button>`).join('')}</div></div>`;
   }
 
   captionPanel() {
     return `
-      <p class="hint">Buat subtitle dari file SRT atau dari naskah. AI agent juga bisa menulis subtitle otomatis lewat MCP (<code>add_subtitles</code>).</p>
+      <div class="soon-card">${icon('mic', 22)}<div><b>Teks otomatis dari suara</b><span>Subtitle langsung dari ucapan di video (transkripsi). Segera hadir — sementara pakai naskah, SRT, atau minta AI lewat MCP (<code>add_subtitles</code>).</span></div></div>
       <div class="seg wide"><button class="${(this.capMode || 'script') === 'script' ? 'on' : ''}" data-capmode="script">Naskah</button><button class="${this.capMode === 'srt' ? 'on' : ''}" data-capmode="srt">SRT</button></div>
       <textarea class="cap-input" rows="8" placeholder="${this.capMode === 'srt' ? '1\n00:00:00,000 --> 00:00:02,500\nHalo semuanya!' : 'Tempel naskah di sini. Kalimat akan dibagi rata sepanjang video.'}">${escapeHtml(this.capText || '')}</textarea>
       <div class="ctl ctl-inline"><label>Gaya</label><select class="cap-preset">${TEXT_PRESETS.map((p) => `<option value="${p.id}" ${p.id === (this.capPreset || 'subtitle') ? 'selected' : ''}>${p.name}</option>`).join('')}</select></div>
@@ -156,19 +152,13 @@ export class Library {
       ${store.P.tracks.some((t) => t.subtitle) ? `<button class="btn sm ghost danger" data-do="clearCaptions">${icon('trash', 14)} Hapus semua subtitle</button>` : ''}`;
   }
 
-  stickerPanel() {
-    return `
-      <div class="lib-section"><h4>Label</h4><div class="badge-grid">${BADGES.map((b) => `<button class="badge-item" draggable="true" data-badge="${b.id}" style="--bg:${b.bg};--fg:${b.fg}">${b.icon} ${b.text}</button>`).join('')}</div></div>
-      <div class="lib-section"><h4>Emoji</h4><div class="emoji-grid">${STICKERS.map((s) => `<button class="emoji" draggable="true" data-emoji="${s}">${s}</button>`).join('')}</div></div>`;
-  }
-
   effectPanel() {
     const cats = ['Semua', ...new Set(EFFECTS.map((e) => e.cat))];
     const list = EFFECTS.filter((e) => this.fxCat === 'Semua' || e.cat === this.fxCat);
     return `
       <div class="chip-row">${cats.map((c) => `<button class="chip ${this.fxCat === c ? 'on' : ''}" data-fxcat="${c}">${c}</button>`).join('')}</div>
       <div class="tile-grid">${list.map((f) => `<button class="tile fx-tile" draggable="true" data-effect="${f.id}" style="--a:${f.colors[0]};--b:${f.colors[1]}"><span class="tile-art fx-${f.id}"><b>${f.icon}</b></span><em>${f.name}</em></button>`).join('')}</div>
-      <p class="hint">Klik untuk menambah di playhead (3 detik), atau tarik ke timeline.</p>`;
+      <p class="hint">${this.opts.range ? 'Efek dipasang sepanjang klip terpilih.' : 'Ketuk untuk menambah di playhead (3 detik).'}</p>`;
   }
 
   transitionPanel() {
@@ -177,8 +167,8 @@ export class Library {
     const valid = sel && sel.trackId === 'main' && list.indexOf(sel) > 0;
     const cur = valid ? sel.transition?.type : null;
     return `
-      <p class="hint">${valid ? `Transisi masuk ke klip <b>${escapeHtml(sel.name || '')}</b>.` : 'Pilih klip kedua (atau setelahnya) di track utama, atau klik ikon + di antara klip.'}</p>
-      <div class="tile-grid">${TRANSITIONS.map((t) => `<button class="tile tr-tile ${cur === t.id ? 'on' : ''}" data-transition="${t.id}"><span class="tile-art tr-art tr-${t.id}"><i class="a"></i><i class="b"></i></span><em>${t.name}</em></button>`).join('')}</div>
+      <p class="hint">${valid ? `Transisi masuk ke klip <b>${escapeHtml(sel.name || '')}</b>.` : 'Ketuk tombol di antara dua klip di track utama untuk memilih sambungannya.'}</p>
+      <div class="tile-grid">${TRANSITIONS.map((t) => `<button class="tile tr-tile ${cur === t.id ? 'on' : ''}" data-transition="${t.id}"><span class="tile-art tr-art tr-${t.id}"><i class="a"></i><i class="b"></i><b class="tr-ic">${t.icon}</b></span><em>${t.name}</em></button>`).join('')}</div>
       <div class="ctl"><label>Durasi transisi: <b class="tr-dur-v">${this.trDuration.toFixed(1)}s</b></label><input type="range" class="tr-dur" min="0.2" max="2" step="0.1" value="${this.trDuration}"></div>
       <button class="btn sm ghost" data-do="trAll">${icon('layers', 14)} Terapkan ke semua klip</button>`;
   }
@@ -384,13 +374,23 @@ export class Library {
     const t = e.target.closest('button, [data-media]');
     if (!t) return;
     const d = t.dataset;
-    const run = (fn) => { try { const r = fn(); if (r && typeof r === 'object' && 'id' in r) store.select(r.id); } catch (err) { toast(err.message, { type: 'error', timeout: 4000 }); } };
+    const run = (fn) => {
+      try {
+        const r = fn();
+        if (r && typeof r === 'object' && 'id' in r) { store.select(r.id); this.opts.onPick?.(r); }
+      } catch (err) { toast(err.message, { type: 'error', timeout: 4000 }); }
+    };
     if (d.copy) { navigator.clipboard?.writeText(d.copy).then(() => toast('Disalin', { type: 'ok' })).catch(() => toast('Gagal menyalin', { type: 'error' })); return; }
     if (d.mfilter) { this.mediaFilter = d.mfilter; this.render(); return; }
     if (d.fxcat) { this.fxCat = d.fxcat; this.render(); return; }
     if (d.capmode) { this.capText = this.panel.querySelector('.cap-input')?.value; this.capMode = d.capmode; this.render(); return; }
     if (d.retry) { e.stopPropagation(); mediaRT.get(d.retry)?.upload?.retry?.(); return; }
-    if (d.add) { run(() => actions.addMediaClip(d.add, {})); return; }
+    if (d.add || (t.dataset.media && !e.target.closest('button'))) {
+      const id = d.add || t.dataset.media;
+      const m = store.media(id);
+      run(() => actions.addMediaClip(id, m?.type === 'audio' ? { track: 'audio', start: this.engine.time } : {}));
+      return;
+    }
     if (d.del) {
       e.stopPropagation();
       const used = store.P.clips.some((c) => c.mediaId === d.del);
@@ -401,6 +401,11 @@ export class Library {
     if (d.play) { this.previewSfx(d.play); return; }
     if (d.addsfx) { this.addSfx(d.addsfx); return; }
     if (d.solid || d.grad) { const p = this.payloadFor(t); run(() => p.drop({ track: 'main' })); return; }
+    if (d.effect && this.opts.range) {
+      const r = this.opts.range;
+      run(() => actions.addEffect({ effect: d.effect, start: r.start, duration: r.duration }));
+      return;
+    }
     if (d.text || d.template || d.emoji || d.badge || d.effect) { const p = this.payloadFor(t); run(() => p.drop({ track: 'auto', start: this.engine.time })); return; }
     if (d.transition) {
       const sel = store.selected();
@@ -429,6 +434,15 @@ export class Library {
     }
     switch (d.do) {
       case 'import': this.fileInput.click(); break;
+      case 'importAudio': {
+        const fi = document.createElement('input');
+        fi.type = 'file';
+        fi.multiple = true;
+        fi.accept = 'audio/*,.mp3,.wav,.m4a,.aac,.ogg';
+        fi.onchange = () => this.importFiles([...fi.files], { addAt: this.engine.time });
+        fi.click();
+        break;
+      }
       case 'url': this.importUrl(); break;
       case 'record': this.toggleRecord(); break;
       case 'extract': actions.extractAudio(); break;
@@ -463,8 +477,6 @@ export class Library {
     }
   }
 
-  bindLiveInputs() {}
-
   paintFilterThumbs() {
     if (!this.sample) this.sample = makeSampleScene();
     const intensity = this.panel.querySelector('.flt-int');
@@ -497,13 +509,6 @@ export class Library {
     }
   }
 }
-
-// Make the transition/filter panels' sliders work after each render
-const origRender = Library.prototype.render;
-Library.prototype.render = function patched() {
-  origRender.call(this);
-  if (this.tab === 'transition') this.paintFilterThumbs();
-};
 
 function makeSampleScene() {
   const c = document.createElement('canvas');
