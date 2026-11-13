@@ -149,7 +149,8 @@ async function applyServerState(id, st, { entry, announce = false } = {}) {
   const preview = editUrl || rt.local || hiUrl || (safe ? fileUrl : null);
   // Exports read full quality: the H.264 copy of a file browsers may not decode, else the original.
   rt.exportSrc = hiUrl || (st.state === 'none' && rt.local) || (safe ? fileUrl : null) || rt.local || editUrl || preview;
-  const waiting = busy(ed?.state) || busy(st.state) || !a;
+  // upgrading: the server remakes an older light copy (e.g. 60 fps); keep playing this one, pick up the new one when ready
+  const waiting = busy(ed?.state) || busy(st.state) || !a || !!ed?.upgrading;
   if (!preview) {
     const name = e?.name || 'video';
     if (busy(ed?.state) || busy(st.state)) {

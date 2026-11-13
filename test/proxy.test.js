@@ -126,3 +126,74 @@ test('light preview copy also for 60 fps and HDR camera footage; at most 30 fps'
   assert.ok(editReasons({ ...base, video: { codec: 'hevc', pix: 'yuv420p10le', transfer: 'arib-std-b67', fps: 30 }, width: 1080, height: 1920 }).includes('hdr'));
   assert.deepEqual([60, 59.94, 50, 120, 30, 25, 24].map(previewFps), [30, 29.97, 25, 30, 30, 25, 24]);
 });
+
+test('a light copy made with older rules (60 fps) is remade at ≤ 30 fps; the old one stays ready meanwhile', async () => {
+  const id = 'm_old60fps1';
+  const dir = st.mediaDir(id);
+  fs.mkdirSync(dir, { recursive: true });
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1920x1080:r=60:d=3', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', path.join(dir, 'source.mp4')]);
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ id, file: 'source.mp4', mime: 'video/mp4' }));
+  // the state an earlier version left: probe without fps, a 60 fps light copy, edit.json without rules
+  const info = await probe(path.join(dir, 'source.mp4'));
+  delete info.video.fps;
+  fs.writeFileSync(path.join(dir, 'proxy.json'), JSON.stringify({ state: 'none', reasons: [], probe: info, updatedAt: 1 }));
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', path.join(dir, 'source.mp4'), '-vf', 'scale=1280:-2', '-c:v', 'libx264', '-preset', 'ultrafast', path.join(dir, 'edit.mp4')]);
+  fs.writeFileSync(path.join(dir, 'edit.json'), JSON.stringify({ state: 'ready', reasons: ['size'], size: 1, updatedAt: 1 }));
+  fs.writeFileSync(path.join(dir, 'assets.json'), JSON.stringify({ sprite: { n: 4, w: 128, h: 72 }, poster: true, updatedAt: 1 }));
+  const first = await proxies.status(id);
+  assert.equal(first.edit.state, 'ready', 'the old copy stays ready while the new one is made');
+  assert.equal(first.edit.upgrading, true, 'the editor is told to check back for the new copy');
+  let ed;
+  for (let i = 0; i < 300; i++) {
+    ed = JSON.parse(fs.readFileSync(path.join(dir, 'edit.json'), 'utf8'));
+    assert.equal(ed.state, 'ready', 'never pending/running during the upgrade');
+    if (ed.rules >= 2) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.equal(ed.rules, 2);
+  assert.ok(ed.updatedAt > 1, 'new version number: devices fetch the new copy');
+  assert.ok(ed.reasons.includes('fps'));
+  const fps = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=avg_frame_rate', '-of', 'csv=p=0', path.join(dir, 'edit.mp4')], { encoding: 'utf8' }).trim();
+  assert.equal(fps, '30/1');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'proxy.json'), 'utf8')).probe.video.fps, 60, 'the probe now knows the frame rate');
+  let after;
+  for (let i = 0; i < 50; i++) { after = await proxies.status(id); if (!after.edit.upgrading) break; await new Promise((r) => setTimeout(r, 100)); }
+  assert.ok(!after.edit.upgrading && after.edit.updatedAt === ed.updatedAt, 'done: no longer upgrading, new version');
+  // a copy that the new rules would not change is only marked (same version)
+  const id2 = 'm_old30fps1';
+  const dir2 = st.mediaDir(id2);
+  fs.mkdirSync(dir2, { recursive: true });
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1920x1080:r=30:d=2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', path.join(dir2, 'source.mp4')]);
+  fs.writeFileSync(path.join(dir2, 'meta.json'), JSON.stringify({ id: id2, file: 'source.mp4', mime: 'video/mp4' }));
+  fs.writeFileSync(path.join(dir2, 'proxy.json'), JSON.stringify({ state: 'none', reasons: [], probe: await probe(path.join(dir2, 'source.mp4')), updatedAt: 1 }));
+  fs.copyFileSync(path.join(dir2, 'source.mp4'), path.join(dir2, 'edit.mp4'));
+  fs.writeFileSync(path.join(dir2, 'edit.json'), JSON.stringify({ state: 'ready', reasons: ['size'], size: 1, updatedAt: 5 }));
+  fs.writeFileSync(path.join(dir2, 'assets.json'), JSON.stringify({ sprite: { n: 4, w: 128, h: 72 }, poster: true, updatedAt: 1 }));
+  await proxies.status(id2);
+  let ed2;
+  for (let i = 0; i < 50; i++) { ed2 = JSON.parse(fs.readFileSync(path.join(dir2, 'edit.json'), 'utf8')); if (ed2.rules) break; await new Promise((r) => setTimeout(r, 50)); }
+  assert.deepEqual([ed2.rules, ed2.updatedAt], [2, 5]);
+  // a light 60 fps original that got no light copy under the old rules gets one now (the original plays meanwhile)
+  const id3 = 'm_none60fps';
+  const dir3 = st.mediaDir(id3);
+  fs.mkdirSync(dir3, { recursive: true });
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=60:d=2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', path.join(dir3, 'source.mp4')]);
+  fs.writeFileSync(path.join(dir3, 'meta.json'), JSON.stringify({ id: id3, file: 'source.mp4', mime: 'video/mp4' }));
+  const info3 = await probe(path.join(dir3, 'source.mp4'));
+  delete info3.video.fps;
+  fs.writeFileSync(path.join(dir3, 'proxy.json'), JSON.stringify({ state: 'none', reasons: [], probe: info3, updatedAt: 1 }));
+  fs.writeFileSync(path.join(dir3, 'edit.json'), JSON.stringify({ state: 'none', reasons: [], updatedAt: 1 }));
+  fs.writeFileSync(path.join(dir3, 'assets.json'), JSON.stringify({ sprite: { n: 4, w: 128, h: 72 }, poster: true, updatedAt: 1 }));
+  const s3 = await proxies.status(id3);
+  assert.deepEqual([s3.edit.state, s3.edit.upgrading], ['none', true]);
+  let ed3;
+  for (let i = 0; i < 200; i++) {
+    ed3 = JSON.parse(fs.readFileSync(path.join(dir3, 'edit.json'), 'utf8'));
+    assert.ok(['none', 'ready'].includes(ed3.state), 'never pending: the original keeps playing');
+    if (ed3.rules >= 2) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.deepEqual([ed3.state, ed3.rules, ed3.reasons], ['ready', 2, ['fps']]);
+  const fps3 = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=avg_frame_rate', '-of', 'csv=p=0', path.join(dir3, 'edit.mp4')], { encoding: 'utf8' }).trim();
+  assert.equal(fps3, '30/1');
+});

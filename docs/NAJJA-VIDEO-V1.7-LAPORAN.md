@@ -650,3 +650,58 @@ Dengan engine lama, cek pertama dan ketiga **gagal**, jadi tes ini menangkap bug
 - Chromium tidak memunculkan jeda data seperti Safari: 0 buffer di versi lama maupun baru (`bench/results/2026-11-13-stall-*`). Lab ini **tidak bisa** mengukur gejala Safari; buktinya ada di Diagnostik pengguna dan di tes simulasi.
 - B6 dengan timeline terlihat vs disembunyikan: jeda frame > 25 ms 11/8 vs 4/3 per 15 dtk (`b6-shown/hidden`). Sisa sumbangan timeline kecil.
 - **Verifikasi berikutnya:** Diagnostik dari iPad yang sama setelah update. Yang diharapkan: "Menunggu buffer" hampir 0, "jeda singkat dilewati" > 0, FPS ±30. Kalau buffer masih muncul, baris "Buffer: …" menunjukkan penyebabnya.
+
+## Perbaikan setelah rilis (3): v1.7.2, salinan ringan lama yang masih 60 fps
+
+**Data dari iPad pengguna setelah v1.7.1** (tangkapan layar Diagnostik):
+
+| | Nilai | Artinya |
+|---|---|---|
+| Menunggu buffer | 0 | tahan-buffer palsu sudah hilang |
+| FPS pratinjau | 27,7 rata-rata / 29,8 p50 | hampir 30 |
+| Seek → frame tampil | p95 17 ms | scrub cepat |
+| Lag event loop | 2–3 ms | main thread tidak sibuk, UI tidak memblokir |
+| **Gambar dari decoder** | **p95 41 fps** | lebih dari 30, jadi salinan yang diputar **masih 60 fps** |
+| **Kecepatan putar** | **p50 90%** | decoder tidak sanggup 60 fps penuh, jam menunggu gambar |
+| Frame proyek terlewat | p95 70,6% | angka ini salah hitung untuk video 60 fps (lihat di bawah) |
+
+**Penyebab.**
+1. Salinan ringan media itu **dibuat sebelum v1.7.1**, saat batas 30 fps belum ada, dan tidak pernah dibuat ulang. Server tidak menyimpan aturan apa yang dipakai untuk membuat salinan.
+2. Server tidak mengirim `reasons` (alasan salinan dibuat) ke editor. Akibatnya `heavyOriginal()` di editor hanya mengenali file asli > 1920 px sebagai berat. Video iPhone 1080×1920 HDR/60 fps tetap diputar dari file asli sampai salinan tiba di perangkat.
+3. Metrik "frame terlewat" menghitung setiap gambar decoder yang tidak digambar sebagai "terlewat". Video 60 fps di proyek 30 fps memang hanya butuh satu dari dua gambar, jadi separuhnya tercatat terlewat padahal tidak.
+
+**Perbaikan:**
+- **`lib/media-proxy.js`:**
+  - `EDIT_RULES = 2` disimpan di `edit.json` setiap kali salinan ringan dibuat.
+  - Salinan dengan aturan lebih lama diperiksa saat medianya dibuka (`status()` → `checkRules`). Probe lama tanpa fps diprobe ulang.
+  - Kalau aturan baru mengubah hasilnya (fps > 30 atau HDR), job `edit-up` membuat ulang salinan di latar belakang. Selama itu `edit.json` **tetap `ready`** dan salinan lama terus dipakai. File baru menggantikan yang lama secara atomik dengan versi (`v`) baru.
+  - Video yang dulu **tidak** dibuatkan salinan (misalnya 720p 60 fps, status `none`) juga diperiksa, dan dibuatkan salinan kalau aturan baru memintanya. Selama itu file aslinya tetap diputar.
+  - Kalau aturan baru tidak mengubah apa-apa, salinan hanya ditandai (versi tetap, perangkat tidak mengunduh ulang).
+  - Gagal di percobaan terakhir: salinan lama tetap dipakai dan ditandai, jadi tidak diulang terus.
+- **`server.js`:** status media mengirim `reasons`, dan `upgrading: true` selama salinan yang lebih baru sedang dibuat.
+- **`public/js/media.js`:** selama `upgrading`, editor terus mengecek server. Begitu versi baru siap, salinan baru diunduh ke perangkat sementara salinan lama tetap diputar, lalu ditukar.
+- **`public/js/engine.js`:** "frame terlewat" = frame proyek yang punya gambar baru tapi tidak digambar (`needed`), bukan setiap gambar decoder. "Gambar dari decoder" tetap menghitung semua gambar, supaya salinan 60 fps tetap kelihatan di Diagnostik.
+
+**Tes.** `test/proxy.test.js` #9:
+- salinan 60 fps lama tanpa `rules` dan probe tanpa fps → status `ready` + `upgrading`;
+- selama dibuat ulang tidak pernah `pending`/`running`;
+- hasil 30/1 fps, `rules: 2`, versi baru, probe kini tahu fps 60, lalu `upgrading` hilang;
+- media 30 fps hanya ditandai, versi tetap;
+- video 60 fps tanpa salinan (`none`) mendapat salinan 30 fps tanpa pernah `pending`.
+
+**Bukti metrik** (video 720p 60 fps di proyek 30 fps, profil iPad, `bench/results/2026-11-13-m60-*`):
+- Opsi baru `--raf-hz=30` menyimulasikan layar yang hanya digambar 30×/dtk, seperti di iPad pengguna (FPS 27,7 dengan decoder 41 fps; misalnya Mode Daya Rendah).
+
+  | | Gambar dari decoder | FPS pratinjau | Frame terlewat |
+  |---|---|---|---|
+  | Metrik lama, layar 30 Hz | 51 | 28,9 | **43,5%** (salah) |
+  | Metrik baru, layar 30 Hz | 53,2 | 29,2 | **1,1%** |
+  | Metrik lama/baru, layar 60 Hz | 47–48 | 47–48 | 0% |
+
+- Kecepatan putar 99,7–99,9% di semua kasus: setiap frame proyek tampil, jadi angka 43,5% hanya salah hitung.
+
+**Benchmark v1.7.2** (`bench/results/2026-11-13-v172-ipad.*`, profil iPad):
+- B6 (48 potongan): kecepatan putar 99,9%, 0 buffer, 0 seek koreksi, 0% terlewat.
+- B7 (4K60): file asli 52% (decoder lab 5 fps); salinan ringan **99,8%, 29,9 fps, 0 buffer, 0% terlewat**.
+
+`npm test` 55/55, e2e lolos.

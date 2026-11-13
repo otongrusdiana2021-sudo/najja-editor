@@ -382,7 +382,8 @@ function publicProxy(st, withProbe = false) {
   if (withProbe && st.probe) out.probe = { duration: st.probe.duration, width: st.probe.width, height: st.probe.height, hasVideo: !!st.probe.video, hasAudio: !!st.probe.audio };
   // Light 720p preview copy, and thumbnails/waveform made on the server.
   const e = st.edit;
-  out.edit = e ? { state: e.state, progress: e.progress ?? (e.state === 'ready' ? 1 : 0), v: e.updatedAt || 0, error: e.error || null } : null;
+  // reasons: why the light copy exists (codec/size/bitrate/fps/hdr) — the editor plays it instead of a heavy original
+  out.edit = e ? { state: e.state, progress: e.progress ?? (e.state === 'ready' ? 1 : 0), v: e.updatedAt || 0, error: e.error || null, reasons: e.reasons || [], ...(e.upgrading ? { upgrading: true } : {}) } : null;
   const a = st.assets;
   out.assets = a ? { sprite: a.sprite || null, poster: !!a.poster, peaks: !!a.peaks, v: a.updatedAt || 0 } : null;
   return out;

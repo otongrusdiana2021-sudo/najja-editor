@@ -3,6 +3,7 @@
 // usage:
 //   node bench/fixtures.mjs                      # once: makes bench/.fixtures
 //   node bench/run.mjs [--only=B0,B1] [--profile=desktop|ipad|phone] [--label=nama] [--fixtures=dir]
+//                      [--raf-hz=30] [--old-clock] [--hide-timeline]
 // Writes bench/results/<date>-<label>-<profile>.json and .md. Numbers from a headless lab machine are a baseline
 // for before/after comparison, not a device verdict: run on real PC/iPad/HP for device classes (blueprint 9.3).
 import { createRequire } from 'node:module';
@@ -22,6 +23,9 @@ const LABEL = arg('label', 'run');
 const FIX = path.resolve(arg('fixtures', path.join(ROOT, 'bench', '.fixtures')));
 const B3_EXPORT_S = Number(arg('b3-export-seconds', 120));
 const HIDE_TIMELINE = process.argv.includes('--hide-timeline');
+// --raf-hz=30: the screen refreshes only 30×/s (iPad Low Power Mode, or Safari's 30 Hz cap): frames are painted at
+// most that often, like the iPad Diagnostik that showed FPS 27.7 with a 41 fps decoder
+const RAF_HZ = Number(arg('raf-hz', 0));
 const OLD_CLOCK = process.argv.includes('--old-clock'); // A/B: the wall clock that seeks lagging videos (before v1.7.1) // diagnosis: is a stutter caused by the timeline UI?
 const TOKEN = `tok-bench-${Date.now().toString(36)}-0123456789`;
 const ADMIN = { email: 'bench@najja.id', password: 'bench-najja-123' };
@@ -71,6 +75,14 @@ const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gestur
 async function openEditor({ user = ADMIN, profile = prof } = {}) {
   const ctx = await browser.newContext({ ...profile.ctx, ...(profile.dpr ? {} : { deviceScaleFactor: 1 }) });
   const page = await ctx.newPage();
+  if (RAF_HZ > 0) {
+    await page.addInitScript((hz) => {
+      const raf = window.requestAnimationFrame.bind(window);
+      const step = 1000 / hz;
+      let next = 0;
+      window.requestAnimationFrame = (cb) => raf(function frame(t) { if (t < next) { raf(frame); return; } next = t + step - 2; cb(t); });
+    }, RAF_HZ);
+  }
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   const t0 = Date.now();
@@ -443,7 +455,9 @@ await run('B6', async () => {
 await run('B7', async () => {
   await mcp('new_project', { name: 'B7 heavy original', aspect_ratio: '16:9' });
   await uploadFiles(page, [fixtures.b7]);
-  await page.waitForFunction(async () => { const { mediaRT } = await import('/js/media.js'); const { store } = await import('/js/store.js'); const m = store.P.media[0]; const rt = m && mediaRT.get(m.id); return rt?.url?.startsWith('blob:') && rt.status === 'ready'; }, null, { timeout: 60000 });
+  // (waitForFunction treats an async predicate's promise as truthy: poll instead)
+  const imported = () => page.evaluate(async () => { const { mediaRT } = await import('/js/media.js'); const { store } = await import('/js/store.js'); const m = store.P.media[0]; const rt = m && mediaRT.get(m.id); return !!(rt?.url?.startsWith('blob:') && rt.status === 'ready'); });
+  for (let t = Date.now(); !(await imported()); await sleep(250)) if (Date.now() - t > 60000) throw new Error('B7: import did not finish');
   const src = await page.evaluate(async () => { const { mediaRT } = await import('/js/media.js'); const { store } = await import('/js/store.js'); const rt = mediaRT.get(store.P.media[0].id); return rt.url === rt.local ? 'original' : 'copy'; });
   const original = await measurePlayback(page, 12, 1);
   // then: the server's light copy (720p, ≤ 30 fps) replaces the heavy original in the preview (v1.7.1)

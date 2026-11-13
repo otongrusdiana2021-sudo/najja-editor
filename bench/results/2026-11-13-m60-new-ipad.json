@@ -1,0 +1,104 @@
+{
+  "label": "m60-new",
+  "profile": "ipad",
+  "at": "2026-11-13T08:59:29.800Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B7": {
+      "ok": true,
+      "source": "original",
+      "playback": {
+        "timeline_ms_per_s": 39.5,
+        "timeline_ms_per_frame": 0.79,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 7.7,
+          "updateTime": 1.2,
+          "paintRuler": 8.8,
+          "paintMedia": 4.8,
+          "placeOverlays": 1.1,
+          "onScroll": 15.8
+        },
+        "raf_p95_ms": 33.4,
+        "frame_hitches_over_25ms": 93,
+        "seconds": 12,
+        "fps_rendered": 48.3,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 19.7,
+        "frame_draw_p50_ms": 12.2,
+        "frame_draw_p95_ms": 21.4,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 99.9,
+        "video_presented_fps": 48.2,
+        "drift_seeks": 0,
+        "buffer_causes": {},
+        "long_tasks": 3,
+        "preview_canvas": "930x523"
+      },
+      "light": {
+        "source": "salinan ringan di perangkat",
+        "after_ms": 4,
+        "playback": {
+          "timeline_ms_per_s": 37,
+          "timeline_ms_per_frame": 0.62,
+          "timeline_ms_per_s_by_part": {
+            "syncScroll": 8.6,
+            "updateTime": 0.9,
+            "onScroll": 16.6,
+            "paintRuler": 7.3,
+            "paintMedia": 2.9,
+            "placeOverlays": 0.6
+          },
+          "raf_p95_ms": 16.8,
+          "frame_hitches_over_25ms": 1,
+          "seconds": 12,
+          "fps_rendered": 30,
+          "frames_missed_pct": 0,
+          "video_dropped_pct": 0.3,
+          "frame_draw_p50_ms": 12.2,
+          "frame_draw_p95_ms": 15.6,
+          "buffer_waits": 0,
+          "buffer_wait_total_ms": 0,
+          "playback_speed_pct": 99.9,
+          "video_presented_fps": 29.9,
+          "drift_seeks": 0,
+          "buffer_causes": {},
+          "long_tasks": 0,
+          "preview_canvas": "930x523"
+        }
+      },
+      "seconds": 25
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1194x834@2x",
+    "touch": true,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 10,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}

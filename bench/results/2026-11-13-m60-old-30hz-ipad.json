@@ -1,0 +1,98 @@
+{
+  "label": "m60-old-30hz",
+  "profile": "ipad",
+  "at": "2026-11-13T09:01:32.911Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B7": {
+      "ok": true,
+      "source": "original",
+      "playback": {
+        "timeline_ms_per_s": 27.3,
+        "timeline_ms_per_frame": null,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 12.8,
+          "updateTime": 0.7,
+          "onScroll": 13.8
+        },
+        "raf_p95_ms": null,
+        "frame_hitches_over_25ms": 0,
+        "seconds": 12,
+        "fps_rendered": 28.9,
+        "frames_missed_pct": 43.5,
+        "video_dropped_pct": 51.7,
+        "frame_draw_p50_ms": 18,
+        "frame_draw_p95_ms": 24.4,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 99.8,
+        "video_presented_fps": 51,
+        "drift_seeks": 0,
+        "buffer_causes": {},
+        "long_tasks": 3,
+        "preview_canvas": "1240x698"
+      },
+      "light": {
+        "source": "salinan ringan di perangkat",
+        "after_ms": 11,
+        "playback": {
+          "timeline_ms_per_s": 25.7,
+          "timeline_ms_per_frame": null,
+          "timeline_ms_per_s_by_part": {
+            "syncScroll": 13.8,
+            "updateTime": 0.6,
+            "onScroll": 11.3
+          },
+          "raf_p95_ms": null,
+          "frame_hitches_over_25ms": 0,
+          "seconds": 12,
+          "fps_rendered": 29.7,
+          "frames_missed_pct": 0.6,
+          "video_dropped_pct": 1.4,
+          "frame_draw_p50_ms": 16.8,
+          "frame_draw_p95_ms": 20.6,
+          "buffer_waits": 0,
+          "buffer_wait_total_ms": 0,
+          "playback_speed_pct": 99.8,
+          "video_presented_fps": 29.8,
+          "drift_seeks": 0,
+          "buffer_causes": {},
+          "long_tasks": 1,
+          "preview_canvas": "1240x698"
+        }
+      },
+      "seconds": 25
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1194x834@2x",
+    "touch": true,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 9,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}

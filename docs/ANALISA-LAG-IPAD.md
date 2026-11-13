@@ -1,4 +1,4 @@
-# Analisa: pratinjau patah-patah di iPad (v1.7.1)
+# Analisa: pratinjau patah-patah di iPad (v1.7.1, v1.7.2)
 
 Sumber data: rekaman layar iPad mini (Safari, potret, proyek 1 klip 25 dtk), Diagnostik dari iPad pengguna, dan pengukuran ulang di lab (Chromium + Playwright, profil iPad).
 
@@ -131,3 +131,17 @@ Peran server hanya dua, dan keduanya tidak terjadi saat memutar:
    - **Gambar dari decoder** ±30 fps dan **Kecepatan putar** ±100%;
    - **Menunggu buffer** ±0;
    - **Diputar:** "salinan ringan di perangkat".
+
+## 8. Setelah v1.7.1: Diagnostik iPad dan perbaikan v1.7.2
+
+Diagnostik dari iPad setelah update:
+- **Sudah beres:** menunggu buffer 0, FPS 27,7–29,8, seek p95 17 ms, lag event loop 2–3 ms. Engine dan UI tidak lagi menjadi penghambat.
+- **Sisa masalah:** "Gambar dari decoder" p95 **41 fps** dan "Kecepatan putar" p50 **90%**. Salinan ringan yang diputar ternyata masih **60 fps**, karena dibuat sebelum batas 30 fps ada. Decoder iPad tidak sanggup 60 fps penuh untuk video ini, sehingga jam pratinjau menunggu gambar (putar ±10% lebih lambat).
+
+Perbaikan di v1.7.2:
+- Salinan lama yang dibuat dengan aturan lama **dibuat ulang otomatis** saat medianya dibuka, kalau aturan baru mengubahnya (fps > 30 atau HDR).
+- Selama dibuat ulang, salinan lama tetap dipakai. Setelah salinan baru siap, editor mengunduhnya ke perangkat lalu menukarnya.
+- Server kini mengirim alasan salinan dibuat (`reasons`). Video iPhone 1080×1920 HDR/60 fps langsung dikenali sebagai berat, bukan hanya video > 1920 px.
+- Metrik "frame terlewat" tidak lagi menghitung video 60 fps di proyek 30 fps sebagai terlewat.
+
+Cara cek: buka proyeknya, lalu tunggu ±1 menit per klip (VPS membuat ulang salinan). Putar ±15 dtk, lalu salin Diagnostik. Yang diharapkan: "Gambar dari decoder" ±30 fps, "Kecepatan putar" ±100%, "Frame proyek terlewat" mendekati 0.

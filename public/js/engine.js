@@ -89,7 +89,7 @@ export class Engine {
     this.clockBase = this.time;
     this.clockStart = performance.now();
     this.sync();
-    this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, shown: 0, vq: this.videoQuality(), lastTick: 0, gaps: 0 };
+    this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, shown: 0, needed: 0, vq: this.videoQuality(), lastTick: 0, gaps: 0 };
     this.emit('play');
   }
   pause() {
@@ -118,7 +118,9 @@ export class Engine {
     // Missed = pictures the video presented that never reached the preview (or, without video, project frames
     // skipped). Not "project frame numbers that jumped": with a 30 fps video and 30 fps project, the phase between
     // the clock and the decoder makes numbers jump while every picture is drawn.
-    const expected = S.shown > 0 ? S.shown : Math.max(1, (this.time - S.t) * fps);
+    // A 60 fps video in a 30 fps project needs only every other picture: `needed` counts project frames that had a
+    // new picture, so drawing one of two is not a miss.
+    const expected = S.needed > 0 ? S.needed : Math.max(1, (this.time - S.t) * fps);
     metrics.sample('fps_rendered', S.draws / secs);
     if (S.shown > 0) metrics.sample('video_presented_fps', S.shown / secs); // pictures the video decoder delivered
     metrics.sample('playback_speed_pct', (100 * (this.time - S.t)) / secs); // timeline seconds per real second
@@ -259,8 +261,12 @@ export class Engine {
         const S = this.session;
         if (S && M && M.frames != null && !this.buffering) {
           const n = M.drawn >= 0 ? M.frames - M.drawn : 0;
-          if (n > 0) { S.shown += n; if (n > 1) S.skipped += n - 1; }
-        } else if (S && this.lastFi >= 0 && fi - this.lastFi > 1) S.skipped += fi - this.lastFi - 1;
+          // missed: pictures not drawn although the project needed them (a 60 fps video in a 30 fps project
+          // presents two pictures per project frame; drawing one of them is not a miss)
+          const due = Math.min(n, this.lastFi >= 0 ? fi - this.lastFi : 1);
+          if (n > 0) S.shown += n; // decoder pictures (video_presented_fps)
+          if (due > 0) { S.needed += due; S.skipped += due - 1; }
+        } else if (S && this.lastFi >= 0 && fi > this.lastFi) { S.needed += fi - this.lastFi; S.skipped += fi - this.lastFi - 1; }
         this.lastFi = fi;
         if (M) M.drawn = M.frames;
       }
