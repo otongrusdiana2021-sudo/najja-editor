@@ -287,6 +287,38 @@ try {
   }));
   check(!pg.overflow && pg.toolbar && pg.stage > 400, `iPad potret: tanpa geser samping, toolbar terlihat, pratinjau ${Math.round(pg.stage)} px`);
 
+  // --- Short "not enough data" dips (Safari on iPad reports them at clip starts) must not hold the preview ------------
+  const dips = await p.evaluate(async () => {
+    const { app } = await import('/js/actions.js');
+    const E = app.engine;
+    const C = E.constructor;
+    const orig = C.starved;
+    let fake = false;
+    C.starved = (el) => fake || orig(el);
+    let holds = 0;
+    const off = E.on((k) => { if (k === 'buffer' && E.buffering) holds++; });
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    E.seek(0.5);
+    E.play();
+    await sleep(600);
+    fake = true; await sleep(120); fake = false; // 120 ms dip
+    await sleep(500);
+    const shortDip = holds;
+    const wasPlaying = E.playing;
+    fake = true; await sleep(800); // a real stall
+    const longDip = holds;
+    fake = false;
+    await sleep(400);
+    E.pause();
+    C.starved = orig;
+    off();
+    return { shortDip, longDip, wasPlaying, spinnerDelayed: getComputedStyle(document.querySelector('.stage'), '::after').opacity };
+  });
+  check(dips.shortDip === 0 && dips.wasPlaying, 'jeda data singkat (120 ms) tidak menahan pratinjau');
+  check(dips.longDip >= 1, 'jeda panjang (800 ms) tetap ditahan sebagai buffer');
+  const host = await p.evaluate(() => ({ inPage: document.querySelectorAll('.media-host video').length, outside: [...document.querySelectorAll('video')].filter((v) => !v.closest('.media-host')).length }));
+  check(host.inPage >= 1 && host.outside === 0, `elemen video pratinjau terpasang di halaman (tersembunyi): ${host.inPage}`);
+
   check(errors.length === 0, `tanpa error halaman${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } finally {
   await b.close();

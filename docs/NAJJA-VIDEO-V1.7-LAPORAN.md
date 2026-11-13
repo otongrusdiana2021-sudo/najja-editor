@@ -610,3 +610,43 @@ Tampilan tidak berubah: screenshot timeline lama vs baru di 5 posisi/zoom tidak 
 | Gambar video tidak tergambar | 0% / 0% | 0% / 0% |
 
 **Batas pengukuran.** Lab memakai Chromium tanpa GPU dan tanpa layar 120 Hz. Biaya gambar frame pratinjau (filter, teks) di GPU iPad bisa berbeda. Kalau setelah update iPad masih tersendat, menu **⋯ → Diagnostik performa → Salin JSON** dari iPad itu menunjukkan bagian mana yang lambat: *Menunggu buffer* (jaringan/salinan belum di perangkat), *Waktu gambar per frame* (efek/filter), atau *Long task*.
+
+---
+
+## Perbaikan setelah rilis (2): "lag buffering" di iPad, dari data Diagnostik pengguna
+
+**Data dari iPad pengguna** (Safari 26.6, layar 820×1180 @2×, v1.7.0; proyek 50 klip, 3 media, 91 dtk):
+
+| | Nilai | Artinya |
+|---|---|---|
+| Waktu gambar per frame | p50 0 ms, p95 1 ms | GPU iPad tidak bermasalah |
+| Menunggu buffer | **10× dalam 10 dtk** putar, ±50 ms (p95 64 ms) | playhead ditahan berulang-ulang |
+| FPS pratinjau | rata-rata 16,5 | separuh frame tidak tampil |
+| Penyimpanan browser | 457 MB | video sudah tersimpan di iPad, jadi ini bukan masalah jaringan |
+
+**Penyebab.** Safari sesaat melaporkan video "belum cukup data" (`readyState < 3`), terutama saat klip baru mulai. Proyek ini punya potongan tiap ±2 dtk. Engine langsung menganggapnya buffering:
+1. menahan playhead dan **mem-pause semua video**;
+2. menunggu `readyState 4` atau 3 dtk data ke depan, bahkan untuk file yang sudah ada di perangkat;
+3. memutar lagi;
+4. menampilkan spinner seketika.
+
+Pause/play di Safari sendiri memicu jeda berikutnya, jadi siklusnya terulang.
+
+**Perbaikan (`public/js/engine.js`, `public/css/app.css`, `public/js/app.js`):**
+- **Toleransi 300 ms:** jeda "belum siap" yang lebih pendek tidak menahan playhead dan tidak mem-pause video. Kalau video pulih dalam toleransi itu, jam pratinjau mengikuti posisi video (video tidak di-seek ke jam, karena seek membuatnya menunggu lagi). Selama menunggu data, video juga tidak di-seek untuk koreksi selisih.
+- **Lanjut cepat untuk salinan di perangkat** (`blob:`): cukup `readyState ≥ 3`. Syarat 3 dtk data ke depan hanya untuk streaming dari server.
+- **Spinner tertunda 0,4 dtk:** jeda singkat tidak berkedip di layar.
+- **Elemen video dipasang di halaman** (wadah 2×2 px, tidak terlihat), karena Safari lebih andal memutar dan menampilkan frame video yang terpasang. `playsinline` eksplisit, remote playback dimatikan.
+- **Diagnostik:** penyebab buffer (awal/tengah klip, dari perangkat/server, `readyState`), jumlah jeda yang dilewati, dan `play()` yang ditolak Safari (per jenis error).
+
+**Tes.** `test/e2e/ipad-ui.mjs` menyimulasikan jeda Safari:
+- jeda 120 ms → pratinjau tidak ditahan (✔);
+- jeda 800 ms → tetap ditahan sebagai buffer (✔);
+- elemen video ada di halaman (✔).
+
+Dengan engine lama, cek pertama dan ketiga **gagal**, jadi tes ini menangkap bug-nya. `npm test` 53/53, e2e lolos.
+
+**Benchmark B6 (baru: 48 potongan pendek bergantian dari 3 file, profil iPad).**
+- Chromium tidak memunculkan jeda data seperti Safari: 0 buffer di versi lama maupun baru (`bench/results/2026-11-13-stall-*`). Lab ini **tidak bisa** mengukur gejala Safari; buktinya ada di Diagnostik pengguna dan di tes simulasi.
+- B6 dengan timeline terlihat vs disembunyikan: jeda frame > 25 ms 11/8 vs 4/3 per 15 dtk (`b6-shown/hidden`). Sisa sumbangan timeline kecil.
+- **Verifikasi berikutnya:** Diagnostik dari iPad yang sama setelah update. Yang diharapkan: "Menunggu buffer" hampir 0, "jeda singkat dilewati" > 0, FPS ±30. Kalau buffer masih muncul, baris "Buffer: …" menunjukkan penyebabnya.

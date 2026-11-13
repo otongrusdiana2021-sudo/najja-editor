@@ -373,7 +373,7 @@ async function diagnosticsDialog() {
         <section>${table('Pemutaran', [
           row('FPS pratinjau', 'fps_rendered', ''), row('Frame proyek terlewat', 'preview_frames_missed_pct', '%'), row('Frame video di-drop', 'video_dropped_frames_pct', '%'),
           row('Waktu gambar per frame', 'frame_draw_ms'), row('Menunggu buffer', 'buffer_wait_ms'), row('Seek → frame tepat', 'seek_to_frame_ms'),
-        ])}</section>
+        ])}<p class="hint">Buffer: awal klip ${c.buffer_at_clip_start || 0} · tengah klip ${c.buffer_mid_clip || 0} · dari perangkat ${c.buffer_src_local || 0} · dari server ${c.buffer_src_server || 0} · jeda singkat dilewati ${c.stall_ridden_out || 0}${Object.keys(c).filter((k) => k.startsWith('play_rejected_')).map((k) => ` · play ditolak (${escapeHtml(k.slice(14))}) ${c[k]}`).join('')}</p></section>
         <section>${table('Respons UI', [row('Interaksi → tampil', 'interaction_ms'), row('Geser klip → tampil', 'timeline_drag_ms'), row('Trim klip → tampil', 'timeline_trim_ms'), row('Long task', 'long_task_ms')])}
           <p class="hint">Long task &gt; 50 ms: ${c.long_tasks_over_50ms || 0} · main thread terblokir ${c.main_thread_blocked_ms || 0} ms</p></section>
         <section>${table('Impor & simpan', [

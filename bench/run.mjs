@@ -16,11 +16,12 @@ import { toMarkdown } from './report.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=').slice(1).join('=') || d;
-const ONLY = arg('only', 'B0,B1,B2,B3,B4,B5').split(',').map((s) => s.trim().toUpperCase());
+const ONLY = arg('only', 'B0,B1,B2,B3,B4,B5,B6').split(',').map((s) => s.trim().toUpperCase());
 const PROFILE = arg('profile', 'desktop');
 const LABEL = arg('label', 'run');
 const FIX = path.resolve(arg('fixtures', path.join(ROOT, 'bench', '.fixtures')));
 const B3_EXPORT_S = Number(arg('b3-export-seconds', 120));
+const HIDE_TIMELINE = process.argv.includes('--hide-timeline'); // diagnosis: is a stutter caused by the timeline UI?
 const TOKEN = `tok-bench-${Date.now().toString(36)}-0123456789`;
 const ADMIN = { email: 'bench@najja.id', password: 'bench-najja-123' };
 
@@ -149,6 +150,7 @@ function memWatch(page) {
 /** Play `secs` from `from` and return the playback metrics of that stretch. */
 async function measurePlayback(page, secs, from = 0) {
   await page.evaluate(async (t) => { const E = window.najja.engine; E.pause(); E.seek(t); await E.settle(8000); }, from);
+  if (HIDE_TIMELINE) await page.evaluate(() => { document.querySelector('.tl-body').style.display = 'none'; });
   await resetMetrics(page);
   // Main-thread time the timeline spends following the playhead (ruler, filmstrips, waveforms, scroll), and the
   // spacing of animation frames (a gap > 25 ms is a visible hitch on a 60 Hz screen).
@@ -192,6 +194,7 @@ async function measurePlayback(page, secs, from = 0) {
     frame_draw_p50_ms: S.frame_draw_ms?.p50 ?? null,
     frame_draw_p95_ms: S.frame_draw_ms?.p95 ?? null,
     buffer_waits: S.buffer_wait_ms?.n || 0,
+    buffer_causes: Object.fromEntries(Object.entries(snap.counters).filter(([k]) => /^(buffer_|stall_|play_rejected)/.test(k))),
     long_tasks: snap.counters.long_tasks_over_50ms || 0,
     preview_canvas: await page.evaluate(() => `${window.najja.engine.canvas.width}x${window.najja.engine.canvas.height}`),
   };
@@ -407,6 +410,26 @@ await run('B5', async () => {
   const st = await (await fetch(`${BASE}/api/status`, { headers: { cookie } })).json();
   for (const e of eds) await e.ctx.close();
   return { total_ms: Date.now() - t0, users: per, api_latency: { n: lat.length, p50_ms: pct(lat, 0.5), p95_ms: pct(lat, 0.95), max_ms: r1(Math.max(...lat)) }, server_jobs: st.metrics?.jobs, server_load: st.metrics?.load };
+});
+
+// B6 (beyond the blueprint's B0–B5): an edited reel — many short jump cuts alternating between a few files, so the
+// preview switches media elements every 1.5–2 s (the case reported as stutter on iPad).
+await run('B6', async () => {
+  await mcp('new_project', { name: 'B6 jump cuts', aspect_ratio: '9:16' });
+  const ms = [];
+  for (const f of fixtures.b1.slice(0, 3)) ms.push(await mcp('import_media', { path: rel(f) }));
+  let t = 0;
+  for (let i = 0; i < 48; i++) {
+    const m = ms[i % 3];
+    const d = 1.4 + ((i * 7) % 9) / 10;
+    const room = Math.max(0.2, (m.duration || 5) - d - 0.1);
+    const srcIn = Math.round(((i * 1.37) % room) * 100) / 100;
+    await mcp('add_media_clip', { media_id: m.media_id, track: 'main', start: Math.round(t * 1000) / 1000, source_in: srcIn, duration: d });
+    t += d;
+  }
+  await waitMediaReady(page);
+  const P = await mcp('get_project');
+  return { project: { clips: P.clips.length, duration: P.duration }, playback: await measurePlayback(page, 15), seek: await measureSeeks(page, 20) };
 });
 
 results.page_errors = mainEditor.errors;

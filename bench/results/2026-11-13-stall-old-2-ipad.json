@@ -1,0 +1,77 @@
+{
+  "label": "stall-old-2",
+  "profile": "ipad",
+  "at": "2026-11-13T07:38:15.649Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B6": {
+      "ok": true,
+      "project": {
+        "clips": 48,
+        "duration": 86.4
+      },
+      "playback": {
+        "timeline_ms_per_s": 54.6,
+        "timeline_ms_per_frame": 1.04,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 6.2,
+          "updateTime": 1.3,
+          "onScroll": 25.4,
+          "paintRuler": 5.9,
+          "paintMedia": 14.2,
+          "placeOverlays": 1.6
+        },
+        "raf_p95_ms": 33.4,
+        "frame_hitches_over_25ms": 95,
+        "seconds": 15,
+        "fps_rendered": 30.1,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 14.5,
+        "frame_draw_p95_ms": 28,
+        "buffer_waits": 0,
+        "buffer_causes": {},
+        "long_tasks": 5,
+        "preview_canvas": "221x393"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 108.5,
+        "p95_ms": 592.1,
+        "max_ms": 592.1
+      },
+      "seconds": 27
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1194x834@2x",
+    "touch": true,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 9.3,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}

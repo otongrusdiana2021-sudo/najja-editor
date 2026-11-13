@@ -7,6 +7,10 @@ import { clamp } from './util.js';
 import { metrics } from './metrics.js';
 
 const AC = window.AudioContext || window.webkitAudioContext;
+// A main video reporting "not enough data" for less than this is ridden out (the clock keeps going): a clip that
+// just started or Safari hesitating for a moment. Holding the playhead and pausing the video for such dips is what
+// made playback stutter on iPad (10 holds of ~50 ms in 10 seconds).
+const STALL_GRACE_MS = 300;
 
 export class Engine {
   constructor(canvas) {
@@ -24,6 +28,12 @@ export class Engine {
     this.master = null;
     this.monitor = null;
     this.listeners = new Set();
+    // Media elements live in the page (invisible): Safari plays and presents frames of attached videos more
+    // reliably than of detached ones.
+    this.host = document.createElement('div');
+    this.host.className = 'media-host';
+    this.host.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(this.host);
     this.lastEmit = 0;
     onFontsLoaded(() => this.requestRender());
     store.on('project', () => { this.clampTime(); this.sync(); this.requestRender(); });
@@ -155,10 +165,28 @@ export class Engine {
       } else {
         this.time = this.clockBase + (now - this.clockStart) / 1000;
         const M = !this.exportTarget && this.masterEl();
-        if (M && !M.noHold && (M.el.played.length || M.el.readyState < 2) && Engine.starved(M.el)) {
-          this.buffering = true;
-          this.bufferSince = now;
-          this.emit('buffer');
+        const starving = M && !M.noHold && (M.el.played.length || M.el.readyState < 2) && Engine.starved(M.el);
+        if (starving) {
+          M.starvedSince ??= now;
+          if (now - M.starvedSince >= STALL_GRACE_MS) {
+            this.buffering = true;
+            this.bufferSince = now;
+            // why (Diagnostik): right after a clip started or mid-clip, local copy or streamed, decoder state
+            metrics.count(M.playAt && now - M.playAt < 1000 ? 'buffer_at_clip_start' : 'buffer_mid_clip');
+            metrics.count(String(M.el.currentSrc || M.el.src).startsWith('blob:') ? 'buffer_src_local' : 'buffer_src_server');
+            metrics.count(`buffer_readystate_${M.el.readyState}${M.el.seeking ? '_seeking' : ''}`);
+            this.emit('buffer');
+          }
+        } else if (M?.starvedSince != null) {
+          // Recovered within the grace time: follow the video instead of seeking it to the clock (a seek would
+          // starve it again).
+          M.starvedSince = null;
+          if (!M.el.seeking && !M.el.paused) {
+            const c = M.clip;
+            const tt = c.start + (M.el.currentTime - c.in) / (c.speed || 1);
+            if (Math.abs(tt - this.time) < 1) { this.time = this.clockBase = tt; this.clockStart = now; }
+          }
+          metrics.count('stall_ridden_out');
         }
       }
       const d = this.duration;
@@ -272,6 +300,8 @@ export class Engine {
     // background; the player then only fetches what it shows (play, seek), so it is not downloaded twice.
     el.preload = url.startsWith('blob:') ? 'auto' : 'metadata';
     el.playsInline = true;
+    el.setAttribute('playsinline', '');
+    el.disableRemotePlayback = true;
     el.crossOrigin = 'anonymous';
     el.src = url;
     const E = { el, mediaId: clip.mediaId, url, clip, gain: null, src: null, vol: -1, hold: null, frames: null, drawn: -1 };
@@ -303,6 +333,7 @@ export class Engine {
     el.addEventListener('loadeddata', settled);
     el.addEventListener('seeked', settled);
     this.els.set(key, E);
+    this.host.appendChild(el);
     return E;
   }
   /** Keep the current picture so a seek or a stall shows the last frame instead of a black gap. */
@@ -341,6 +372,7 @@ export class Engine {
     try { E.src?.disconnect(); E.gain?.disconnect(); } catch { /* ignore */ }
     E.el.removeAttribute('src');
     try { E.el.load(); } catch { /* ignore */ }
+    E.el.remove();
     this.els.delete(id);
   }
   setGain(E, v) {
@@ -410,8 +442,10 @@ export class Engine {
       if (running && active && el.readyState >= 1) {
         if (el.paused) {
           if (Math.abs(el.currentTime - local) > 0.05) this.seekEl(E, local);
-          el.play().catch(() => {});
-        } else if (Math.abs(el.currentTime - local) > 0.3 && !el.seeking) {
+          E.playAt = performance.now();
+          el.play().catch((err) => { metrics.count(`play_rejected_${err?.name || 'error'}`); });
+        } else if (Math.abs(el.currentTime - local) > 0.3 && !el.seeking && E.starvedSince == null) {
+          // (not while it waits for data: a seek would make it wait longer)
           this.seekEl(E, local);
         }
       } else {
@@ -451,6 +485,8 @@ export class Engine {
   }
   static canResume(el) {
     if (el.seeking || el.readyState < 3) return false;
+    // A copy on this device can play on as soon as it can play; a stream from the server first buffers a few seconds.
+    if (String(el.currentSrc || el.src).startsWith('blob:')) return true;
     return el.readyState >= 4 || Engine.bufferedAhead(el) >= Math.min(3, el.duration - el.currentTime - 0.1);
   }
 
