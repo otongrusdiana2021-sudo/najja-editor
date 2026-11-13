@@ -506,6 +506,21 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     return out;
   }
 
+  /** Backend metrics for admins (blueprint 9.1 "Backend"): job queues, disk, memory, load, HTTP status counts. */
+  async function serverMetrics() {
+    let disk = null;
+    try { const s = await fsp.statfs(DATA_DIR); disk = { free: s.bavail * s.bsize, total: s.blocks * s.bsize }; } catch { /* old Node */ }
+    return {
+      jobs: proxies.metrics(),
+      disk,
+      mem: { free: os.freemem(), total: os.totalmem(), rss: process.memoryUsage().rss },
+      load: os.loadavg().map((v) => Math.round(v * 100) / 100),
+      cores: os.cpus().length,
+      http: { ...httpCounts },
+      uptimeS: Math.round(process.uptime()),
+    };
+  }
+
   /** Run a tool in an editor of the caller's account (never in another account's editor). */
   async function callTool(name, args = {}, who = { id: primaryOwnerId, role: 'admin' }) {
     if (!TOOLS.find((t) => t.name === name)) throw new Error(`Unknown tool: ${name}`);
@@ -722,7 +737,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
         editors: bridge.count(who.id),
         convert: (await mediaTools()).ffmpeg,
         mcpClients: bridge.mcpFor(who.id),
-        ...(admin ? { exportsDir: EXPORT_DIR } : {}),
+        ...(admin ? { exportsDir: EXPORT_DIR, metrics: await serverMetrics() } : {}),
         lastExport: lastExport.get(who.id) || null,
         tools: TOOLS.map((t) => ({ name: t.name, title: t.title, description: t.description })),
       });
@@ -886,7 +901,9 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     return sendFile(req, res, rel === '/index.html' ? path.join(PUBLIC_DIR, 'index.html') : filePath);
   }
 
+  const httpCounts = { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 };
   const server = http.createServer((req, res) => {
+    res.on('finish', () => { const k = `${Math.floor(res.statusCode / 100)}xx`; if (k in httpCounts) httpCounts[k]++; });
     route(req, res).catch((err) => {
       log('request error:', err.message);
       if (!res.headersSent) sendJson(res, err.status || 500, { error: err.message });

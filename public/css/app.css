@@ -660,6 +660,17 @@ body.kb-open .sheet.size-text { height: min(52vh, calc(100% - var(--kb) - 40px))
 .kbd-list kbd { padding: 3px 8px; border-radius: 6px; background: var(--panel-3); border: 1px solid var(--border-2); font-size: 11px; font-weight: 600; white-space: nowrap; }
 .kbd-list span { color: var(--text-2); text-align: right; }
 .about { display: flex; gap: 14px; align-items: flex-start; }
+.diag-body { display: grid; gap: 10px; }
+.diag-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px 18px; }
+.diag-grid section { min-width: 0; }
+.diag-grid h4 { margin: 0 0 6px; font-size: 13px; }
+.diag-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.diag-table th { text-align: right; font-weight: 500; color: var(--text-2); padding: 2px 4px; }
+.diag-table td { padding: 3px 4px; border-top: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.diag-table td:first-child { text-align: left; white-space: normal; }
+.diag-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; margin: 0; font-size: 12px; }
+.diag-kv dt { color: var(--text-2); }
+.diag-kv dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .about svg { width: 48px; height: 48px; flex: none; }
 .about p { margin: 6px 0 0; }
 

@@ -3,3 +3,5 @@ data/
 .DS_Store
 *.log
 .env
+bench/.fixtures/
+bench/results/*.tmp

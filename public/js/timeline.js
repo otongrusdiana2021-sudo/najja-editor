@@ -12,6 +12,7 @@ import { prefs } from './db.js';
 import { EFFECTS, TRANSITIONS } from './presets.js';
 import * as actions from './actions.js';
 import { contextMenu } from './ui.js';
+import { metrics } from './metrics.js';
 
 const MAIN_H = 64;
 const LANE_H = 30;
@@ -792,6 +793,7 @@ export class Timeline {
         begin();
       }
       this.autoScroll(ev.clientX);
+      metrics.afterPaint('timeline_drag_ms', ev.timeStamp);
       const t = this.snapTime(this.timeAt(ev.clientX) - grab, clip.duration, clip.id, pts);
       const target = this.dropTarget(ev.clientY, clip.type) || { track: store.track(clip.trackId), row: this.layoutRows.find((r) => r.track.id === clip.trackId) };
       state = { t, target, pt: this.timeAt(ev.clientX) };
@@ -862,6 +864,7 @@ export class Timeline {
     const grabOffset = this.timeAt(e.clientX) - (side === 'r' ? orig.start + orig.dur : orig.start);
     const move = (ev) => {
       this.autoScroll(ev.clientX);
+      metrics.afterPaint('timeline_trim_ms', ev.timeStamp);
       let t = this.timeAt(ev.clientX) - grabOffset;
       if (this.snap) {
         const th = 10 / this.pps;

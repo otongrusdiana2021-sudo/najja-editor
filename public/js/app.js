@@ -22,6 +22,7 @@ import { RESOLUTIONS, FPS_OPTIONS } from './presets.js';
 import { icon, LOGO } from './icons.js';
 import { toast, modal, contextMenu, confirmDialog } from './ui.js';
 import { escapeHtml, fmtDur, fmtBytes, downloadBlob, fmtTC } from './util.js';
+import { metrics } from './metrics.js';
 
 const $ = (s) => document.querySelector(s);
 document.documentElement.dataset.theme = 'dark';
@@ -111,6 +112,7 @@ topbar.addEventListener('click', (e) => {
         'sep',
         ...(installPrompt ? [{ label: 'Pasang sebagai aplikasi', icon: 'download', run: () => installApp() }] : []),
         { label: 'Pintasan keyboard', icon: 'keyboard', kbd: '?', run: () => shortcutsDialog() },
+        { label: 'Diagnostik performa', icon: 'clock', run: () => diagnosticsDialog() },
         { label: 'Tentang Najja Editor', icon: 'help', run: () => aboutDialog() },
       ]);
       break;
@@ -211,6 +213,7 @@ function searchDialog() {
     { id: 'x-project', label: 'Pengaturan proyek', icon: 'settings', where: 'Proyek', run: () => openSheet('project') },
     { id: 'x-export', label: 'Ekspor video', icon: 'export', where: 'Proyek', run: () => quickExport() },
     { id: 'x-ai', label: 'AI · MCP', icon: 'ai', where: 'Proyek', run: () => openSheet('ai') },
+    { id: 'x-diag', label: 'Diagnostik performa', icon: 'clock', where: 'Menu ⋯', run: () => diagnosticsDialog() },
   ];
   let items = [];
   const draw = () => {
@@ -329,6 +332,77 @@ function shortcutsDialog() {
   ];
   modal({ title: 'Pintasan keyboard', body: `<div class="kbd-list">${rows.map(([k, d]) => `<div><kbd>${k}</kbd><span>${d}</span></div>`).join('')}</div>` });
 }
+/** Everything the metrics collector knows, plus live state of the preview and (for admins) the server. */
+async function diagnosticsSnapshot() {
+  let server = null;
+  try { server = (await (await fetch('/api/status', { cache: 'no-store', credentials: 'same-origin' })).json()).metrics || null; } catch { /* offline */ }
+  return metrics.snapshot({
+    app: bridge.state.status?.version || null,
+    preview: { canvas: `${engine.canvas.width}x${engine.canvas.height}`, quality: player.quality, activeMediaElements: engine.els.size, project: store.P ? { clips: store.P.clips.length, media: store.P.media.length, tracks: store.P.tracks.length, duration: Math.round(store.duration()) } : null },
+    server,
+  });
+}
+
+/** Menu ⋯ → Diagnostik: where time goes on this device (blueprint 9.1), copyable as JSON for bug reports. */
+async function diagnosticsDialog() {
+  const m = modal({ title: 'Diagnostik performa', wide: true, body: '<div class="diag-body"><p class="hint">Mengukur…</p></div>', footer: `<button class="btn" data-reset>Reset</button><button class="btn" data-dl>${icon('download', 14)} Unduh JSON</button><button class="btn btn-primary" data-copy>${icon('copy', 14)} Salin JSON</button>` });
+  const body = m.el.querySelector('.diag-body');
+  let snap = null;
+  const fmt = (v, unit = '') => (v == null ? '—' : `${v}${unit}`);
+  const row = (label, name, unit = ' ms', hint = '') => {
+    const s = snap.series[name];
+    return `<tr><td>${label}${hint ? `<span class="hint"> ${hint}</span>` : ''}</td><td>${fmt(s?.p50, unit)}</td><td>${fmt(s?.p95, unit)}</td><td>${s?.n || 0}</td></tr>`;
+  };
+  const table = (title, rows) => `<h4>${title}</h4><table class="diag-table"><thead><tr><th></th><th>p50</th><th>p95</th><th>n</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  const kv = (title, pairs) => `<h4>${title}</h4><dl class="diag-kv">${pairs.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join('')}</dl>`;
+  const render = async () => {
+    snap = await diagnosticsSnapshot();
+    const d = snap.device;
+    const c = snap.counters;
+    const ex = [...snap.events].reverse().find((e) => e.kind === 'export');
+    const srv = snap.server;
+    body.innerHTML = `
+      <p class="hint">Diukur di perangkat ini sejak editor dibuka (${snap.uptimeS} dtk). Tidak ada data yang dikirim ke mana pun; salin JSON untuk laporan masalah atau benchmark.</p>
+      <div class="diag-grid">
+        <section>${table('Pemutaran', [
+          row('FPS pratinjau', 'fps_rendered', ''), row('Frame proyek terlewat', 'preview_frames_missed_pct', '%'), row('Frame video di-drop', 'video_dropped_frames_pct', '%'),
+          row('Waktu gambar per frame', 'frame_draw_ms'), row('Menunggu buffer', 'buffer_wait_ms'), row('Seek → frame tepat', 'seek_to_frame_ms'),
+        ])}</section>
+        <section>${table('Respons UI', [row('Interaksi → tampil', 'interaction_ms'), row('Geser klip → tampil', 'timeline_drag_ms'), row('Trim klip → tampil', 'timeline_trim_ms'), row('Long task', 'long_task_ms')])}
+          <p class="hint">Long task &gt; 50 ms: ${c.long_tasks_over_50ms || 0} · main thread terblokir ${c.main_thread_blocked_ms || 0} ms</p></section>
+        <section>${table('Impor & simpan', [
+          row('Impor → bisa dipakai', 'import_visible_ms'), row('Salinan ringan siap', 'asset_ready_ms'), row('Durasi upload', 'upload_ms'), row('Kecepatan upload', 'upload_mbps', ' Mbps'), row('Simpan → diterima server', 'save_ack_ms'),
+        ])}<p class="hint">Upload diulang: ${c.upload_retry_count || 0} · simpan gagal: ${c.save_failed || 0}</p></section>
+        <section>${ex ? kv(`Ekspor terakhir (${ex.ok ? 'berhasil' : ex.cancelled ? 'dibatalkan' : 'gagal'})`, [
+          ['Mode', ex.mode === 'fast' ? 'cepat (WebCodecs)' : ex.mode === 'realtime' ? 'real-time (MediaRecorder)' : ex.mode],
+          ['Fallback', ex.fallback], ['Hasil', `${ex.width}×${ex.height} ${ex.fps} fps · ${ex.duration} dtk`],
+          ['Siapkan media', fmt(ex.fetch_media_ms, ' ms')], ['Persiapan', fmt(ex.prepare_ms, ' ms')], ['Decode', fmt(ex.decode_ms, ' ms')], ['Komposit', fmt(ex.composite_ms, ' ms')],
+          ['Encode', fmt(ex.encode_ms, ' ms')], ['Mux', fmt(ex.mux_ms, ' ms')], ['Total', fmt(ex.total_ms, ' ms')], ['Kecepatan', ex.realtime_factor ? `${ex.realtime_factor}× real-time` : null],
+          ['Antrean encoder maks.', ex.encoder_queue_max], ['Ukuran', ex.output_size ? fmtBytes(ex.output_size) : null], ['Gagal di tahap', ex.ok ? null : ex.failure_stage], ['Error', ex.error],
+        ]) : '<h4>Ekspor</h4><p class="hint">Belum ada ekspor di sesi ini.</p>'}</section>
+        <section>${kv('Perangkat', [
+          ['CPU', d.cores ? `${d.cores} core` : null], ['RAM', d.deviceMemoryGB ? `≥ ${d.deviceMemoryGB} GB` : null], ['Layar', d.screen], ['GPU', d.gpu?.renderer],
+          ['WebCodecs', d.webcodecs.encoder ? `ya · H.264 ${d.webcodecs.h264 ? '✓' : '✗'} · HEVC ${d.webcodecs.hevc ? '✓' : '✗'}` : 'tidak'], ['OPFS', d.opfs ? 'ya' : 'tidak'],
+          ['Frame callback video', d.rvfc ? 'ya' : 'tidak'], ['JS heap', snap.memory.jsHeapUsedMB != null ? `${snap.memory.jsHeapUsedMB} MB` : null],
+          ['Penyimpanan browser', snap.memory.storage ? `${snap.memory.storage.usageMB} MB dipakai` : null],
+          ['Kanvas pratinjau', `${snap.preview.canvas} (kualitas ${Math.round(snap.preview.quality * 100)}%)`], ['Elemen media aktif', snap.preview.activeMediaElements],
+          ['Jaringan', d.connection ? `${d.connection.type || '?'} · ${d.connection.downlinkMbps ?? '?'} Mbps · RTT ${d.connection.rttMs ?? '?'} ms` : null],
+        ])}</section>
+        ${srv ? `<section>${kv('Server (admin)', [
+          ...Object.entries(srv.jobs || {}).map(([k, j]) => [`Job ${k}`, `${j.done} selesai · ${j.failed} gagal · tunggu p95 ${fmt(j.wait?.p95, ' ms')} · durasi p95 ${fmt(j.run?.p95, ' ms')} · jalan ${j.running}/${j.limit} · antre ${j.queued}`]),
+          ['Disk kosong', srv.disk ? `${fmtBytes(srv.disk.free)} dari ${fmtBytes(srv.disk.total)}` : null],
+          ['Respons HTTP', srv.http ? `${srv.http['2xx'] || 0} ok · ${srv.http['4xx'] || 0} 4xx · ${srv.http['5xx'] || 0} 5xx` : null],
+          ['CPU load (1 mnt)', srv.load?.[0]], ['RAM server', srv.mem ? `${fmtBytes(srv.mem.free)} kosong dari ${fmtBytes(srv.mem.total)}` : null],
+        ])}</section>` : ''}
+      </div>`;
+  };
+  await render();
+  const json = () => JSON.stringify(snap, null, 2);
+  m.el.querySelector('[data-copy]').onclick = async () => { await render(); navigator.clipboard?.writeText(json()).then(() => toast('JSON diagnostik disalin', { type: 'ok' })).catch(() => toast('Gagal menyalin', { type: 'error' })); };
+  m.el.querySelector('[data-dl]').onclick = async () => { await render(); downloadBlob(new Blob([json()], { type: 'application/json' }), `najja-diagnostik-${Date.now()}.json`); };
+  m.el.querySelector('[data-reset]').onclick = () => { metrics.reset(); render(); };
+}
+
 function aboutDialog() {
   modal({
     title: 'Tentang Najja Editor',

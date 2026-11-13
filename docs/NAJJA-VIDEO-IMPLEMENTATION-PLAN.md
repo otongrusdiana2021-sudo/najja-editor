@@ -53,7 +53,7 @@ Identitas selalu dari sesi/token yang diverifikasi server, tidak pernah dari bod
 |---|---|
 | `public/js/metrics.js` (baru) | Kolektor metrik di browser (bagian 9.1 blueprint): impor (`time_to_timeline_visible`, `asset_ready_time`, `upload_duration`), playback (fps, dropped frames, p50/p95 frame time, `seek_to_frame_ms`, decoder aktif, buffer wait, resolusi pratinjau), UI (long task > 50 ms), memori (JS heap bila tersedia, pemakaian OPFS), ekspor (prepare/decode/render/encode/mux, realtime factor, mode), sync (`save_ack_ms`, konflik). |
 | `public/js/app.js` | Menu ⋯ → **Diagnostik**: ringkasan metrik + tombol salin JSON (untuk laporan bug/benchmark). |
-| `lib/media-proxy.js`, `server.js` | Metrik backend: waktu tunggu antrean & durasi job per jenis, jumlah job, ruang disk; tersedia di `/api/status` (admin) dan `/api/jobs`. |
+| `lib/media-proxy.js`, `server.js` | Metrik backend: waktu tunggu antrean & durasi job per jenis, jumlah job, ruang disk, RAM, beban CPU, jumlah respons HTTP 2xx/4xx/5xx; tersedia di `/api/status` (admin). `/api/jobs` menyusul di P5. |
 | `bench/` (baru) | `bench/fixtures.mjs` membuat fixture **B0–B3** dengan ffmpeg; `bench/run.mjs` (Playwright) mengukur B0–B5 dan menulis laporan JSON + Markdown yang bisa diulang. |
 
 **Exit gate:** bottleneck bisa diidentifikasi per stage; laporan before/after untuk fase berikutnya.

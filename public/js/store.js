@@ -3,6 +3,7 @@ import { uid, clone, deepMerge, clamp, debounce } from './util.js';
 import { ASPECTS, DEFAULT_TEXT, ADJUSTMENTS } from './presets.js';
 import { prefs } from './db.js';
 import { storage } from './storage.js';
+import { metrics } from './metrics.js';
 
 export const MIN_CLIP = 0.1;
 export const VISUAL_TYPES = ['video', 'image', 'solid', 'text', 'sticker'];
@@ -448,10 +449,13 @@ class Store {
     try { rec.thumb = this.thumbProvider ? await this.thumbProvider() : undefined; } catch { /* ignore */ }
     rec.duration = this.duration();
     try {
+      const ack = metrics.timer('save_ack_ms');
       await storage.putProject(rec);
+      ack();
       prefs.set('lastProject', this.project.id);
       this.saveState = 'saved';
     } catch (err) {
+      metrics.count('save_failed');
       console.warn('save failed', err);
       this.saveState = 'error';
       clearTimeout(this.retryTimer);

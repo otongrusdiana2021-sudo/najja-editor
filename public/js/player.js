@@ -5,6 +5,7 @@ import * as actions from './actions.js';
 import { ASPECTS } from './presets.js';
 import { icon } from './icons.js';
 import { clamp } from './util.js';
+import { metrics } from './metrics.js';
 
 const PREVIEW_LONG = 1280;
 
@@ -89,7 +90,7 @@ export class Player {
     const E = this.engine;
     if (!E.playing || E.drawMs == null) { this.slowRuns = 0; this.fastRuns = 0; return; }
     if (E.drawMs > 16 && this.quality > 0.5) {
-      if (++this.slowRuns >= 2) { this.quality = Math.max(0.5, this.quality * 0.75); this.slowRuns = 0; E.drawMs = null; this.layout(); }
+      if (++this.slowRuns >= 2) { this.quality = Math.max(0.5, this.quality * 0.75); this.slowRuns = 0; E.drawMs = null; this.layout(); metrics.count('preview_quality_down'); }
     } else this.slowRuns = 0;
     if (E.drawMs != null && E.drawMs < 6 && this.quality < 1) {
       if (++this.fastRuns >= 4) { this.quality = Math.min(1, this.quality / 0.75); this.fastRuns = 0; E.drawMs = null; this.layout(); }

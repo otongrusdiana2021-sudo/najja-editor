@@ -3,6 +3,7 @@ import { store, sortedClips } from './store.js';
 import { mediaRT } from './media.js';
 import { renderFrame, preloadFonts, onFontsLoaded } from './render.js';
 import { clamp } from './util.js';
+import { metrics } from './metrics.js';
 
 const AC = window.AudioContext || window.webkitAudioContext;
 
@@ -71,18 +72,50 @@ export class Engine {
     this.clockBase = this.time;
     this.clockStart = performance.now();
     this.sync();
+    this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, vq: this.videoQuality() };
     this.emit('play');
   }
   pause() {
     if (!this.playing) return;
     this.playing = false;
+    this.endSession();
     if (this.buffering) { this.buffering = false; this.emit('buffer'); }
     this.sync();
     this.requestRender();
     this.emit('pause');
   }
   toggle() { this.playing ? this.pause() : this.play(); }
+  /** Decoded/dropped frame counters of the main video element (where the browser reports them). */
+  videoQuality() {
+    const q = this.masterEl()?.el.getVideoPlaybackQuality?.();
+    return q ? { total: q.totalVideoFrames, dropped: q.droppedVideoFrames } : null;
+  }
+  /** Playback metrics for one play → pause stretch (blueprint 9.1 "Playback"). */
+  endSession() {
+    const S = this.session;
+    this.session = null;
+    if (!S || this.exportTarget) return;
+    const secs = (performance.now() - S.at) / 1000;
+    if (secs < 1) return;
+    const fps = store.P?.fps || 30;
+    const expected = Math.max(1, (this.time - S.t) * fps);
+    metrics.sample('fps_rendered', S.draws / secs);
+    metrics.sample('preview_frames_missed_pct', (100 * S.skipped) / expected);
+    const q = this.videoQuality();
+    if (q && S.vq && q.total > S.vq.total) metrics.sample('video_dropped_frames_pct', (100 * (q.dropped - S.vq.dropped)) / (q.total - S.vq.total));
+    metrics.count('playback_seconds', Math.round(secs));
+  }
+  /** Do all videos on screen show their frame for the playhead? (for seek_to_frame_ms) */
+  visibleReady() {
+    for (const E of this.els.values()) {
+      const c = E.clip;
+      if (c?.type !== 'video' || this.time < c.start || this.time >= c.start + c.duration) continue;
+      if (!this.frameReady(E)) return false;
+    }
+    return true;
+  }
   seek(t) {
+    if (!this.exportTarget) this.seekAt = performance.now();
     this.time = clamp(t, 0, Math.max(0, this.duration));
     if (this.playing) { this.clockBase = this.time; this.clockStart = performance.now(); }
     this.sync();
@@ -112,6 +145,7 @@ export class Engine {
             if (Math.abs(tt - this.time) < 1) this.time = this.clockBase = tt;
           }
           this.buffering = false;
+          metrics.sample('buffer_wait_ms', now - this.bufferSince);
           this.emit('buffer');
         }
       } else {
@@ -132,6 +166,7 @@ export class Engine {
         } else {
           this.time = d;
           this.playing = false;
+          this.endSession();
           this.emit('ended');
           this.emit('pause');
         }
@@ -149,7 +184,16 @@ export class Engine {
       if (M && M.frames != null && !this.buffering && !M.el.paused) {
         if (M.frames !== M.drawn || fi - this.lastFi >= 2) draw = true; // video late: keep overlays moving
       } else if (fi !== this.lastFi) draw = true;
-      if (draw) { this.lastFi = fi; if (M) M.drawn = M.frames; }
+      if (draw) {
+        if (this.session && this.lastFi >= 0 && fi - this.lastFi > 1) this.session.skipped += fi - this.lastFi - 1;
+        this.lastFi = fi;
+        if (M) M.drawn = M.frames;
+      }
+    }
+    // Seek → the right picture is on screen (waits for the decoder, not just for 'seeked').
+    if (this.seekAt) {
+      const ms = performance.now() - this.seekAt;
+      if (this.visibleReady()) { this.seekAt = null; metrics.sample('seek_to_frame_ms', ms); draw = true; } else if (ms > 10000) { this.seekAt = null; metrics.count('seek_timeouts'); }
     }
     if (draw) {
       this.needsRender = false;
@@ -187,7 +231,11 @@ export class Engine {
     renderFrame(this.ctx, this.time, this.env(this.canvas.width / P.width, this.boxes));
     const ms = performance.now() - t0;
     // Draw time while playing (moving average): the player lowers the preview resolution when it is too slow.
-    if (this.playing) this.drawMs = this.drawMs == null ? ms : this.drawMs * 0.9 + ms * 0.1;
+    if (this.playing) {
+      this.drawMs = this.drawMs == null ? ms : this.drawMs * 0.9 + ms * 0.1;
+      metrics.sample('frame_draw_ms', ms);
+      if (this.session) this.session.draws++;
+    }
     this.emit('render');
   }
 

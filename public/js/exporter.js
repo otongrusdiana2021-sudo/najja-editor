@@ -4,6 +4,7 @@ import { RESOLUTIONS } from './presets.js';
 import { preloadFonts } from './render.js';
 import { cacheProjectMedia } from './media.js';
 import { fastExport, fastExportAvailable } from './fastexport.js';
+import { metrics } from './metrics.js';
 
 const MP4_TYPES = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4'];
 const WEBM_TYPES = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
@@ -113,16 +114,23 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
   Object.assign(exportState, { state: 'running', progress: 0, error: null, result: null, startedAt: Date.now(), mode: null, options: { ...opts, format: wantMp4 ? 'mp4' : 'webm', fps, width, height } });
   const flag = { cancelled: false };
   cancelFlag = flag;
+  const stats = { stage: 'prepare' }; // per-stage timings for Diagnostik (metrics.js)
+  const record = (extra) => metrics.event('export', {
+    width, height, fps, duration: Math.round((r1 - r0) * 10) / 10, mode: exportState.mode, fallback: stats.fallback || null, ...stats, ...extra,
+  });
   const finish = (blob, ext, mode) => {
     const result = { blob, mime: blob.type, ext, filename: `${base}.${ext}`, width, height, fps, size: blob.size, duration: r1 - r0, mode, seconds: (Date.now() - exportState.startedAt) / 1000 };
     Object.assign(exportState, { state: 'done', progress: 1, phase: null, mode, result: { ...result, blob: undefined } });
     cancelFlag = null;
+    record({ ok: true, output_size: blob.size, total_ms: Math.round(result.seconds * 1000), realtime_factor: Math.round(((r1 - r0) / Math.max(0.001, result.seconds)) * 100) / 100 });
+    if (result.seconds > 0) metrics.sample(`export_realtime_factor_${mode}`, (r1 - r0) / result.seconds);
     onProgress(1);
     return result;
   };
   const fail = (err) => {
     Object.assign(exportState, { state: flag.cancelled ? 'cancelled' : 'error', error: err.message, phase: null });
     cancelFlag = null;
+    record({ ok: false, cancelled: flag.cancelled, failure_stage: stats.stage, error: err.message });
     return err;
   };
 
@@ -130,7 +138,9 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
   try {
     // Every file is read from this device, so rendering never waits on the network.
     exportState.phase = 'preparing';
+    const fetchMs = metrics.timer('export_fetch_media_ms');
     await cacheProjectMedia(P, onPrepare);
+    stats.fetch_media_ms = Math.round(fetchMs());
     if (flag.cancelled) throw new Error('Ekspor dibatalkan');
     if (wantMp4 && !opts.realtime && fastExportAvailable()) {
       exportState.phase = 'rendering';
@@ -138,13 +148,15 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
       try {
         await preloadFonts(P);
         const blob = await fastExport({
-          engine, P, width, height, fps, bitrate: videoBitsPerSecond, r0, r1, flag,
+          engine, P, width, height, fps, bitrate: videoBitsPerSecond, r0, r1, flag, stats,
           onProgress: (p) => { exportState.progress = p; onProgress(p); },
         });
         return finish(blob, 'mp4', 'fast');
       } catch (err) {
         if (flag.cancelled) throw err;
         console.warn('[najja] fast export not possible here, recording in real time:', err.message);
+        stats.fallback = `${stats.stage}: ${err.message}`;
+        stats.stage = 'realtime';
         exportState.progress = 0;
         onProgress(0);
       }

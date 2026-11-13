@@ -6,6 +6,7 @@ import { SFX } from './presets.js';
 import { remote } from './remote.js';
 import { toast } from './ui.js';
 import { deviceCache } from './devicecache.js';
+import { metrics } from './metrics.js';
 
 /** Runtime data per media id (not serialized): { url, img, sprite, spriteN, spriteW, spriteH, poster, peaks, status, error } */
 export const mediaRT = new Map();
@@ -151,6 +152,7 @@ async function applyServerState(id, st, { entry, announce = false } = {}) {
     changed(id);
     return;
   }
+  if (rt.importAt && editUrl) { metrics.sample('asset_ready_ms', performance.now() - rt.importAt); rt.importAt = null; }
   const wasWaiting = !!rt.convert;
   rt.convert = null;
   rt.playError = null;
@@ -503,6 +505,7 @@ async function persistMedia(entry, file, rt, { adoptFrom } = {}) {
   changed(entry.id);
   let last = 0;
   try {
+    const upAt = performance.now();
     if (adoptFrom) await remote.adopt(entry.id, adoptFrom, file.name, file.type);
     else {
       await remote.upload(file, {
@@ -512,6 +515,11 @@ async function persistMedia(entry, file, rt, { adoptFrom } = {}) {
           if (performance.now() - last > 200) { last = performance.now(); changed(entry.id); }
         },
       });
+    }
+    if (!adoptFrom) {
+      const ms = performance.now() - upAt;
+      metrics.sample('upload_ms', ms);
+      if (file.size > 1e6) metrics.sample('upload_mbps', (file.size * 8) / 1e6 / (ms / 1000));
     }
     // The server makes the filmstrip and waveform of videos from its light copy; audio/image keep the browser's.
     await remote.putMeta(entry.id, metaOf(entry, rt, { sprite: entry.type !== 'video' }));
@@ -582,9 +590,10 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
   const type = detectType(file);
   if (!type) throw new Error(`Jenis file tidak didukung: ${file.name || file.type}`);
   const id = uid('m');
+  const importAt = performance.now();
   const url = URL.createObjectURL(file);
   const entry = { id, name: name || file.name || `${type}-${id}`, type, duration: 0, width: 0, height: 0, size: file.size, hasAudio: type !== 'image', createdAt: Date.now() };
-  const rt = { url, src: url, local: url, exportSrc: url, status: 'processing' };
+  const rt = { url, src: url, local: url, exportSrc: url, status: 'processing', importAt: remote.enabled && type === 'video' ? importAt : null };
   mediaRT.set(id, rt);
   try {
     if (type === 'video') {
@@ -642,6 +651,9 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
     throw err;
   }
   changed(id);
+  // time until the media can be put on the timeline (local metadata only: no upload, no server)
+  metrics.afterPaint('import_visible_ms', importAt);
+  metrics.count(`import_${type}`);
   (type === 'audio' ? rt.ready.catch(() => {}) : Promise.resolve()).then(() => persistMedia(entry, file, rt, { adoptFrom }));
   if (!silent) store.scheduleSave();
   return entry;

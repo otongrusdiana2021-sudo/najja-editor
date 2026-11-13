@@ -124,3 +124,96 @@ Overhead cek pemilik ≈ 0,3–0,5 ms per request (satu baca `meta.json` kecil).
 ### Berikutnya
 
 P1 — metrik pipeline (impor, proxy, pratinjau, ekspor) dan fixture benchmark B0–B5, supaya fase P2/P4/P5/P6 bisa diukur sebelum/sesudah.
+
+---
+
+## P1 — Pengukuran (observability) dan fixture benchmark
+
+### Masalah
+
+v1.6 tidak punya angka. Tidak bisa menjawab pertanyaan blueprint bagian 9: stage mana yang lambat, di perangkat apa, untuk proyek seperti apa, dan apakah sebuah perubahan memperbaikinya. Hanya ekspor cepat yang mencetak profil ke console, dan server tidak punya metrik antrean.
+
+### Keputusan desain
+
+- **Kolektor di memori, tanpa layanan luar** (`public/js/metrics.js`):
+  - Sampel disimpan di ring buffer 600 nilai per metrik, jadi memori tetap datar walau editor terbuka berjam-jam.
+  - Tidak ada data yang dikirim ke mana pun. Pengguna menyalin JSON sendiri dari menu **⋯ → Diagnostik performa**.
+  - *Trade-off:* belum ada agregasi lintas pengguna. Kalau nanti dibutuhkan, JSON yang sama bisa dikirim ke endpoint VPS sendiri.
+- **Diukur di titik yang benar-benar dirasakan pengguna:**
+  - *Seek → frame tepat:* dari perintah seek sampai video di layar menunjukkan frame posisi itu (menunggu decoder, bukan sekadar event `seeked`).
+  - *Impor → bisa dipakai:* sampai frame berikutnya tergambar.
+  - *Geser/trim klip:* dari event input sampai frame berikutnya.
+- **Benchmark yang bisa diulang:**
+  - `bench/fixtures.mjs` membuat B0–B3 dengan ffmpeg: H.264 High, GOP 1 dtk, bitrate konstan supaya ukuran file realistis.
+  - `bench/run.mjs` menjalankan editor asli di Chromium (Playwright). Proyek disusun lewat MCP, upload lewat input file seperti pengguna. B4 memakai dua perangkat (desktop dan profil HP), B5 memakai empat akun bersamaan.
+  - *Trade-off:* angka dari mesin lab headless (tanpa GPU) adalah **baseline untuk perbandingan sebelum/sesudah**, bukan vonis per perangkat. Blueprint 9.3 tetap meminta pengukuran di PC, iPad, dan HP nyata, dan menu Diagnostik dibuat untuk itu.
+
+### Metrik yang dikumpulkan (blueprint 9.1)
+
+| Kategori | Metrik |
+|---|---|
+| Impor | `import_visible_ms`, `upload_ms`, `upload_mbps`, `upload_retry_count`, `asset_ready_ms` (salinan ringan siap) |
+| Pemutaran | `fps_rendered`, `preview_frames_missed_pct`, `video_dropped_frames_pct` (dari `getVideoPlaybackQuality`), `frame_draw_ms`, `buffer_wait_ms`, `seek_to_frame_ms`, `seek_timeouts`, `preview_quality_down`, elemen media aktif, ukuran kanvas pratinjau |
+| Respons UI | `long_tasks_over_50ms`, `main_thread_blocked_ms`, `long_task_ms`, `interaction_ms` (Event Timing), `timeline_drag_ms`, `timeline_trim_ms` |
+| Memori/perangkat | JS heap, pemakaian penyimpanan browser (OPFS), core, RAM, layar, GPU, dukungan WebCodecs H.264/HEVC, OPFS, frame callback video, jaringan |
+| Ekspor | `fetch_media_ms`, `prepare_ms`, `decode_ms`, `composite_ms`, `encode_ms`, `mux_ms`, `total_ms`, `realtime_factor`, `mode`, `fallback`, `encoder_queue_max`, `output_size`, `failure_stage` |
+| Sync | `save_ack_ms`, `save_failed` (konflik revisi menyusul di P6) |
+| Backend (admin, `/api/status` → `metrics`) | antrean job per jenis (selesai/gagal, tunggu p50/p95, durasi p50/p95, jalan/batas, antre), disk kosong, RAM, load CPU, respons HTTP 2xx/3xx/4xx/5xx |
+
+### File yang berubah
+
+| File | Perubahan |
+|---|---|
+| `public/js/metrics.js` (baru) | Kolektor: `sample/count/gauge/event/timer/afterPaint`, `stats` (p50/p95/max), `snapshot` (+ info perangkat), observer long task & Event Timing. |
+| `public/js/engine.js` | FPS, frame terlewat, frame video di-drop per sesi putar; tunggu buffer; seek → frame tepat; waktu gambar frame. |
+| `public/js/media.js`, `remote.js`, `store.js` | Impor → bisa dipakai, durasi/kecepatan upload, upload diulang, salinan ringan siap, simpan → diterima server. |
+| `public/js/fastexport.js`, `exporter.js` | Waktu per tahap ekspor, antrean encoder maksimum, mode/fallback, tahap gagal, kecepatan real-time. |
+| `public/js/timeline.js`, `player.js` | Latensi geser/trim klip; berapa kali kualitas pratinjau diturunkan. |
+| `public/js/app.js`, `public/css/app.css` | Menu ⋯ → **Diagnostik performa** (juga lewat 🔍 cari fitur, termasuk di HP): ringkasan, Salin/Unduh JSON, Reset. |
+| `lib/media-proxy.js`, `server.js` | Metrik antrean job + disk/RAM/load/HTTP di `/api/status` (admin). |
+| `bench/fixtures.mjs`, `bench/run.mjs`, `bench/report.mjs` (baru) | Fixture B0–B3, runner B0–B5, laporan + perbandingan sebelum/sesudah. |
+| `test/metrics.test.js` (baru) | Persentil, ring buffer terbatas, counter/event/timer/snapshot. |
+
+### Temuan langsung: bug frame salah setelah seek (sudah diperbaiki, commit terpisah)
+
+Metrik `seek_to_frame_ms` langsung memperlihatkan bug di v1.6.
+
+- **Gejala:** saat dijeda, seek jauh ke klip lain atau scrub cepat bisa membuat pratinjau tertahan di frame yang salah.
+- **Penyebab:** `sync()` melewati elemen yang belum punya metadata atau masih seeking, dan tidak ada yang memposisikannya ulang.
+- **Bukti:** sebelum diperbaiki, di proyek nyata 6 dari 10 seek tidak pernah menampilkan frame yang benar dalam 10 detik. Sesudahnya 10/10 benar dalam 41–77 ms.
+- **Perbaikan:** commit "Perbaiki pratinjau yang tertahan di frame salah…" (`engine.js`, sinkron ulang saat `loadedmetadata`/`seeked`).
+
+### Tes
+
+- `npm test`: **32/32 lolos** (3 tes metrik baru).
+- `npm run test:e2e`: lolos. `get_frame` tepat 8/8, dan semua cek UI iPad lolos.
+
+### Baseline B0–B5 (sebelum P2–P6)
+
+Lab: 4 vCPU Xeon 2,1 GHz, 17 GB, Chromium headless **tanpa GPU** (SwiftShader), profil desktop 1280×800. Detail lengkap ada di `bench/results/2026-11-13-p1-baseline-desktop.{json,md}`.
+
+| Fixture | Angka utama |
+|---|---|
+| **B0** 1 klip 1080p 60 dtk + musik | Impor → bisa dipakai p95 **167 ms**. Upload 88 MB 0,8 dtk (loopback). Salinan ringan siap 10 dtk. Putar 30,1 fps, 0% frame terlewat, gambar frame p50/p95 5,9/8,5 ms. Seek → frame p50/p95 **25/41 ms**. Ekspor 1080p **2,85× real-time** (komposit 16,2 dtk dari 21 dtk total). RAM renderer naik 741 → 1.141 MB. |
+| **B1** 9:16, 6 klip + 2 teks + musik + filter | Putar 30,3 fps, 1,6% frame terlewat. Seek p95 110 ms. Ekspor **1,2× real-time** (komposit 41 dtk dari 50 dtk: filter di 9:16 1080×1920 mahal). RAM renderer puncak 1.452 MB. |
+| **B2** 3 klip + 2 overlay + teks animasi + efek + transisi | Putar 30,5 fps tapi **8,7% frame terlewat**, gambar frame p95 15,1 ms. Seek p95 209 ms. Ekspor 1,6× real-time. |
+| **B3** 10 menit, 62 potongan, 2 audio | Putar 30,1 fps. Seek p95 58 ms. Ekspor 120 dtk pertama: 2,6× real-time, tapi **RAM renderer 770 → 2.715 MB dan JS heap 669 MB**, karena file sumber 440 MB dibaca utuh ke memori. |
+| **B4** perangkat kedua (profil HP, CPU 4× lebih lambat) membuka proyek B1 | Dingin: siap 1,2 dtk, frame pertama 159 ms, seek p95 145 ms, semua media tersalin 1,1 dtk. Hangat (reload): siap 0,9 dtk. |
+| **B5** 4 akun impor bersamaan (12–440 MB) | Latensi API saat antrean penuh p50/p95 **9,5/32 ms** (tetap responsif). Tapi job thumbnail/waveform **menunggu sampai 117 dtk** di belakang konversi video 10 menit (satu antrean, satu job). Salinan ringan file 88 MB baru siap setelah 22,5 dtk. |
+
+**Bottleneck yang teridentifikasi (masukan untuk fase berikutnya):**
+
+1. **Memori ekspor (P4):** sumber dibaca utuh dan hasil encode dikumpulkan di RAM. B3 menembus 2,7 GB untuk 2 menit ekspor, dan di HP/iPad ini berarti tab crash.
+2. **Antrean job tunggal (P5):** pekerjaan kecil tertahan di belakang pekerjaan besar akun lain. Tidak ada retry, cancel, atau status job, dan job hilang saat restart.
+3. **Proyek berlapis (P2, lalu P3):** B2 kehilangan 8,7% frame. Waktu gambar frame dan komposit ekspor mendominasi. P2 mengurangi kerja JS per frame. Biaya gambar Canvas 2D sendiri adalah wilayah P3 (ditunda sampai ada data perangkat nyata).
+
+### Risiko, fallback, rollback
+
+- Metrik pasif dan ringan: satu `performance.now()` dan satu tulis ke ring buffer per event. Observer long task dan Event Timing dibungkus `try`, jadi browser yang tidak mendukung tidak terpengaruh.
+- Tidak ada data yang dikirim keluar. JSON hanya keluar kalau pengguna menekan Salin/Unduh.
+- `/api/status` → `metrics` hanya untuk admin.
+- Rollback: revert commit. Tidak ada perubahan data atau skema.
+
+### Berikutnya
+
+P2: render plan terkompilasi (indeks per track + binary search), lalu ukur ulang B1/B2/B3 dengan `node bench/report.mjs baseline.json sesudah.json`.

@@ -1,4 +1,5 @@
 // Server (VPS) storage client: projects, media library and chunked uploads.
+import { metrics } from './metrics.js';
 const CHUNK = 8 * 1024 * 1024; // well below common proxy limits (aaPanel nginx defaults to 50 MB per request)
 
 async function api(path, opts = {}) {
@@ -92,6 +93,7 @@ export const remote = {
               loaded[i] = 0;
               if (err.status === 401) { location.href = '/login'; throw err; }
               if (err.status === 507 || err.status === 413 || attempt >= 5) throw err;
+              metrics.count('upload_retry_count');
               await sleep(1000 * 2 ** (attempt - 1));
             }
           }

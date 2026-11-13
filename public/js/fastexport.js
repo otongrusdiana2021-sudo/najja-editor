@@ -439,8 +439,11 @@ function avcLevel(w, h, fps) {
 /**
  * Render [r0, r1] of the project to an MP4 Blob as fast as possible.
  * engine: the live Engine (chain keys, image sources); flag.cancelled stops it; onProgress(0..1).
+ * stats (optional object) receives the time spent per stage in ms (blueprint 9.1 "Export").
  */
-export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r1, flag, onProgress }) {
+export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r1, flag, onProgress, stats = {} }) {
+  const tPrep = performance.now();
+  stats.stage = 'prepare';
   if (!fastExportAvailable()) throw unsupported('WebCodecs not available');
   const lv = avcLevel(width, height, fps);
   let cfg = null;
@@ -510,6 +513,10 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   const total = Math.max(1, Math.round((r1 - r0) * fps));
   const prof = { decode: 0, render: 0, frame: 0, encodeWait: 0 }; // ms per stage (shown in the console)
   const tStart = performance.now();
+  stats.prepare_ms = Math.round(tStart - tPrep);
+  stats.encoder = cfg.codec;
+  stats.encoder_queue_max = 0;
+  stats.stage = 'render';
   try {
     for (let i = 0; i < total; i++) {
       if (flag?.cancelled) throw new Error('Ekspor dibatalkan');
@@ -535,12 +542,21 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
       enc.encode(vf, { keyFrame: i % (fps * 2) === 0 });
       vf.close();
       prof.frame += performance.now() - m; m = performance.now();
+      if (enc.encodeQueueSize > stats.encoder_queue_max) stats.encoder_queue_max = enc.encodeQueueSize;
       while (enc.encodeQueueSize > 4) await new Promise((r) => setTimeout(r, 1));
       prof.encodeWait += performance.now() - m;
       if (i % 5 === 0) onProgress?.(i / total);
     }
+    stats.stage = 'encode';
+    const tFlush = performance.now();
     await enc.flush();
     if (encError) throw encError;
+    Object.assign(stats, {
+      frames: total,
+      decode_ms: Math.round(prof.decode),
+      composite_ms: Math.round(prof.render),
+      encode_ms: Math.round(prof.frame + prof.encodeWait + (performance.now() - tFlush)),
+    });
     const secs = (performance.now() - tStart) / 1000;
     console.info(`[najja] fast export: ${total} frames in ${secs.toFixed(1)} s (${(total / secs).toFixed(1)} fps) · ${cfg.codec} ·`,
       Object.fromEntries(Object.entries(prof).map(([k, v]) => [k, `${(v / total).toFixed(1)} ms/frame`])));
@@ -550,5 +566,10 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   }
   if (!vDesc) throw unsupported('encoder gave no avcC');
   onProgress?.(1);
-  return muxMp4({ fps, width, height, description: vDesc, colorSpace, chunks }, audio);
+  stats.stage = 'mux';
+  const tMux = performance.now();
+  const out = muxMp4({ fps, width, height, description: vDesc, colorSpace, chunks }, audio);
+  stats.mux_ms = Math.round(performance.now() - tMux);
+  stats.stage = 'done';
+  return out;
 }
