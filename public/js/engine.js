@@ -257,8 +257,13 @@ export class Engine {
     }
     if (!E.src) el.volume = 0;
     const rr = () => this.requestRender();
+    // While paused, sync() can only position an element that has metadata and is not mid-seek. A new element
+    // (far seek) or one still seeking to an older position (fast scrub) is positioned again once it can be,
+    // otherwise the preview would keep showing the wrong frame.
+    const resync = () => { if (this.els.get(key) === E && !this.playing && !this.exportTarget) this.sync(); };
     // When the element last settled on a position (used to decide that no newer frame is coming).
-    const settled = () => { E.settledAt = performance.now(); rr(); };
+    const settled = () => { E.settledAt = performance.now(); rr(); resync(); };
+    el.addEventListener('loadedmetadata', resync);
     el.addEventListener('loadeddata', settled);
     el.addEventListener('seeked', settled);
     this.els.set(key, E);
