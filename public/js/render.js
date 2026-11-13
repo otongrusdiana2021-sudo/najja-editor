@@ -1,7 +1,8 @@
 // Frame compositor: draws the project at time t onto a 2D canvas. Pure drawing — media elements come from env.
 import { FILTERS, FONTS } from './presets.js';
 import { clamp, ease, hash, rand2, rgba, hexToRgb } from './util.js';
-import { sortedClips, kfValue } from './store.js';
+import { kfValue } from './store.js';
+import { compilePlan, clipsAt, mainStateAt } from './plan.js';
 
 const FILTER_MAP = Object.fromEntries(FILTERS.map((f) => [f.id, f]));
 const NEUTRAL = { brightness: 1, contrast: 1, saturate: 1, sepia: 0, grayscale: 0, invert: 0, 'hue-rotate': 0 };
@@ -561,6 +562,7 @@ function drawTransition(ctx, A, B, t, p, type, env) {
 }
 
 /** Which main-track clips are visible at time t (handles transition overlap windows). */
+/** v1.6 reference: what is on the main track at t (linear scan). The renderer uses plan.js mainStateAt; tests compare the two. */
 export function mainTrackState(list, t) {
   for (let i = 0; i < list.length; i++) {
     const c = list[i];
@@ -905,12 +907,12 @@ export function renderFrame(ctx, t, env) {
   ctx.fillRect(0, 0, cw, ch);
   ctx.setTransform(env.s, 0, 0, env.s, 0, 0);
   env.boxes?.clear();
+  // Tracks, clip order and the clip index come from the compiled plan (built once per project change), so a frame
+  // only looks at the clips near t. Callers without a plan (rare) get one compiled here.
+  const plan = env.plan?.project === P ? env.plan : compilePlan(P);
 
-  const visual = P.tracks.filter((tr) => tr.kind !== 'audio' && tr.kind !== 'effect' && !tr.hidden).reverse();
-  const mainList = sortedClips(P, 'main');
-
-  if (P.background?.mode === 'blur' && !P.tracks.find((tr) => tr.kind === 'main')?.hidden) {
-    const st = mainTrackState(mainList, t);
+  if (P.background?.mode === 'blur' && !plan.mainHidden) {
+    const st = mainStateAt(plan, t);
     const c = st?.clip || st?.B;
     if (c && (c.type === 'video' || c.type === 'image')) {
       const src = env.source(c);
@@ -924,23 +926,19 @@ export function renderFrame(ctx, t, env) {
     }
   }
 
-  for (const tr of visual) {
+  for (const { tr, idx } of plan.visual) {
     if (tr.kind === 'main') {
-      const st = mainTrackState(mainList, t);
+      const st = mainStateAt(plan, t);
       if (!st) continue;
       if (st.clip) drawVisualClip(ctx, st.clip, t, env);
       else drawTransition(ctx, st.A, st.B, t, clamp(st.p, 0, 1), st.type, env);
     } else {
-      for (const c of sortedClips(P, tr.id)) {
-        if (t >= c.start && t < c.start + c.duration) drawVisualClip(ctx, c, t, env);
-      }
+      for (const c of clipsAt(idx, t)) drawVisualClip(ctx, c, t, env);
     }
   }
 
-  const fxTracks = P.tracks.filter((tr) => tr.kind === 'effect' && !tr.hidden).reverse();
-  for (const tr of fxTracks) {
-    for (const c of sortedClips(P, tr.id)) {
-      if (t < c.start || t >= c.start + c.duration) continue;
+  for (const { idx } of plan.effects) {
+    for (const c of clipsAt(idx, t)) {
       if (c.effect?.type === 'adjust') applyAdjustLayer(ctx, c, env.s);
       else applyEffect(ctx, c.effect, t, t - c.start, c.duration);
     }

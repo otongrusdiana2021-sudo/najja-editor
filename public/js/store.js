@@ -4,6 +4,7 @@ import { ASPECTS, DEFAULT_TEXT, ADJUSTMENTS } from './presets.js';
 import { prefs } from './db.js';
 import { storage } from './storage.js';
 import { metrics } from './metrics.js';
+import { planFor } from './plan.js';
 
 export const MIN_CLIP = 0.1;
 export const VISUAL_TYPES = ['video', 'image', 'solid', 'text', 'sticker'];
@@ -304,6 +305,7 @@ class Store {
     this.listeners = new Map();
     this.saveState = 'saved';
     this.clipboard = null;
+    this.rev = 0; // bumped on every change of the project (render plan cache key)
     this._live = null;
     this.thumbProvider = null;
     this.scheduleSave = debounce(() => this.save(), 700);
@@ -314,6 +316,7 @@ class Store {
     return () => this.listeners.get(evt)?.delete(fn);
   }
   emit(evt, data) {
+    if (evt === 'project') this.rev++;
     for (const fn of this.listeners.get(evt) || []) {
       try { fn(data); } catch (e) { console.error(e); }
     }
@@ -325,6 +328,8 @@ class Store {
   track(id) { return this.project.tracks.find((t) => t.id === id); }
   media(id) { return getMedia(this.project, id); }
   duration() { return projectDuration(this.project); }
+  /** Compiled render plan of the current project (rebuilt only after a change). */
+  plan() { return planFor(this.project, this.rev); }
   selected() { return this.selection ? this.clip(this.selection) : null; }
 
   // history
@@ -347,6 +352,7 @@ class Store {
   live(fn, kind = 'live') {
     if (!this._live) this._live = this.snapshot();
     fn(this.project);
+    this.rev++;
     this.emit(kind);
   }
   commitLive(label) {

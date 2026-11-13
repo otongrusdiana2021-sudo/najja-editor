@@ -1,5 +1,6 @@
 // Playback engine: master clock, media element sync, Web Audio mixing and preview rendering.
-import { store, sortedClips } from './store.js';
+import { store } from './store.js';
+import { compilePlan } from './plan.js';
 import { mediaRT } from './media.js';
 import { renderFrame, preloadFonts, onFontsLoaded } from './render.js';
 import { clamp } from './util.js';
@@ -204,6 +205,7 @@ export class Engine {
   env(s, boxes = null) {
     return {
       project: store.P,
+      plan: store.plan(),
       s,
       boxes,
       mediaMeta: (id) => store.media(id),
@@ -247,28 +249,7 @@ export class Engine {
    * Returns Map clipId -> element key (the id of the first clip in its chain).
    */
   chainKeys(P) {
-    const keys = new Map();
-    const byTrack = new Map();
-    for (const c of P.clips) {
-      if (c.type !== 'video' && c.type !== 'audio') continue;
-      if (!byTrack.has(c.trackId)) byTrack.set(c.trackId, []);
-      byTrack.get(c.trackId).push(c);
-    }
-    for (const list of byTrack.values()) {
-      list.sort((a, b) => a.start - b.start);
-      let prev = null;
-      for (const c of list) {
-        const sp = c.speed || 1;
-        const joins = !!prev && prev.mediaId === c.mediaId && prev.type === c.type
-          && Math.abs((prev.speed || 1) - sp) < 1e-6
-          && Math.abs(prev.start + prev.duration - c.start) < 0.002
-          && Math.abs(prev.in + prev.duration * sp - c.in) < 0.05
-          && !(c.transition?.type && c.transition.type !== 'none');
-        keys.set(c.id, joins ? keys.get(prev.id) : c.id);
-        prev = c;
-      }
-    }
-    return keys;
+    return (P === store.P ? store.plan() : compilePlan(P)).chainKeys;
   }
   keyFor(clip) { return this.keys?.get(clip.id) || clip.id; }
 
@@ -367,23 +348,20 @@ export class Engine {
     const P = store.P;
     if (!P) return;
     const t = this.time;
-    this.keys = this.chainKeys(P);
-    const mainList = sortedClips(P, 'main');
+    // Element groups, chain keys and the main track order come from the compiled plan (once per project change,
+    // not on every tick).
+    const plan = store.plan();
+    this.keys = plan.chainKeys;
+    const mainList = plan.main.clips;
     const margins = (clip) => {
       if (clip.trackId !== 'main') return [0, 0];
-      const i = mainList.indexOf(clip);
+      const i = plan.mainIndex.get(clip.id) ?? -1;
       const pre = clip.transition?.type && clip.transition.type !== 'none' ? (clip.transition.duration || 0.6) / 2 : 0;
       const next = mainList[i + 1];
       const post = next?.transition?.type && next.transition.type !== 'none' ? (next.transition.duration || 0.6) / 2 : 0;
       return [pre, post];
     };
-    const groups = new Map();
-    for (const clip of P.clips) {
-      if (clip.type !== 'video' && clip.type !== 'audio') continue;
-      const k = this.keyFor(clip);
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(clip);
-    }
+    const groups = plan.groups;
     const lookahead = this.playing ? 2.5 : 0.5;
     const running = this.playing && !this.buffering;
     const alive = new Set();

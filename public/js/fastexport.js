@@ -6,6 +6,7 @@
 import { store } from './store.js';
 import { mediaRT } from './media.js';
 import { renderFrame } from './render.js';
+import { compilePlan } from './plan.js';
 
 export class Unsupported extends Error {}
 const unsupported = (why) => new Unsupported(why);
@@ -483,6 +484,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   const ctx = canvas.getContext('2d', { alpha: false });
   const env = {
     project: P,
+    plan: compilePlan(P), // the project does not change during an export
     s: width / P.width,
     boxes: null,
     mediaMeta: (id) => store.media(id),

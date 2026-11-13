@@ -217,3 +217,74 @@ Lab: 4 vCPU Xeon 2,1 GHz, 17 GB, Chromium headless **tanpa GPU** (SwiftShader), 
 ### Berikutnya
 
 P2: render plan terkompilasi (indeks per track + binary search), lalu ukur ulang B1/B2/B3 dengan `node bench/report.mjs baseline.json sesudah.json`.
+
+---
+
+## P2 — Timeline hot path: render plan terkompilasi
+
+### Masalah (kode v1.6/P1)
+
+| Lokasi | Masalah |
+|---|---|
+| `public/js/render.js` `renderFrame` | Setiap frame (30–60×/dtk): `P.tracks.filter(...)` dua kali, lalu `sortedClips()` (filter + sort semua klip) untuk **setiap** track, lalu `mainTrackState` yang menyisir track utama dari awal. |
+| `public/js/engine.js` `sync()` | Setiap tick saat diputar: `chainKeys()` (kelompokkan + sort semua klip video/audio), `sortedClips('main')`, bangun ulang peta grup elemen, dan `mainList.indexOf()` per klip (O(n²)). |
+
+Biayanya tumbuh dengan jumlah klip, bukan dengan apa yang terlihat di layar.
+
+### Keputusan desain
+
+- **`store.rev`**: nomor revisi proyek, naik pada setiap perubahan (`mutate`, `live`, undo/redo, muat proyek, batal geser).
+- **`public/js/plan.js` (baru, fungsi murni tanpa DOM):** `compilePlan(P)` membangun sekali per revisi:
+  - klip per track terurut (sort stabil, urutan seri sama seperti `sortedClips`), plus `maxEnd` (maksimum berjalan ujung klip);
+  - urutan track visual/efek, posisi klip di track utama, *chain key* elemen media, dan grup elemen.
+- **`clipsAt(track, t)`**: binary search + mundur selama `maxEnd > t`, jadi O(log n + klip yang terlihat).
+- **`mainStateAt(plan, t)`**: hasilnya persis sama dengan `mainTrackState` (klip, atau pasangan transisi + progres), tapi hanya memeriksa klip di sekitar `t`.
+- **`renderFrame`** memakai `env.plan`. Pemanggil tanpa plan tetap benar karena plan dikompilasi di tempat. **Ekspor cepat** mengompilasi plan sekali per ekspor. **`engine.sync`** memakai grup, *chain key*, dan indeks track utama dari plan.
+- *Trade-off:* cache bergantung pada setiap perubahan struktur yang lewat `store.mutate/live`. Semua jalur edit (timeline, inspector, MCP, undo) sudah memakainya. Selain itu, cache juga dikunci pada objek proyek, jadi undo/muat proyek selalu membuat plan baru. `mainTrackState` versi lama tetap ada sebagai referensi tes.
+
+### File yang berubah
+
+`public/js/plan.js` (baru), `public/js/store.js` (`rev`, `plan()`), `public/js/render.js`, `public/js/engine.js`, `public/js/fastexport.js`, `test/plan.test.js` (baru), `bench/plan-micro.mjs` (baru).
+
+### Tes
+
+- `test/plan.test.js` (4 tes) membandingkan langsung dengan kode lama di 20 proyek acak (hingga ~280 klip per proyek, termasuk celah, transisi, potongan dari file yang sama, dan start yang sama):
+  - `clipsAt` = `sortedClips().filter()` di setiap track, ±8.000 titik waktu acak, plus semua batas klip (tepat di awal/akhir dan 1e-9 sebelumnya).
+  - `mainStateAt` = `mainTrackState` (klip yang sama, atau pasangan A/B transisi yang sama dengan progres sama hingga 1e-12).
+  - urutan track, track tersembunyi, chain key, grup elemen, dan cache per revisi.
+- `npm test` **36/36 lolos**. `npm run test:e2e` lolos (`get_frame` 8/8 tepat, semua cek UI iPad).
+
+### Benchmark sebelum/sesudah
+
+**1. Mikro (`node bench/plan-micro.mjs`)**: biaya JS per frame untuk "apa yang terlihat di t" (renderFrame) ditambah pengelompokan elemen (engine.sync).
+
+| Klip | v1.6 (ms/frame) | P2 (ms/frame) | Lebih cepat | Kompilasi plan (sekali per edit) |
+|---|---|---|---|---|
+| 50 | 0,033 | 0,007 | 4,6× | 0,04 ms |
+| 200 | 0,064 | 0,019 | 3,5× | 0,12 ms |
+| 1.000 | 0,407 | 0,010 | 41× | 0,46 ms |
+| 3.000 | 1,618 | 0,034 | 47× | 0,98 ms |
+
+**2. A/B `renderFrame` di browser**: renderer commit P1 vs P2, berselang-seling per blok 40 frame di halaman yang sama (menghilangkan noise antar-run). Dipakai proyek nyata pengguna (57 klip: 38 teks, 7 video, 6 efek, 5 stiker) dan versi yang ditambah klip teks. Dua putaran:
+
+| Proyek | v1.6 (ms/frame) | P2 (ms/frame) | Perubahan |
+|---|---|---|---|
+| Nyata, 57 klip | 0,53–0,57 | 0,48–0,51 | **−10%** |
+| +500 klip (557) | 0,66–0,67 | 0,51–0,54 | **−20%** |
+| +2.000 klip (2.057) | 1,11–1,15 | 0,70–0,72 | **−37%** |
+
+**3. Fixture B1–B3** (`bench/results/2026-11-13-p2-desktop.*`):
+- FPS, frame terlewat, seek, dan ekspor berada dalam rentang noise lab.
+- Contoh noisenya: decode/encode ekspor, yang tidak disentuh P2, bergerak ±10–14% antar-run, dan B1 baseline sendiri 1,6% vs 2,4% frame terlewat di dua run.
+- Di proyek ≤62 klip, pencarian klip hanya ~0,03 ms dari 6–10 ms waktu gambar frame. Biaya utamanya ada di gambar Canvas 2D (filter, teks, komposit), yang menjadi wilayah P3.
+- **Kesimpulan jujur:** P2 tidak membuat B1–B3 terasa berbeda di desktop lab. P2 menghapus biaya yang tumbuh dengan jumlah klip, yang paling terasa di proyek panjang dan di HP (CPU 4–8× lebih lambat dari lab).
+
+### Risiko, fallback, rollback
+
+- **Risiko:** plan basi kalau ada kode yang mengubah `start/duration/trackId/transition/hidden` tanpa `store.mutate/live`. Mitigasinya: semua jalur edit sudah lewat store (diaudit: timeline, inspector, actions, MCP api), cache juga dikunci pada objek proyek, dan tes e2e iPad (geser, trim, transisi, pindah overlay) lolos.
+- **Fallback:** `renderFrame` tanpa `env.plan` (atau plan untuk proyek lain) langsung mengompilasi plan sendiri.
+- **Rollback:** revert commit. Tidak ada perubahan data.
+
+### Berikutnya
+
+P4: memori ekspor (B3 baseline 2,7 GB RAM renderer untuk 2 menit ekspor).
