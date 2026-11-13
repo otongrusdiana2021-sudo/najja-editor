@@ -1,0 +1,371 @@
+{
+  "label": "v1.7.0",
+  "profile": "desktop",
+  "at": "2026-11-13T06:03:31.807Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B0": {
+      "ok": true,
+      "import": {
+        "import_visible_p95_ms": 257.8,
+        "upload_ms": 731.8,
+        "upload_mbps": 1006.9,
+        "asset_ready_ms": 10002.1,
+        "until_steady_ms": 10523,
+        "wait_after_upload_ms": 10216
+      },
+      "playback": {
+        "seconds": 15,
+        "fps_rendered": 29.8,
+        "frames_missed_pct": 5.3,
+        "video_dropped_pct": 0.9,
+        "frame_draw_p50_ms": 6,
+        "frame_draw_p95_ms": 9.5,
+        "buffer_waits": 0,
+        "long_tasks": 1,
+        "preview_canvas": "579x326"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 33.1,
+        "p95_ms": 54.1,
+        "max_ms": 54.1
+      },
+      "export": {
+        "state": "done",
+        "wall_ms": 22532,
+        "mode": "fast",
+        "spool": "opfs",
+        "audio_decoded_s": 120,
+        "fetch_media_ms": 1,
+        "prepare_ms": 1812,
+        "decode_ms": 3482,
+        "composite_ms": 16506,
+        "encode_ms": 322,
+        "mux_ms": 25,
+        "total_ms": 22194,
+        "realtime_factor": 2.7,
+        "encoder_queue_max": 3,
+        "output_size": 47984117,
+        "renderer_rss_start_mb": 740,
+        "renderer_rss_peak_mb": 1087,
+        "js_heap_peak_mb": 75,
+        "probe": {
+          "video": "h264 1920x1080 30/1",
+          "audio": "opus",
+          "duration": 60,
+          "audio_mean_db": -18.1,
+          "audio_max_db": -10.9
+        }
+      },
+      "seconds": 50
+    },
+    "B1": {
+      "ok": true,
+      "project": {
+        "clips": 9,
+        "duration": 60
+      },
+      "playback": {
+        "seconds": 15,
+        "fps_rendered": 30.2,
+        "frames_missed_pct": 5.1,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 6.3,
+        "frame_draw_p95_ms": 9,
+        "buffer_waits": 0,
+        "long_tasks": 0,
+        "preview_canvas": "183x325"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 26.6,
+        "p95_ms": 105.4,
+        "max_ms": 105.4
+      },
+      "export": {
+        "state": "done",
+        "wall_ms": 51743,
+        "mode": "fast",
+        "spool": "opfs",
+        "audio_decoded_s": 100,
+        "fetch_media_ms": 0,
+        "prepare_ms": 1588,
+        "decode_ms": 3506,
+        "composite_ms": 42182,
+        "encode_ms": 4074,
+        "mux_ms": 23,
+        "total_ms": 51419,
+        "realtime_factor": 1.17,
+        "encoder_queue_max": 5,
+        "output_size": 32448468,
+        "renderer_rss_start_mb": 908,
+        "renderer_rss_peak_mb": 1375,
+        "js_heap_peak_mb": 89,
+        "probe": {
+          "video": "h264 1080x1920 30/1",
+          "audio": "opus",
+          "duration": 60,
+          "audio_mean_db": -18.9,
+          "audio_max_db": -10.7
+        }
+      },
+      "seconds": 80
+    },
+    "B2": {
+      "ok": true,
+      "project": {
+        "clips": 9,
+        "duration": 34
+      },
+      "playback": {
+        "seconds": 15,
+        "fps_rendered": 30.3,
+        "frames_missed_pct": 11.6,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 10.3,
+        "frame_draw_p95_ms": 16.3,
+        "buffer_waits": 0,
+        "long_tasks": 0,
+        "preview_canvas": "579x326"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 54.9,
+        "p95_ms": 187.9,
+        "max_ms": 187.9
+      },
+      "export": {
+        "state": "done",
+        "wall_ms": 22306,
+        "mode": "fast",
+        "spool": "opfs",
+        "audio_decoded_s": 34,
+        "audio_full_decode": 2,
+        "fetch_media_ms": 0,
+        "prepare_ms": 818,
+        "decode_ms": 2832,
+        "composite_ms": 12659,
+        "encode_ms": 5346,
+        "mux_ms": 26,
+        "total_ms": 21711,
+        "realtime_factor": 1.57,
+        "encoder_queue_max": 5,
+        "output_size": 27172231,
+        "renderer_rss_start_mb": 1020,
+        "renderer_rss_peak_mb": 1341,
+        "js_heap_peak_mb": 70,
+        "probe": {
+          "video": "h264 1920x1080 30/1",
+          "audio": "opus",
+          "duration": 34,
+          "audio_mean_db": -21.3,
+          "audio_max_db": -14.4
+        }
+      },
+      "seconds": 49
+    },
+    "B3": {
+      "ok": true,
+      "project": {
+        "clips": 62,
+        "duration": 600
+      },
+      "playback": {
+        "seconds": 10,
+        "fps_rendered": 30,
+        "frames_missed_pct": 5.3,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 6.6,
+        "frame_draw_p95_ms": 9.9,
+        "buffer_waits": 0,
+        "long_tasks": 0,
+        "preview_canvas": "579x326"
+      },
+      "seek": {
+        "n": 30,
+        "p50_ms": 53.9,
+        "p95_ms": 73.6,
+        "max_ms": 74
+      },
+      "export": {
+        "range_s": 120,
+        "size": 95577316,
+        "seconds": 45.737,
+        "mode": "fast",
+        "probe": {
+          "video": "h264 1920x1080 30/1",
+          "audio": "opus",
+          "duration": 120,
+          "audio_mean_db": -16.3,
+          "audio_max_db": -8.5
+        },
+        "spool": "opfs",
+        "audio_decoded_s": 360,
+        "prepare_ms": 7451,
+        "fetch_media_ms": 0,
+        "decode_ms": 5826,
+        "composite_ms": 31985,
+        "encode_ms": 422,
+        "mux_ms": 28,
+        "realtime_factor": 2.62,
+        "encoder_queue_max": 3,
+        "renderer_rss_start_mb": 1042,
+        "renderer_rss_peak_mb": 1434,
+        "js_heap_peak_mb": 261
+      },
+      "seconds": 141
+    },
+    "B4": {
+      "ok": true,
+      "cold_ready_ms": 1446,
+      "cold_first_frame_ms": 146,
+      "cold_seek_p95_ms": 189.4,
+      "cold_media_on_device_ms": 1558,
+      "warm_ready_ms": 870,
+      "warm_first_frame_ms": 144,
+      "warm_seek_p95_ms": 156.2,
+      "project_matches": true,
+      "seconds": 7
+    },
+    "B5": {
+      "ok": true,
+      "total_ms": 96185,
+      "users": [
+        {
+          "file": "b3-long-10m-1080p.mp4",
+          "size_mb": 439,
+          "started_s": 0,
+          "upload_ms": 2969.3,
+          "asset_ready_ms": 95829.5,
+          "until_ready_ms": 95911
+        },
+        {
+          "file": "b0-1080p30-60s.mp4",
+          "size_mb": 88,
+          "started_s": 3.4,
+          "upload_ms": 3361.9,
+          "asset_ready_ms": 26356.4,
+          "until_ready_ms": 26439
+        },
+        {
+          "file": "b2-main1-1080p.mp4",
+          "size_mb": 18,
+          "started_s": 3.4,
+          "upload_ms": 1118.1,
+          "asset_ready_ms": 9420.8,
+          "until_ready_ms": 9409
+        },
+        {
+          "file": "b1-clip4-1080x1920.mp4",
+          "size_mb": 12,
+          "started_s": 3.4,
+          "upload_ms": 1056.8,
+          "asset_ready_ms": 6178.8,
+          "until_ready_ms": 6427
+        }
+      ],
+      "api_latency": {
+        "n": 362,
+        "p50_ms": 9,
+        "p95_ms": 42.3,
+        "max_ms": 199.6
+      },
+      "server_jobs": {
+        "edit": {
+          "class": "fast",
+          "limit": 1,
+          "done": 15,
+          "failed": 0,
+          "cancelled": 0,
+          "retried": 0,
+          "running": 0,
+          "queued": 0,
+          "wait": {
+            "n": 15,
+            "p50": 3796,
+            "p95": 6580,
+            "max": 6580
+          },
+          "run": {
+            "n": 15,
+            "p50": 2428,
+            "p95": 91640,
+            "max": 91640
+          }
+        },
+        "assets": {
+          "class": "light",
+          "limit": 1,
+          "done": 20,
+          "failed": 0,
+          "cancelled": 0,
+          "retried": 0,
+          "running": 1,
+          "queued": 0,
+          "wait": {
+            "n": 21,
+            "p50": 5668,
+            "p95": 79766,
+            "max": 91642
+          },
+          "run": {
+            "n": 20,
+            "p50": 1213,
+            "p95": 23427,
+            "max": 23427
+          }
+        },
+        "proxy": {
+          "class": "slow",
+          "limit": 1,
+          "done": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "retried": 0,
+          "running": 0,
+          "queued": 0,
+          "wait": null,
+          "run": null
+        }
+      },
+      "server_load": [
+        8.01,
+        5.11,
+        3.55
+      ],
+      "seconds": 98
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1280x800@1x",
+    "touch": false,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 9,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}

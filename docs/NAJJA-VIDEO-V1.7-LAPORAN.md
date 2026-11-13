@@ -5,6 +5,50 @@ masalah (file/baris), keputusan desain dan trade-off, file yang berubah, tes, be
 risiko/fallback/deploy/migrasi/rollback, dan pekerjaan berikutnya. Rencananya ada di
 [NAJJA-VIDEO-IMPLEMENTATION-PLAN.md](NAJJA-VIDEO-IMPLEMENTATION-PLAN.md).
 
+## Ringkasan rilis v1.7.0
+
+| Fase | Status | Hasil utama (diukur) |
+|---|---|---|
+| **P0** Keamanan | ✅ | Data per akun. Akun lain dijawab 404 di semua route, file, dan MCP. Token AI pribadi. Migrasi otomatis dengan cadangan, dan rollback ke v1.6 aman. |
+| **P1** Pengukuran | ✅ | Menu Diagnostik, metrik blueprint 9.1, benchmark B0–B5 yang bisa diulang. Langsung menemukan bug frame salah setelah seek (diperbaiki: 6/10 → 10/10 benar dalam 41–77 ms). |
+| **P2** Timeline | ✅ | Render plan terkompilasi. Pencarian klip 3,5–47× lebih cepat; `renderFrame` −10% (57 klip) s.d. −37% (2.057 klip). |
+| P3 Render worker / WebGL2 | ⏸ | Ditunda: butuh data perangkat nyata (lihat rencana). |
+| **P4** Memori ekspor | ✅ (spool Safari menyusul) | Ekspor 120 dtk dari video 10 menit: RAM renderer 2,7 GB → 1,3 GB, JS heap 690 → 174–284 MB. Audio identik, kecepatan sama. |
+| **P5** Antrean job | ✅ | Tahan restart/crash, retry, cancel, adil antar-akun. Klip pendek siap 7–11 dtk (sebelumnya 111–112 dtk) saat video panjang sedang dikonversi. |
+| **P6** Sinkron | ✅ | Revisi + 409. Perubahan perangkat A terlihat di B dalam 1,0 dtk. Konflik ditanyakan, tidak ditimpa diam-diam. Draf lokal tidak hilang. |
+| P7 Cloud render | ⏸ | Butuh keputusan biaya/infrastruktur. |
+
+**Tes:** `npm test` 53/53. `npm run test:e2e` (get_frame, UI iPad, sinkron dua perangkat) lolos.
+
+### Benchmark akhir vs baseline, dan catatan noise
+
+Benchmark akhir ada di `bench/results/2026-11-13-v1.7.0-desktop.*`. Dibanding baseline P1, beberapa angka pratinjau tampak lebih buruk: seek → frame dan frame terlewat di B0/B3. Untuk memastikan, B0 dan B3 dijalankan **bergantian** di kode P1 dan v1.7.0, masing-masing 2× dengan runner yang sama (`bench/results/2026-11-13-ab-*`):
+
+| | P1 run 1 | P1 run 2 | v1.7.0 run 1 | v1.7.0 run 2 |
+|---|---|---|---|---|
+| B0 seek → frame p50 / p95 (ms) | 38,8 / 169,7 | 39,1 / 41,0 | 24,6 / 56,7 | 37,7 / 52,7 |
+| B0 frame terlewat | 6,9% | 0% | 4,4% | 2,4% |
+| B3 seek → frame p50 / p95 (ms) | 41,2 / 61,6 | 55,0 / 88,4 | 54,7 / 72,8 | 54,8 / 69,0 |
+| B3 frame terlewat | 4,3% | 10,7% | 0% | 3,7% |
+| B3 ekspor: RAM renderer puncak | 2.248 MB | 2.723 MB | **1.259 MB** | **1.320 MB** |
+| B3 ekspor: JS heap puncak | 686 MB | 698 MB | **251 MB** | **284 MB** |
+
+Kesimpulannya:
+- Angka pratinjau (seek, frame terlewat) di mesin lab headless tanpa GPU berayun ±30–300% antar-run **pada kode yang sama**. Baseline P1 kebetulan run yang baik.
+- Tidak ada regresi pratinjau. Penghematan memori ekspor konsisten di semua run.
+- Angka pratinjau yang bisa dipercaya untuk keputusan berikutnya (terutama P3) harus diambil dari **Diagnostik di PC, iPad, dan HP nyata**, dengan beberapa run per perangkat (blueprint 9.3).
+
+### Deploy dan rollback
+
+- **Deploy:** jalankan installer seperti biasa. Saat start, v1.7 otomatis:
+  1. memberi ID ke akun lama dan menetapkan pemilik data lama ke admin pertama (dicadangkan dulu ke `data/backups/`);
+  2. membuat `data/jobs/` (antrean konversi).
+- **Yang berubah bagi pengguna:**
+  - Akun editor hanya melihat proyeknya sendiri.
+  - AI disambungkan dengan **Token AI pribadi** (menu akun). Token server lama tetap berlaku sebagai admin pertama.
+- **Saklar `.env` baru:** `NAJJA_JOB_LIGHT/FAST/SLOW`, `NAJJA_EXPORT_SPOOL=0`, `NAJJA_SYNC_POLL_MS`.
+- **Rollback:** pasang v1.6.0. Semua kolom baru hanya ditambahkan; detailnya di `docs/DEPLOY.md`.
+
 ---
 
 ## P0 — Fondasi keamanan: data per akun

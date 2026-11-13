@@ -73,14 +73,15 @@ Identitas selalu dari sesi/token yang diverifikasi server, tidak pernah dari bod
 
 Alasan: blueprint mewajibkan benchmark di perangkat nyata (PC, iPad, HP) sebelum memindahkan compositing ke OffscreenCanvas/WebGL2, dan menganggap WebGL bukan "tombol ajaib". Pengukuran v1.6 di Chromium tanpa GPU tidak mewakili iPad/HP. Langkah berikut: kumpulkan data **Diagnostik** (P1) dari perangkat nyata, lalu prototipe compositor WebGL2 untuk filter/adjustment layer di balik feature flag, dengan Canvas 2D tetap sebagai fallback.
 
-## P4 — Export memory 🟡 (v1.7)
+## P4 — Export memory ✅ (v1.7; spool di Safari menyusul)
 
 | File | Task |
 |---|---|
 | `public/js/fastexport.js` | Sumber video dibaca **bertahap** dari Blob (disk-backed) per sampel, bukan `arrayBuffer()` penuh; **backpressure** encoder (`encodeQueueSize` dibatasi); hasil encode video ditulis bertahap ke **file sementara OPFS** (bila tersedia) sehingga RAM tidak tumbuh sepanjang durasi; file akhir disusun dari Blob disk-backed. Pencatatan sumber yang dipakai per media. |
 | `public/js/exporter.js` | Status mode (cepat/realtime) dan sumber kualitas penuh per media dicatat di hasil ekspor. |
 
-Belum di v1.7: mix audio masih men-decode file audio utuh lewat `decodeAudioData` (perlu jalur AudioDecoder streaming).
+Dikerjakan juga: audio MP4/AAC di-decode **hanya rentang yang diekspor** lewat `AudioDecoder` (fallback `decodeAudioData` utuh untuk MP3/WAV, tanpa cache permanen).
+Belum di v1.7: spool OPFS di Safari/iPad (butuh worker + `createSyncAccessHandle`); di sana hasil encode masih di memori, sementara pembacaan sumber bertahap dan decode audio per rentang tetap aktif.
 
 ## P5 — Media job system ✅ (v1.7)
 
