@@ -376,6 +376,9 @@ async function diagnosticsDialog() {
         <section>${ex ? kv(`Ekspor terakhir (${ex.ok ? 'berhasil' : ex.cancelled ? 'dibatalkan' : 'gagal'})`, [
           ['Mode', ex.mode === 'fast' ? 'cepat (WebCodecs)' : ex.mode === 'realtime' ? 'real-time (MediaRecorder)' : ex.mode],
           ['Fallback', ex.fallback], ['Hasil', `${ex.width}×${ex.height} ${ex.fps} fps · ${ex.duration} dtk`],
+          ['Hasil encode ditampung', ex.spool === 'opfs' ? 'file sementara di perangkat (hemat RAM)' : ex.spool === 'memory' ? 'memori' : null],
+          ['Audio di-decode', ex.audio_decoded_s != null ? `${Math.round(ex.audio_decoded_s)} dtk (hanya bagian yang dipakai)` : null],
+          ['File audio di-decode utuh', ex.audio_full_decode || null],
           ['Siapkan media', fmt(ex.fetch_media_ms, ' ms')], ['Persiapan', fmt(ex.prepare_ms, ' ms')], ['Decode', fmt(ex.decode_ms, ' ms')], ['Komposit', fmt(ex.composite_ms, ' ms')],
           ['Encode', fmt(ex.encode_ms, ' ms')], ['Mux', fmt(ex.mux_ms, ' ms')], ['Total', fmt(ex.total_ms, ' ms')], ['Kecepatan', ex.realtime_factor ? `${ex.realtime_factor}× real-time` : null],
           ['Antrean encoder maks.', ex.encoder_queue_max], ['Ukuran', ex.output_size ? fmtBytes(ex.output_size) : null], ['Gagal di tahap', ex.ok ? null : ex.failure_stage], ['Error', ex.error],

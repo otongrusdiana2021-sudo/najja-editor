@@ -733,6 +733,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
         auth: !!TOKEN,
         storage: 'server',
         account: { id: who.id, via: who.via, role: who.role },
+        features: { exportSpool: process.env.NAJJA_EXPORT_SPOOL !== '0' },
         mcp: { http: `${publicUrl}/mcp`, ...(admin ? { stdio: { command: 'node', args: [path.join(__dirname, 'mcp-stdio.js')] } } : {}) },
         editors: bridge.count(who.id),
         convert: (await mediaTools()).ffmpeg,

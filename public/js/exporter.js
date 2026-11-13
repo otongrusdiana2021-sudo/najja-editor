@@ -5,6 +5,7 @@ import { preloadFonts } from './render.js';
 import { cacheProjectMedia } from './media.js';
 import { fastExport, fastExportAvailable } from './fastexport.js';
 import { metrics } from './metrics.js';
+import { storage } from './storage.js';
 
 const MP4_TYPES = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4'];
 const WEBM_TYPES = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
@@ -149,6 +150,7 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
         await preloadFonts(P);
         const blob = await fastExport({
           engine, P, width, height, fps, bitrate: videoBitsPerSecond, r0, r1, flag, stats,
+          spool: storage.status?.features?.exportSpool !== false, // NAJJA_EXPORT_SPOOL=0 on the server turns it off
           onProgress: (p) => { exportState.progress = p; onProgress(p); },
         });
         return finish(blob, 'mp4', 'fast');

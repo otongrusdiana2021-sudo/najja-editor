@@ -6,7 +6,7 @@
 // Writes bench/results/<date>-<label>-<profile>.json and .md. Numbers from a headless lab machine are a baseline
 // for before/after comparison, not a device verdict: run on real PC/iPad/HP for device classes (blueprint 9.3).
 import { createRequire } from 'node:module';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -199,16 +199,23 @@ async function measureExport(page, { resolution = '1080p' } = {}) {
   const snap = await snapshot(page);
   const ev = [...snap.events].reverse().find((e) => e.kind === 'export') || {};
   const file = st.result?.path || (st.result?.file && path.join(dataDir, 'exports', st.result.file));
-  return { state: st.state, wall_ms: Date.now() - t0, ...pick(ev, ['mode', 'fallback', 'fetch_media_ms', 'prepare_ms', 'decode_ms', 'composite_ms', 'encode_ms', 'mux_ms', 'total_ms', 'realtime_factor', 'encoder_queue_max', 'output_size', 'failure_stage']), ...mem, probe: probe(file) };
+  return { state: st.state, wall_ms: Date.now() - t0, ...pick(ev, ['mode', 'fallback', 'spool', 'audio_decoded_s', 'audio_full_decode', 'fetch_media_ms', 'prepare_ms', 'decode_ms', 'composite_ms', 'encode_ms', 'mux_ms', 'total_ms', 'realtime_factor', 'encoder_queue_max', 'output_size', 'failure_stage']), ...mem, probe: probe(file) };
 }
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] != null).map((k) => [k, o[k]]));
+/** Loudness of the exported audio: a quick check that the sound is there, at the same level as before. */
+function loud(file) {
+  const r = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', file, '-map', '0:a:0', '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' });
+  const mean = /mean_volume:\s*(-?[\d.]+) dB/.exec(r.stderr || '')?.[1];
+  const max = /max_volume:\s*(-?[\d.]+) dB/.exec(r.stderr || '')?.[1];
+  return { audio_mean_db: mean != null ? Number(mean) : null, audio_max_db: max != null ? Number(max) : null };
+}
 function probe(file) {
   if (!file || !fs.existsSync(file)) return null;
   try {
     const j = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,width,height,avg_frame_rate:format=duration', '-of', 'json', file]).toString());
     const v = j.streams.find((s) => s.codec_type === 'video');
     const a = j.streams.find((s) => s.codec_type === 'audio');
-    return { video: v ? `${v.codec_name} ${v.width}x${v.height} ${v.avg_frame_rate}` : null, audio: a?.codec_name || null, duration: r1(Number(j.format.duration)) };
+    return { video: v ? `${v.codec_name} ${v.width}x${v.height} ${v.avg_frame_rate}` : null, audio: a?.codec_name || null, duration: r1(Number(j.format.duration)), ...(a ? loud(file) : {}) };
   } catch (err) { return { error: err.message }; }
 }
 
@@ -288,15 +295,19 @@ await run('B3', async () => {
   const ex = await page.evaluate(async (secs) => {
     const { exportVideo } = await import('/js/exporter.js');
     const r = await exportVideo(window.najja.engine, { resolution: '1080p', format: 'mp4', range: [0, secs] });
-    return { size: r.size, seconds: r.seconds, mode: r.mode };
+    const { remote } = await import('/js/remote.js');
+    const up = await remote.upload(r.blob, { target: 'export', filename: 'b3-range.mp4', mime: r.mime });
+    return { size: r.size, seconds: r.seconds, mode: r.mode, file: up.file };
   }, B3_EXPORT_S);
   const mem = stop();
+  ex.probe = probe(path.join(dataDir, 'exports', ex.file));
+  delete ex.file;
   const ev = [...(await snapshot(page)).events].reverse().find((e) => e.kind === 'export') || {};
   return {
     project: { clips: P.clips.length, duration: P.duration },
     playback: await measurePlayback(page, 10, 300),
     seek: await measureSeeks(page, 30),
-    export: { range_s: B3_EXPORT_S, ...ex, ...pick(ev, ['prepare_ms', 'fetch_media_ms', 'decode_ms', 'composite_ms', 'encode_ms', 'mux_ms', 'realtime_factor', 'encoder_queue_max']), ...mem },
+    export: { range_s: B3_EXPORT_S, ...ex, ...pick(ev, ['spool', 'audio_decoded_s', 'audio_full_decode', 'prepare_ms', 'fetch_media_ms', 'decode_ms', 'composite_ms', 'encode_ms', 'mux_ms', 'realtime_factor', 'encoder_queue_max']), ...mem },
   };
 });
 

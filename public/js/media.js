@@ -1,5 +1,5 @@
 // Media import, thumbnails (filmstrip sprites), waveforms, persistence and synthesized stock audio.
-import { uid, waitEvent, clamp } from './util.js';
+import { uid, waitEvent, clamp, objectUrl, revokeUrl } from './util.js';
 import { db } from './db.js';
 import { store } from './store.js';
 import { SFX } from './presets.js';
@@ -171,7 +171,7 @@ async function setPreview(id, src) {
   if (src.startsWith('blob:')) { rt.url = src; rt.cacheKey = null; changed(id); return; }
   const key = deviceCache.keyFor(id, src);
   const local = key ? await deviceCache.open(key).catch(() => null) : null;
-  if (rt.src !== src) { if (local) URL.revokeObjectURL(local); return; }
+  if (rt.src !== src) { if (local) revokeUrl(local); return; }
   if (local) { useLocal(id, rt, local, src, key); return; }
   // Keep playing what is already on this device (e.g. the original just imported) until the new copy is here.
   if (!rt.url || !rt.url.startsWith('blob:')) rt.url = src;
@@ -277,7 +277,7 @@ export async function cacheLocally(id) {
     onProgress: (p) => { rt.cache = p == null ? null : { progress: p }; changed(id); },
   });
   if (!url) return false;
-  if (mediaRT.get(id) !== rt || (rt.src || src) !== src) { if (url !== rt.exportUrl) URL.revokeObjectURL(url); return false; }
+  if (mediaRT.get(id) !== rt || (rt.src || src) !== src) { if (url !== rt.exportUrl) revokeUrl(url); return false; }
   useLocal(id, rt, url, src, deviceCache.keyFor(id, src));
   return true;
 }
@@ -303,7 +303,7 @@ async function downloadToDevice(id, src, onProgress, stillWanted) {
       })();
       onProgress?.(null);
       if (url) {
-        if (!stillWanted()) { URL.revokeObjectURL(url); return null; }
+        if (!stillWanted()) { revokeUrl(url); return null; }
         return url;
       }
     } catch { /* fall through to the in-memory copy */ }
@@ -362,7 +362,7 @@ async function downloadToMemory(src, onProgress, stillWanted) {
   if (!stillWanted() || (total && got !== total)) return null;
   const blob = new Blob(parts, { type });
   deviceBytes += blob.size;
-  return URL.createObjectURL(blob);
+  return objectUrl(blob);
 }
 
 /** Remove every copy kept on this device; media in use goes back to streaming from the server. */
@@ -373,9 +373,9 @@ export async function clearDeviceCache() {
       rt.url = rt.remoteUrl;
       rt.cacheKey = null;
       changed(id);
-      setTimeout(() => URL.revokeObjectURL(local), 2000);
+      setTimeout(() => revokeUrl(local), 2000);
     }
-    if (rt.exportUrl && rt.exportUrl !== rt.local && rt.exportUrl !== rt.url) URL.revokeObjectURL(rt.exportUrl);
+    if (rt.exportUrl && rt.exportUrl !== rt.local && rt.exportUrl !== rt.url) revokeUrl(rt.exportUrl);
     rt.exportUrl = null;
   }
   await deviceCache.clear();
@@ -591,7 +591,7 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
   if (!type) throw new Error(`Jenis file tidak didukung: ${file.name || file.type}`);
   const id = uid('m');
   const importAt = performance.now();
-  const url = URL.createObjectURL(file);
+  const url = objectUrl(file);
   const entry = { id, name: name || file.name || `${type}-${id}`, type, duration: 0, width: 0, height: 0, size: file.size, hasAudio: type !== 'image', createdAt: Date.now() };
   const rt = { url, src: url, local: url, exportSrc: url, status: 'processing', importAt: remote.enabled && type === 'video' ? importAt : null };
   mediaRT.set(id, rt);
@@ -601,7 +601,7 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
       try {
         v = await probeVideo(url);
       } catch (err) {
-        URL.revokeObjectURL(url);
+        revokeUrl(url);
         if (!remote.enabled) throw err;
         return await importViaServer(file, entry, rt, { silent, adoptFrom });
       }
@@ -644,7 +644,7 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
     }
   } catch (err) {
     mediaRT.delete(id);
-    URL.revokeObjectURL(url);
+    revokeUrl(url);
     const idx = store.P.media.findIndex((m) => m.id === id);
     if (idx >= 0) store.P.media.splice(idx, 1);
     changed(id);
@@ -692,7 +692,7 @@ export async function restoreMedia(P) {
     if (mediaRT.has(m.id)) return;
     const rec = await db.getMedia(m.id);
     if (!rec || !rec.blob) { missing.push(m.id); return; }
-    const url = URL.createObjectURL(rec.blob);
+    const url = objectUrl(rec.blob);
     const rt = { url, src: url, local: url, exportSrc: url, status: 'ready', sprite: rec.sprite, spriteN: rec.spriteN, spriteW: rec.spriteW, spriteH: rec.spriteH, poster: rec.poster, peaks: rec.peaks || null };
     if (m.type === 'image') {
       try { rt.img = await loadImage(url); } catch { rt.status = 'error'; }
@@ -713,7 +713,7 @@ export async function removeMedia(id) {
   const idx = P.media.findIndex((m) => m.id === id);
   if (idx >= 0) P.media.splice(idx, 1);
   const rt = mediaRT.get(id);
-  if (rt?.url) setTimeout(() => URL.revokeObjectURL(rt.url), 2000);
+  if (rt?.url) setTimeout(() => revokeUrl(rt.url), 2000);
   mediaRT.delete(id);
   if (remote.enabled) {
     // the server keeps it if another project still uses it; then the device copy stays too

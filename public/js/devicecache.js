@@ -6,6 +6,7 @@
 // segments (at most 4 MB each, closed whenever the download pauses), so an interrupted download
 // resumes where it stopped. The finished file is a Blob made of the segment files: disk-backed,
 // never loaded into memory as a whole.
+import { objectUrl } from './util.js';
 // key = <media id>_p<version> for the server's H.264 copy, <media id>_f for an original file.
 
 const ROOT = 'najja-media';
@@ -95,7 +96,7 @@ export const deviceCache = {
       if (size !== meta.size) return null;
       meta.lastUsed = Date.now();
       writeMeta(dir, meta).catch(() => {});
-      return URL.createObjectURL(new Blob(segs.map((s) => s.file), { type: meta.type || '' }));
+      return objectUrl(new Blob(segs.map((s) => s.file), { type: meta.type || '' }));
     } catch {
       return null;
     }

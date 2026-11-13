@@ -127,6 +127,21 @@ export function normHex(s) {
   return `#${h}`;
 }
 
+// Blob URLs of media: the Blob behind each URL is kept so an export can read the file in pieces straight from
+// disk (a File, or an OPFS copy) instead of copying it whole into memory. revokeUrl() forgets it again.
+const blobsByUrl = new Map();
+export function objectUrl(blob) {
+  const url = URL.createObjectURL(blob);
+  blobsByUrl.set(url, blob);
+  return url;
+}
+export function revokeUrl(url) {
+  if (!url) return;
+  blobsByUrl.delete(url);
+  URL.revokeObjectURL(url);
+}
+export const blobOfUrl = (url) => blobsByUrl.get(url) || null;
+
 export function downloadBlob(blob, filename) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);

@@ -288,3 +288,83 @@ Biayanya tumbuh dengan jumlah klip, bukan dengan apa yang terlihat di layar.
 ### Berikutnya
 
 P4: memori ekspor (B3 baseline 2,7 GB RAM renderer untuk 2 menit ekspor).
+
+---
+
+## P4 — Memori ekspor
+
+### Masalah (kode sebelum P4)
+
+| Lokasi | Masalah |
+|---|---|
+| `public/js/fastexport.js` `bytes()` | Setiap file sumber dibaca utuh ke RAM (`fetch(url).then(r => r.arrayBuffer())`). Untuk B3, itu 440 MB sebelum satu frame pun dirender. |
+| `fastexport.js` `audioBufferFor` + `audioCache` | Audio setiap file di-decode **utuh** (10 menit stereo float ≈ 230 MB per file) dan disimpan di cache tingkat modul, yang tidak pernah dibersihkan, bahkan antar-ekspor. |
+| `fastexport.js` encoder `output` | Semua chunk H.264 hasil encode dikumpulkan di `chunks[]` (RAM) sampai akhir. Memori tumbuh sepanjang durasi ekspor. |
+| `muxMp4` | Ukuran `mdat` 32-bit: file > 4 GB akan ditulis rusak diam-diam. |
+
+Baseline P1 (B3, 120 dtk pertama): RAM renderer naik 770 → 2.715 MB dan JS heap 669 MB.
+
+### Keputusan desain
+
+- **Sumber dibaca bertahap:**
+  - `ByteSource` membaca Blob di balik URL media (File impor atau salinan OPFS, berbasis disk) per jendela 8 MB.
+  - `moov()` mencari kotak `moov` dengan menelusuri header kotak tingkat atas (juga kalau `moov` ada di akhir file), lalu hanya kotak itu yang dibaca utuh.
+  - Demuxer tidak berubah perilakunya: offset sampel tetap absolut.
+  - Blob tiap URL dicatat lewat `objectUrl()/revokeUrl()` di `util.js`. URL tanpa catatan memakai `fetch().blob()` sebagai fallback.
+- **Audio hanya rentang yang dipakai:**
+  - `demuxAudio` membaca trak AAC (esds → AudioSpecificConfig, edit list untuk priming).
+  - Rentang sumber semua klip dari file yang sama digabung, lalu di-decode dengan **WebCodecs AudioDecoder** hanya untuk rentang itu (±0,25 dtk).
+  - Memori sebanding dengan durasi ekspor, bukan panjang file.
+  - **Fallback:** file non-MP4 (MP3/WAV/OGG) atau browser tanpa AudioDecoder memakai `decodeAudioData` utuh seperti v1.6, tapi **tanpa cache permanen**.
+- **Hasil encode ke file sementara OPFS:**
+  - Data ditulis bertahap (batch 4 MB) dengan *backpressure* (encoder menunggu kalau > 32 MB belum tertulis).
+  - MP4 akhir adalah Blob gabungan header + **File OPFS** (berbasis disk).
+  - File sementara dihapus saat ekspor berikutnya dimulai, karena Blob hasil masih dipakai untuk unduh/upload.
+  - **Fallback:** memori (perilaku v1.6) bila OPFS/`createWritable` tidak ada, atau server diset `NAJJA_EXPORT_SPOOL=0` (diteruskan lewat `/api/status` → `features.exportSpool`).
+- **Jaga-jaga 4 GB:** output yang akan melewati batas ukuran 32-bit dilempar sebagai `unsupported`, lalu jatuh ke perekam real-time. File tidak pernah ditulis rusak.
+- **Kualitas tidak diubah:** resolusi, fps, bitrate, codec, dan sumber kualitas penuh sama persis.
+
+### File yang berubah
+
+| File | Perubahan |
+|---|---|
+| `public/js/fastexport.js` | `sampleTable`/`traks` (dipakai bersama video dan audio), `demuxAudio`, `ByteSource`, rentang audio + `AudioDecoder`, spool OPFS, `VideoSource` membaca bertahap, muxer menerima body Blob + jaga 4 GB, statistik `spool`/`audio_decoded_s`/`audio_full_decode`. |
+| `public/js/util.js`, `media.js`, `devicecache.js` | `objectUrl()/revokeUrl()/blobOfUrl()`: semua URL blob media lewat registri. |
+| `public/js/exporter.js`, `server.js` | Saklar `NAJJA_EXPORT_SPOOL=0` → `features.exportSpool`. |
+| `public/js/app.js` | Diagnostik: tempat hasil encode, detik audio yang di-decode, jumlah file yang di-decode utuh. |
+| `bench/run.mjs` | Cek kebenaran: ffprobe + **loudness audio** (`volumedetect`) untuk hasil ekspor B0/B3. |
+| `test/export-read.test.js` (baru) | `moov` di awal/akhir file, sampel identik dengan demux file utuh, pembacaan jendela = byte file, demux AAC (codec, rate, channel, ASC, priming), file tanpa audio/`moov` → unsupported. |
+
+### Tes
+
+- `npm test`: **38/38 lolos**.
+- `npm run test:e2e`: lolos.
+- Uji fallback MP3 di browser: ekspor tetap mode cepat dengan 1 file di-decode utuh. Audio hening −91 dB sebelum klip mulai dan −21,5 dB saat nada berbunyi. Durasi dan stream benar.
+
+### Benchmark sebelum/sesudah (runner sama, kode commit P2 vs P4)
+
+Data lengkap ada di `bench/results/2026-11-13-p4-{before,after}-desktop.*`.
+
+| | Sebelum | Sesudah | Perubahan |
+|---|---|---|---|
+| **B3 ekspor 120 dtk** · RAM renderer puncak | 2.667 MB | **1.287 MB** | **−52%** |
+| B3 · pertumbuhan RAM selama ekspor | +1.652 MB | **+224 MB** | **−86%** |
+| B3 · JS heap puncak | 690 MB | **174 MB** | **−75%** |
+| B3 · kecepatan ekspor | 2,48× real-time | 2,40× | noise |
+| B3 · audio hasil (rata-rata/puncak) | −16,3 / −8,5 dB | −16,3 / −8,5 dB | **identik** |
+| **B0 ekspor 60 dtk** · JS heap puncak | 140 MB | **74 MB** | **−47%** |
+| B0 · RAM renderer puncak | 1.136 MB | 1.049 MB | −8% |
+| B0 · kecepatan ekspor | 2,52× | 2,55× | noise |
+| B0 · audio hasil | −18,1 / −10,9 dB | −18,1 / −10,9 dB | **identik** |
+| Video hasil (B0, B3) | h264 1920×1080 30 fps | sama | identik |
+
+### Risiko, fallback, rollback
+
+- **Safari/iPad:** `createWritable` OPFS di main thread belum ada di semua versi Safari. Di sana spool otomatis kembali ke memori, sementara pembacaan sumber bertahap dan decode audio per rentang tetap bekerja. Spool untuk Safari butuh worker + `createSyncAccessHandle`. Ini dicatat sebagai pekerjaan lanjutan, bersama P3.
+- **AudioDecoder tidak ada** (Safari lama): kembali ke `decodeAudioData` utuh, tanpa cache permanen.
+- **Disk penuh saat spool:** error penulisan menggagalkan ekspor dengan pesan jelas (tahap tercatat di Diagnostik), lalu file sementara dihapus.
+- **Rollback:** revert commit, atau `NAJJA_EXPORT_SPOOL=0` untuk mematikan spool saja. Tidak ada perubahan data.
+
+### Berikutnya
+
+P5: antrean job media yang tahan restart, dengan konkurensi terbatas, retry, cancel, dan status job. Baseline B5: job thumbnail menunggu sampai 117 dtk di belakang konversi video akun lain.

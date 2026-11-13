@@ -1,0 +1,142 @@
+{
+  "label": "p4-before",
+  "profile": "desktop",
+  "at": "2026-11-13T05:27:14.973Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B0": {
+      "ok": true,
+      "import": {
+        "import_visible_p95_ms": 122.7,
+        "upload_ms": 794.3,
+        "upload_mbps": 927.7,
+        "asset_ready_ms": 11604,
+        "until_steady_ms": 12075,
+        "wait_after_upload_ms": 11658
+      },
+      "playback": {
+        "seconds": 15,
+        "fps_rendered": 30,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 6,
+        "frame_draw_p95_ms": 8.6,
+        "buffer_waits": 0,
+        "long_tasks": 0,
+        "preview_canvas": "579x326"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 37.2,
+        "p95_ms": 41,
+        "max_ms": 41
+      },
+      "export": {
+        "state": "done",
+        "wall_ms": 24239,
+        "mode": "fast",
+        "fetch_media_ms": 0,
+        "prepare_ms": 1220,
+        "decode_ms": 3516,
+        "composite_ms": 18624,
+        "encode_ms": 353,
+        "mux_ms": 51,
+        "total_ms": 23816,
+        "realtime_factor": 2.52,
+        "encoder_queue_max": 5,
+        "output_size": 47990773,
+        "renderer_rss_start_mb": 737,
+        "renderer_rss_peak_mb": 1136,
+        "js_heap_peak_mb": 140,
+        "probe": {
+          "video": "h264 1920x1080 30/1",
+          "audio": "opus",
+          "duration": 60,
+          "audio_mean_db": -18.1,
+          "audio_max_db": -10.9
+        }
+      },
+      "seconds": 53
+    },
+    "B3": {
+      "ok": true,
+      "project": {
+        "clips": 62,
+        "duration": 600
+      },
+      "playback": {
+        "seconds": 10,
+        "fps_rendered": 30.1,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 6.9,
+        "frame_draw_p95_ms": 9.7,
+        "buffer_waits": 0,
+        "long_tasks": 1,
+        "preview_canvas": "579x326"
+      },
+      "seek": {
+        "n": 30,
+        "p50_ms": 53.1,
+        "p95_ms": 57.2,
+        "max_ms": 59.3
+      },
+      "export": {
+        "range_s": 120,
+        "size": 95562225,
+        "seconds": 48.394,
+        "mode": "fast",
+        "probe": {
+          "video": "h264 1920x1080 30/1",
+          "audio": "opus",
+          "duration": 120,
+          "audio_mean_db": -16.3,
+          "audio_max_db": -8.5
+        },
+        "prepare_ms": 5999,
+        "fetch_media_ms": 0,
+        "decode_ms": 6632,
+        "composite_ms": 35174,
+        "encode_ms": 474,
+        "mux_ms": 90,
+        "realtime_factor": 2.48,
+        "encoder_queue_max": 2,
+        "renderer_rss_start_mb": 1015,
+        "renderer_rss_peak_mb": 2667,
+        "js_heap_peak_mb": 690
+      },
+      "seconds": 147
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1280x800@1x",
+    "touch": false,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 10,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}
