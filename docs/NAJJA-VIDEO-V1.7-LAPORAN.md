@@ -456,3 +456,78 @@ Data lengkap ada di `bench/results/2026-11-13-p5-{before,after}-desktop.*`.
 ### Berikutnya
 
 P6: revisi proyek + deteksi konflik antar-perangkat (sekarang simpan terakhir menimpa diam-diam).
+
+---
+
+## P6 — Sinkron multi-perangkat
+
+### Masalah (kode sebelum P6)
+
+| Lokasi | Masalah |
+|---|---|
+| `server.js` `PUT /api/projects/:id`, `lib/storage.js` `putProject` | *Last write wins*: simpan dari perangkat mana pun menimpa begitu saja. HP yang masih membuka versi lama bisa menghapus pekerjaan dari laptop tanpa peringatan. |
+| `public/js/store.js` `save()` | Tidak ada revisi atau basis, dan simpan-simpan dari satu tab bisa saling menyusul. |
+| Klien | Perubahan dari perangkat lain tidak pernah terlihat sampai proyek dibuka ulang. Perubahan yang gagal terkirim (tab ditutup, offline) hilang. |
+
+### Keputusan desain
+
+- **Revisi di server:**
+  - Setiap simpan → `rev + 1`.
+  - `PUT ?baseRev=N` ditolak **409** `{ conflict, rev, updatedAt }` kalau server sudah di revisi lain. `&force=1` hanya dipakai setelah pengguna memilih "timpa".
+  - Simpan tanpa `baseRev` (klien lama) tetap diterima, demi kompatibilitas.
+  - Penulisan per proyek diserialkan (kunci per id), jadi dari dua simpan bersamaan dengan basis sama tepat satu yang menang.
+  - `GET /api/projects/:id/rev` dijawab dari cache memori, cukup murah untuk dipolling tiap detik.
+- **Klien:**
+  - `store.baseRev` disimpan **di luar** objek proyek, supaya undo/redo tidak memundurkan revisi dan tidak memicu konflik palsu.
+  - Simpan dalam satu tab dijalankan berurutan.
+  - Simpan dilewati kalau tidak ada perubahan (`dirty`), sehingga perangkat lain tidak memuat ulang tanpa alasan.
+- **Mengikuti perangkat lain:**
+  - Polling revisi tiap `NAJJA_SYNC_POLL_MS` (default 1 dtk), hanya saat tab terlihat, dan tidak saat menggeser klip atau mengekspor.
+  - Tanpa perubahan lokal, versi baru langsung dimuat (playhead dan pilihan klip dipertahankan).
+  - Dengan perubahan lokal, simpan berikutnya kena 409, lalu **dialog konflik** muncul: *muat versi terbaru* / *simpan versiku sebagai salinan* / *timpa dengan versiku*. Simpan otomatis berhenti sampai pengguna memilih.
+- **Draf lokal:**
+  - Setiap perubahan disimpan ke IndexedDB (`drafts`, ±0,4 dtk) dan dihapus setelah server menerimanya. Tab yang disembunyikan langsung menyimpan.
+  - Saat proyek dibuka: draf yang berbasis revisi server yang sama dipulihkan otomatis. Kalau server juga berubah, dialog konflik ditampilkan.
+- *Trade-off:* tidak ada penggabungan otomatis (*merge*) JSON proyek. Blueprint melarang auto-merge tanpa semantik revisi, dan dua versi timeline yang digabung otomatis bisa menghasilkan proyek yang tidak diinginkan siapa pun. Pengguna yang memilih, dan tidak ada versi yang hilang.
+
+### File yang berubah
+
+| File | Perubahan |
+|---|---|
+| `lib/storage.js` | `putProject(id, p, { baseRev, force })` dengan kunci per proyek, `projectRev()` + cache revisi. |
+| `server.js` | `PUT ?baseRev&force`, `GET /api/projects/:id/rev` (cek pemilik), 409 membawa info konflik, `features.syncPollMs`. |
+| `public/js/remote.js`, `storage.js`, `db.js` | `putProject` dengan basis, `projectRev`, tabel `drafts` (IndexedDB v2). |
+| `public/js/store.js` | `baseRev`, `dirty`, simpan berurutan, draf, status `conflict`, metrik `revision_conflict_count`. |
+| `public/js/app.js`, `public/css/app.css` | `loadProject` (draf), polling revisi, dialog konflik, indikator "Diubah di perangkat lain — pilih versi" (bisa diklik), simpan saat tab disembunyikan; footer modal bisa membungkus (tombol tidak meluber di HP). |
+| `test/sync.test.js`, `test/e2e/sync.mjs` (baru) | Tes API + e2e dua perangkat. |
+
+### Tes
+
+- `test/sync.test.js` (4 tes):
+  - revisi naik per simpan; basis lama → 409 dengan revisi server, tanpa menimpa; `force` menimpa; klien lama tanpa `baseRev` tetap bisa menyimpan;
+  - revisi dan konflik per akun (404 untuk akun lain);
+  - 6 simpan bersamaan dengan basis sama → tepat 1 berhasil, 5 dapat 409;
+  - proyek lama tanpa `rev` mulai dari 0, dan cache mengikuti penghapusan.
+- `test/e2e/sync.mjs` (dua konteks browser, satu akun, 15 cek): B melihat perubahan nama dan klip dari A; undo di A tidak menimbulkan konflik dan B ikut; B mengubah saat offline sementara A menyimpan, lalu dialog konflik muncul di B, versi A tetap utuh, dan pilihan "salinan" menyimpan versi B sebagai proyek baru; tombol dialog tidak meluber (iPad dan 390 px); tab A ditutup sebelum perubahan terkirim, lalu dibuka lagi: perubahan dipulihkan dari draf dan tersimpan sebagai revisi berikutnya; tanpa error halaman.
+- Diulang 3×, stabil.
+- `npm test` **53/53**. `npm run test:e2e` (get-frame, iPad UI, sync) lolos.
+
+### Ukuran (target blueprint: perubahan perangkat kedua terlihat ≤ 2 dtk di jaringan lab)
+
+| | Sebelum | Sesudah |
+|---|---|---|
+| Perubahan di A terlihat di B | tidak pernah (sampai dibuka ulang) | **1,0 dtk** (3 run; jeda simpan 0,7 dtk + polling 1 dtk) |
+| Dua perangkat menyimpan versi berbeda | yang terakhir menimpa diam-diam | 409 → pengguna memilih, tidak ada versi hilang |
+| Perubahan yang belum terkirim saat tab ditutup | hilang | dipulihkan dari draf, lalu tersimpan |
+| Beban polling | — | 1 GET kecil/dtk per tab yang terlihat, dijawab dari memori |
+
+### Risiko, fallback, rollback
+
+- **Klien lama** (tab v1.6 yang masih terbuka saat update) menyimpan tanpa `baseRev`: tetap diterima, dengan perilaku lama untuk tab itu. Setelah reload, tab memakai revisi.
+- **IndexedDB tidak tersedia** (mode privat): draf dilewati tanpa error; sinkron dan konflik tetap bekerja.
+- **Jam perangkat berbeda:** `sync_lag_ms` di Diagnostik memakai jam perangkat pengirim, jadi hanya perkiraan. Keputusan sinkron hanya memakai nomor revisi, tidak memakai jam.
+- **Rollback:** pasang versi sebelumnya. Kolom `rev` di JSON proyek diabaikan versi lama, dan tabel `drafts` di browser tidak mengganggu.
+
+### Berikutnya
+
+Rilis v1.7.0: tes lengkap, ringkasan, versi 1.7.0. P3 (render worker/WebGL2) dan P7 (cloud render) tetap ditunda dengan alasan di rencana.

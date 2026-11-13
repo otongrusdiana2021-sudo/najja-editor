@@ -1,7 +1,7 @@
 // Najja Editor — bootstrap and app shell, laid out like a tablet video editor:
 // top bar · large preview · control row · timeline (centre playhead) · bottom toolbar · bottom sheets.
 import { store, newProject } from './store.js';
-import { prefs } from './db.js';
+import { prefs, db } from './db.js';
 import { storage } from './storage.js';
 import { account } from './account.js';
 import { remote } from './remote.js';
@@ -21,7 +21,7 @@ import { fastExportAvailable } from './fastexport.js';
 import { RESOLUTIONS, FPS_OPTIONS } from './presets.js';
 import { icon, LOGO } from './icons.js';
 import { toast, modal, contextMenu, confirmDialog } from './ui.js';
-import { escapeHtml, fmtDur, fmtBytes, downloadBlob, fmtTC } from './util.js';
+import { escapeHtml, fmtDur, fmtBytes, downloadBlob, fmtTC, uid, clone } from './util.js';
 import { metrics } from './metrics.js';
 
 const $ = (s) => document.querySelector(s);
@@ -76,9 +76,12 @@ nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') nameInput.
 const syncName = () => { if (document.activeElement !== nameInput) nameInput.value = store.P.name; document.title = `${store.P.name} · Najja Editor`; };
 store.on('project', syncName);
 store.on('rename', syncName);
+saveState.addEventListener('click', () => { if (store.conflict) conflictDialog(); });
+store.on('conflict', () => conflictDialog());
 store.on('save', (s) => {
   saveState.className = `save-state ${s}`;
   saveState.innerHTML = s === 'saving' ? '<i class="spin"></i><span>Menyimpan…</span>'
+    : s === 'conflict' ? `${icon('x', 13)}<span>Diubah di perangkat lain — pilih versi</span>`
     : s === 'error' ? `${icon('x', 13)}<span>Gagal menyimpan — mencoba lagi…</span>`
       : `${icon('check', 13)}<span>${storage.server ? 'Tersimpan di server' : 'Tersimpan'}</span>`;
 });
@@ -439,21 +442,132 @@ function aboutDialog() {
 async function createProject({ name = 'Proyek tanpa judul', aspect = '16:9' } = {}) {
   engine.pause();
   await store.save();
-  store.setProject(newProject({ name, aspect }));
+  store.setProject(newProject({ name, aspect }), { dirty: true });
   engine.seek(0);
   await store.save();
   timeline.fit();
 }
+
+/**
+ * Show a project from the server, together with this device's unsaved changes (draft) when there are any:
+ * on top of the same server revision they simply continue; if the server changed too, the user chooses.
+ */
+async function loadProject(rec) {
+  delete rec.thumb;
+  delete rec.duration;
+  const draft = storage.server ? await db.getDraft(rec.id) : null;
+  if (draft?.project && draft.at > (rec.updatedAt || 0)) {
+    if ((draft.baseRev || 0) === (rec.rev || 0)) {
+      const missing = await restoreMedia(draft.project);
+      store.setProject(draft.project, { baseRev: rec.rev || 0, dirty: true });
+      store.scheduleSave();
+      toast('Perubahan yang belum tersimpan di perangkat ini dipulihkan', { type: 'ok', timeout: 4000 });
+      return missing;
+    }
+    const missing = await restoreMedia(rec);
+    store.setProject(rec);
+    await restoreMedia(draft.project);
+    conflictDialog({ local: draft.project });
+    return missing;
+  }
+  if (draft) db.deleteDraft(rec.id); // already on the server
+  const missing = await restoreMedia(rec);
+  store.setProject(rec);
+  return missing;
+}
+
+// ---- multi-device sync (v1.7 P6): the open project follows changes made on other devices
+let conflictOpen = false;
+/** The server has a newer version than the one these changes build on: the user decides, nothing is lost. */
+function conflictDialog({ local = null } = {}) {
+  if (conflictOpen) return;
+  conflictOpen = true;
+  const id = store.P.id;
+  const mine = local || JSON.parse(store.snapshot());
+  if (!store.conflict) store.conflict = { rev: null };
+  store.saveState = 'conflict';
+  store.emit('save', 'conflict');
+  const m = modal({
+    title: 'Proyek diubah di perangkat lain',
+    body: `<p class="muted">Proyek <b>${escapeHtml(mine.name || '')}</b> disimpan dari perangkat lain setelah perangkat ini terakhir mengambilnya, dan perangkat ini juga punya perubahan. Tidak ada yang ditimpa sampai kamu memilih:</p>
+      <ul class="conflict-list"><li><b>Muat versi terbaru</b>: pakai versi dari perangkat lain; perubahan di sini dibuang.</li>
+      <li><b>Simpan versiku sebagai salinan</b>: kedua versi tetap ada (versiku jadi proyek baru).</li>
+      <li><b>Timpa dengan versiku</b>: versi dari perangkat lain diganti.</li></ul>`,
+    footer: '<button class="btn" data-latest>Muat versi terbaru</button><button class="btn" data-copy>Simpan versiku sebagai salinan</button><button class="btn btn-danger" data-force>Timpa dengan versiku</button>',
+    onClose: () => { conflictOpen = false; },
+  });
+  const done = () => { conflictOpen = false; m.close(); };
+  m.el.querySelector('[data-latest]').onclick = async () => {
+    done();
+    const rec = await storage.getProject(id);
+    if (!rec) return;
+    db.deleteDraft(id);
+    delete rec.thumb;
+    delete rec.duration;
+    await restoreMedia(rec);
+    store.setProject(rec);
+    store.emit('save', store.saveState = 'saved');
+    toast('Versi terbaru dimuat', { type: 'ok' });
+  };
+  m.el.querySelector('[data-copy]').onclick = async () => {
+    done();
+    const copy = clone(mine);
+    copy.id = uid('p');
+    copy.name = `${mine.name || 'Proyek'} (salinan)`;
+    copy.createdAt = copy.updatedAt = Date.now();
+    delete copy.rev;
+    db.deleteDraft(id);
+    store.setProject(copy, { baseRev: 0, dirty: true });
+    await store.save();
+    toast('Versimu disimpan sebagai proyek baru', { type: 'ok' });
+  };
+  m.el.querySelector('[data-force]').onclick = async () => {
+    done();
+    const server = await storage.projectRev(id).catch(() => null);
+    if (local) store.setProject(mine, { baseRev: server?.rev ?? store.baseRev, dirty: true });
+    store.dirty = true;
+    await store.save({ force: true });
+    toast('Versimu disimpan', { type: 'ok' });
+  };
+}
+
+let pollingRev = false;
+async function pollRevision() {
+  if (!storage.server || document.hidden || pollingRev || store.conflict || store._live || exportState.state === 'running') return;
+  pollingRev = true;
+  try {
+    const id = store.P.id;
+    const r = await storage.projectRev(id).catch(() => null);
+    if (!r || store.P.id !== id || r.rev <= store.baseRev) return;
+    // Newer on the server. With local changes, the next save gets 409 and the user chooses; without, follow it.
+    if (store.dirty || store.saveState === 'saving') return;
+    const rec = await storage.getProject(id);
+    if (!rec || store.P.id !== id || store.dirty || store._live || (rec.rev || 0) <= store.baseRev) return;
+    const t = engine.time;
+    const sel = store.selection;
+    delete rec.thumb;
+    delete rec.duration;
+    await restoreMedia(rec);
+    if (store.P.id !== id || store.dirty) return;
+    store.setProject(rec);
+    engine.seek(Math.min(t, store.duration()));
+    if (sel && store.clip(sel)) store.select(sel);
+    metrics.sample('sync_lag_ms', Date.now() - (r.updatedAt || Date.now())); // device clocks: approximate
+    toast('Diperbarui dari perangkat lain', { timeout: 2500 });
+  } finally {
+    pollingRev = false;
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (store.dirty) store.scheduleSave.flush(); } else pollRevision();
+});
 
 async function openProject(id) {
   engine.pause();
   await store.save();
   const rec = await storage.getProject(id);
   if (!rec) return toast('Proyek tidak ditemukan', { type: 'error' });
-  delete rec.thumb;
-  delete rec.duration;
-  const missing = await restoreMedia(rec);
-  store.setProject(rec);
+  const missing = await loadProject(rec);
   engine.seek(0);
   timeline.fit();
   if (missing.length) toast(`${missing.length} file media tidak ditemukan${storage.server ? ' di server' : ' di browser ini'}`, { type: 'warn', timeout: 5000 });
@@ -666,17 +780,15 @@ bridge.start({
   if (lastId) {
     const rec = await storage.getProject(lastId);
     if (rec) {
-      delete rec.thumb;
-      delete rec.duration;
-      await restoreMedia(rec);
-      store.setProject(rec);
+      await loadProject(rec);
       loaded = true;
     }
   }
   if (!loaded) {
-    store.setProject(newProject());
+    store.setProject(newProject(), { dirty: true });
     store.save();
   }
+  if (storage.server) setInterval(pollRevision, storage.status?.features?.syncPollMs || 1000);
   syncName();
   player.layout();
   requestAnimationFrame(() => timeline.fit());

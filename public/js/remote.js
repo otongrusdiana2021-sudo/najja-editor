@@ -10,8 +10,9 @@ async function api(path, opts = {}) {
   }
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
-    try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
-    throw Object.assign(new Error(msg), { status: r.status });
+    let data = null;
+    try { data = await r.json(); msg = data.error || msg; } catch { /* ignore */ }
+    throw Object.assign(new Error(msg), { status: r.status, data });
   }
   return r;
 }
@@ -37,7 +38,12 @@ export const remote = {
 
   async listProjects() { return (await api('/api/projects')).json(); },
   async getProject(id) { return (await api(`/api/projects/${encodeURIComponent(id)}`)).json(); },
-  async putProject(rec) { return (await api(`/api/projects/${encodeURIComponent(rec.id)}`, { method: 'PUT', ...json(rec) })).json(); },
+  /** baseRev: the revision this save builds on (409 when another device saved since); force: overwrite anyway. */
+  async putProject(rec, { baseRev = null, force = false } = {}) {
+    const q = baseRev != null ? `?baseRev=${baseRev}${force ? '&force=1' : ''}` : '';
+    return (await api(`/api/projects/${encodeURIComponent(rec.id)}${q}`, { method: 'PUT', ...json(rec) })).json();
+  },
+  async projectRev(id) { return (await api(`/api/projects/${encodeURIComponent(id)}/rev`, { cache: 'no-store' })).json(); },
   async deleteProject(id) { return (await api(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })).json(); },
 
   mediaUrl: (id) => `/api/media/${encodeURIComponent(id)}/file`,

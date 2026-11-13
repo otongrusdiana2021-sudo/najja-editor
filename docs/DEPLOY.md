@@ -175,6 +175,14 @@ Semua data ada **di VPS kamu**, tidak di layanan luar (tidak memakai Supabase at
 | Cadangan otomatis sebelum migrasi | `/data/backups/` |
 | Antrean pekerjaan media (konversi, thumbnail) | `/data/jobs/*.json` (satu file kecil per job; yang selesai dihapus setelah 7 hari) |
 
+### Proyek dibuka di beberapa perangkat
+
+Setiap simpan menaikkan **revisi** proyek di server. Editor yang terbuka mengecek revisi tiap detik (`NAJJA_SYNC_POLL_MS`):
+
+- **Tidak ada perubahan lokal:** versi dari perangkat lain langsung dimuat (posisi playhead dipertahankan).
+- **Dua perangkat mengubah proyek yang sama:** server menolak simpan yang berbasis versi lama (HTTP 409), lalu editor menanyakan *muat versi terbaru* / *simpan versiku sebagai salinan* / *timpa dengan versiku*.
+- **Perubahan yang belum terkirim** (tab tertutup, koneksi putus) disimpan sebagai draf di browser (IndexedDB) dan dipulihkan saat proyek dibuka lagi.
+
 ### Antrean pekerjaan media
 
 Salinan ringan (pratinjau 720p), thumbnail/waveform, dan salinan kualitas penuh dibuat oleh antrean job di server:

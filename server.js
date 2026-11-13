@@ -740,7 +740,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
         auth: !!TOKEN,
         storage: 'server',
         account: { id: who.id, via: who.via, role: who.role },
-        features: { exportSpool: process.env.NAJJA_EXPORT_SPOOL !== '0' },
+        features: { exportSpool: process.env.NAJJA_EXPORT_SPOOL !== '0', syncPollMs: Math.max(500, Number(process.env.NAJJA_SYNC_POLL_MS) || 1000) },
         mcp: { http: `${publicUrl}/mcp`, ...(admin ? { stdio: { command: 'node', args: [path.join(__dirname, 'mcp-stdio.js')] } } : {}) },
         editors: bridge.count(who.id),
         convert: (await mediaTools()).ffmpeg,
@@ -793,14 +793,22 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       const list = (await storage.listProjects()).filter((x) => tenancy.owns(x, who)).map(({ ownerId, ...x }) => x);
       return sendJson(res, 200, list);
     }
+    // Revision only (polled by open editors to see changes from other devices): no project body.
+    if ((m = /^\/api\/projects\/([\w-]+)\/rev$/.exec(p)) && req.method === 'GET') {
+      const r = await storage.projectRev(m[1]);
+      if (!tenancy.owns(r, who)) throw httpErr(404, 'Project not found');
+      return sendJson(res, 200, { rev: r.rev, updatedAt: r.updatedAt });
+    }
     if ((m = /^\/api\/projects\/([\w-]+)$/.exec(p))) {
       if (req.method === 'GET') return sendJson(res, 200, await ownProject(m[1]));
       if (req.method === 'PUT') {
         const body = JSON.parse((await readBody(req, 32 * 1024 * 1024)).toString('utf8') || 'null');
-        const existing = await storage.getProject(m[1]).catch((err) => { if (err.status === 404) return null; throw err; });
+        const existing = await storage.projectRev(m[1]).catch((err) => { if (err.status === 404) return null; throw err; });
         if (existing && !tenancy.owns(existing, who)) throw httpErr(404, 'Project not found');
         if (body && typeof body === 'object') body.ownerId = who.id; // set by the server, never trusted from the client
-        return sendJson(res, 200, await storage.putProject(m[1], body));
+        // ?baseRev=N: the revision this save is based on (409 when another device saved since); &force=1 overwrites
+        const baseRev = url.searchParams.has('baseRev') ? Number(url.searchParams.get('baseRev')) : null;
+        return sendJson(res, 200, await storage.putProject(m[1], body, { baseRev, force: url.searchParams.get('force') === '1' }));
       }
       if (req.method === 'DELETE') { await ownProject(m[1]); return sendJson(res, 200, await storage.deleteProject(m[1])); }
     }
@@ -926,7 +934,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     res.on('finish', () => { const k = `${Math.floor(res.statusCode / 100)}xx`; if (k in httpCounts) httpCounts[k]++; });
     route(req, res).catch((err) => {
       log('request error:', err.message);
-      if (!res.headersSent) sendJson(res, err.status || 500, { error: err.message });
+      if (!res.headersSent) sendJson(res, err.status || 500, { error: err.message, ...(err.data || {}) });
       else try { res.end(); } catch { /* ignore */ }
     });
   });

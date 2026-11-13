@@ -113,7 +113,7 @@ Butuh keputusan biaya/infrastruktur (worker GPU terpisah). Blueprint: hanya sete
 | P2 | Tes kesetaraan render plan; e2e `ipad-ui`, `get-frame`; benchmark JS per frame. |
 | P4 | Ekspor B1/B3: file valid (ffprobe: codec, resolusi, fps, durasi, audio), heap tidak tumbuh linear. |
 | P5 | Tes unit antrean: idempotensi, retry, cancel, restart (jurnal), concurrency. |
-| P6 | Tes API 409; e2e dua konteks browser (perangkat A & B). |
+| P6 | Tes API 409 (`test/sync.test.js`); e2e dua konteks browser (`test/e2e/sync.mjs`). |
 
 ## Risiko & mitigasi
 

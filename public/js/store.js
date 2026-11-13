@@ -1,7 +1,7 @@
 // Project model, editing operations, undo/redo and autosave.
 import { uid, clone, deepMerge, clamp, debounce } from './util.js';
 import { ASPECTS, DEFAULT_TEXT, ADJUSTMENTS } from './presets.js';
-import { prefs } from './db.js';
+import { prefs, db } from './db.js';
 import { storage } from './storage.js';
 import { metrics } from './metrics.js';
 import { planFor } from './plan.js';
@@ -308,7 +308,20 @@ class Store {
     this.rev = 0; // bumped on every change of the project (render plan cache key)
     this._live = null;
     this.thumbProvider = null;
-    this.scheduleSave = debounce(() => this.save(), 700);
+    // Sync with the server (v1.7 P6). baseRev: the server revision the local project builds on. It is kept outside
+    // the project object, so undo/redo never moves it back. dirty: changes not on the server yet.
+    this.baseRev = 0;
+    this.dirty = false;
+    this.conflict = null; // { rev, updatedAt } of the server version while a conflict waits for the user
+    this._saving = null;
+    const save = debounce(() => this.save(), 700);
+    this.scheduleSave = Object.assign(() => { this.dirty = true; this.saveDraft(); save(); }, { flush: () => save.flush() });
+    // Unsaved changes are also kept on this device (IndexedDB) right away: a closed tab, a crash or a lost
+    // connection does not lose them; they are offered again when the project is opened.
+    this.saveDraft = debounce(() => {
+      if (!storage.server || !this.dirty) return;
+      db.putDraft({ id: this.project.id, project: JSON.parse(this.snapshot()), baseRev: this.baseRev, at: Date.now() }).catch?.(() => {});
+    }, 400);
   }
   on(evt, fn) {
     if (!this.listeners.has(evt)) this.listeners.set(evt, new Set());
@@ -400,8 +413,12 @@ class Store {
     this.scheduleSave();
   }
 
-  setProject(p, { keepHistory = false } = {}) {
+  /** baseRev: server revision of `p` (default: its stored rev). dirty: `p` has changes the server does not have. */
+  setProject(p, { keepHistory = false, baseRev = null, dirty = false } = {}) {
     this.project = p;
+    this.baseRev = baseRev ?? (p.rev || 0);
+    this.dirty = dirty;
+    this.conflict = null;
     if (!keepHistory) { this.past = []; this.future = []; }
     this.selection = null;
     this._live = null;
@@ -448,19 +465,50 @@ class Store {
     }
   }
 
-  async save() {
+  /**
+   * Save to the server, based on the revision this device has (baseRev). Saves of one tab run one after another
+   * (otherwise the second would look like a conflict). Nothing to save → no request. force: overwrite the server
+   * version after a conflict (the user chose it).
+   */
+  save({ force = false } = {}) {
+    const run = (this._saving || Promise.resolve()).then(() => this._save({ force }));
+    this._saving = run.catch(() => {});
+    return run;
+  }
+  async _save({ force }) {
+    if (!this.dirty && !force) return;
+    if (this.conflict && !force) return; // waiting for the user's choice
     this.saveState = 'saving';
     this.emit('save', this.saveState);
     const rec = clone(this.project);
+    const project = this.project;
+    const stamp = project.updatedAt;
     try { rec.thumb = this.thumbProvider ? await this.thumbProvider() : undefined; } catch { /* ignore */ }
     rec.duration = this.duration();
     try {
       const ack = metrics.timer('save_ack_ms');
-      await storage.putProject(rec);
+      const res = await storage.putProject(rec, { baseRev: this.baseRev, force });
       ack();
-      prefs.set('lastProject', this.project.id);
-      this.saveState = 'saved';
+      if (this.project !== project) return; // another project was opened meanwhile
+      if (res?.rev != null) this.baseRev = res.rev;
+      this.conflict = null;
+      if (project.updatedAt === stamp) { // nothing changed while saving
+        this.dirty = false;
+        if (storage.server) db.deleteDraft(project.id);
+      }
+      prefs.set('lastProject', project.id);
+      this.saveState = this.dirty ? 'saving' : 'saved';
+      if (this.dirty) this.scheduleSave();
     } catch (err) {
+      if (err.status === 409 && err.data?.conflict) {
+        // Another device saved this project since we loaded it: never overwrite silently (the app asks).
+        metrics.count('revision_conflict_count');
+        this.conflict = { rev: err.data.rev, updatedAt: err.data.updatedAt };
+        this.saveState = 'conflict';
+        this.emit('save', this.saveState);
+        this.emit('conflict', this.conflict);
+        return;
+      }
       metrics.count('save_failed');
       console.warn('save failed', err);
       this.saveState = 'error';

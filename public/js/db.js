@@ -1,6 +1,6 @@
 // IndexedDB persistence: media blobs + projects. Every call fails soft (private mode, blocked storage...).
 const DB_NAME = 'najja-editor';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // 2: drafts (unsaved project changes on this device, v1.7)
 let dbPromise = null;
 
 function open() {
@@ -12,6 +12,7 @@ function open() {
         const db = req.result;
         if (!db.objectStoreNames.contains('media')) db.createObjectStore('media', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => resolve(null);
@@ -48,6 +49,10 @@ export const db = {
   getProject: (id) => tx('projects', 'readonly', (s) => s.get(id)),
   deleteProject: (id) => tx('projects', 'readwrite', (s) => s.delete(id)),
   listProjects: async () => (await tx('projects', 'readonly', (s) => s.getAll())) || [],
+  // Latest local state of a server project that may not have reached the server yet: { id, project, baseRev, at }
+  putDraft: (d) => tx('drafts', 'readwrite', (s) => s.put(d)),
+  getDraft: (id) => tx('drafts', 'readonly', (s) => s.get(id)),
+  deleteDraft: (id) => tx('drafts', 'readwrite', (s) => s.delete(id)),
 };
 
 export const prefs = {

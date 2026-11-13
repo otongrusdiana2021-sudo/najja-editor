@@ -22,6 +22,7 @@ export const storage = {
 
   listProjects() { return this.server ? remote.listProjects() : db.listProjects(); },
   getProject(id) { return this.server ? remote.getProject(id).catch(() => null) : db.getProject(id); },
-  putProject(rec) { return this.server ? remote.putProject(rec) : db.putProject(rec); },
+  putProject(rec, opts) { return this.server ? remote.putProject(rec, opts) : db.putProject(rec); },
+  projectRev(id) { return this.server ? remote.projectRev(id) : Promise.resolve(null); },
   deleteProject(id) { return this.server ? remote.deleteProject(id) : db.deleteProject(id); },
 };

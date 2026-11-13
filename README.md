@@ -162,6 +162,7 @@ Contoh perintah ke AI:
 | `NAJJA_JOB_FAST` | 1 per 4 core (maks. 3) | Konversi salinan ringan (pratinjau) yang boleh jalan bersamaan |
 | `NAJJA_JOB_SLOW` | 1 (2 bila ≥ 8 core & 8 GB) | Konversi salinan kualitas penuh yang boleh jalan bersamaan |
 | `NAJJA_EXPORT_SPOOL` | | Isi `0` agar ekspor cepat menampung hasil encode di memori, bukan di file sementara browser (OPFS) |
+| `NAJJA_SYNC_POLL_MS` | `1000` | Seberapa sering editor yang terbuka mengecek perubahan proyek dari perangkat lain (min. 500) |
 
 ## Deploy ke VPS
 
@@ -230,6 +231,7 @@ test/              npm test
 - **Ekspor MP4 cepat** dengan WebCodecs (Chrome/Edge): frame di-decode, dirender, dan di-encode H.264 secepat kemampuan perangkat (GPU), lalu file langsung terunduh; salinan ke server diupload di background. Browser tanpa WebCodecs, atau format WebM, memakai perekaman real-time (durasi ekspor ≈ durasi video). Biarkan tab editor tetap terbuka.
 - MP4 dipakai jika browser bisa merekamnya (Chrome/Edge terbaru, Safari). Jika tidak, hasilnya WebM.
 - Proyek dan media disimpan di server (folder `data/`, atau `NAJJA_DATA_DIR`), bukan di browser, jadi bisa dibuka dari perangkat mana pun.
+- **Proyek di beberapa perangkat (v1.7):** perubahan di satu perangkat muncul di perangkat lain yang membuka proyek yang sama dalam ±1–2 detik. Kalau dua perangkat mengubah proyek yang sama sebelum sempat sinkron, tidak ada yang ditimpa diam-diam: editor menanyakan *muat versi terbaru*, *simpan versiku sebagai salinan*, atau *timpa*. Perubahan yang belum sampai ke server (tab tertutup, koneksi putus) disimpan dulu di perangkat dan dipulihkan saat proyek dibuka lagi.
 - **Data per akun (v1.7):** di mode VPS setiap akun hanya melihat proyek, media, dan ekspornya sendiri; AI yang tersambung dengan token AI pribadi hanya bisa mengedit akun itu. Data dari versi sebelumnya otomatis jadi milik admin pertama, dengan cadangan di `data/backups/` (lihat [docs/DEPLOY.md](docs/DEPLOY.md#pindah-dari-v16-ke-v17-migrasi-pemilik-data)).
 - Belum tersedia (tampil abu-abu *Segera* di toolbar):
   - Butuh pemrosesan di server: putar mundur, stabilkan, pisah suara, kurangi kebisingan.
