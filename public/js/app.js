@@ -506,7 +506,7 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
       target: 'export', filename: res.filename, mime: res.mime,
       onProgress: (p) => { const el = ov.querySelector('.ex-srv'); if (el) el.textContent = `Menyimpan salinan ke server… ${Math.round(p * 100)}%`; },
     }).then((j) => { exportState.result.serverPath = j.path; exportState.result.serverUrl = j.url; }, (err) => { exportState.result.serverError = err.message; });
-    const srvLine = () => (exportState.result?.serverPath ? 'Salinan tersimpan di server ✓'
+    const srvLine = () => ((exportState.result?.serverPath || exportState.result?.serverUrl) ? 'Salinan tersimpan di server ✓'
       : exportState.result?.serverError ? `Gagal menyimpan salinan ke server: ${escapeHtml(exportState.result.serverError)}` : '');
     if (toServer && !download) {
       // AI export: the agent needs the server path, so report "done" only once the file is on the server.

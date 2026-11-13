@@ -118,6 +118,9 @@ body.ready .boot { opacity: 0; visibility: hidden; }
 .user-list { display: flex; flex-direction: column; gap: 6px; }
 .dc-bar { height: 8px; border-radius: 99px; background: var(--panel-3); overflow: hidden; margin: 12px 0 6px; }
 .dc-bar i { display: block; height: 100%; background: var(--grad); border-radius: 99px; }
+.tok-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.tok-fresh { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px; border-radius: 10px; border: 1px solid var(--accent, #7c5cff); background: var(--panel-2); }
+.tok-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .dc-meta { font-size: 12px; color: var(--text-2); margin-bottom: 10px; }
 .dc-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; margin-bottom: 12px; }
 .user-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); }

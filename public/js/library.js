@@ -14,6 +14,7 @@ import { setDragPayload } from './timeline.js';
 import * as actions from './actions.js';
 import { toast, modal, confirmDialog } from './ui.js';
 import { bridge } from './bridge.js';
+import { account } from './account.js';
 
 const TITLES = {
   music: 'Suara', sfx: 'Efek suara', record: 'Rekam suara', templates: 'Template teks', caption: 'Keterangan',
@@ -191,10 +192,10 @@ export class Library {
     const auth = !!st.status?.auth;
     const remote = auth || !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
     const desktopEntry = remote
-      ? { command: 'node', args: ['/path/ke/najja-editor/mcp-stdio.js'], env: { NAJJA_URL: base, ...(auth ? { NAJJA_TOKEN: '<NAJJA_TOKEN>' } : {}) } }
+      ? { command: 'node', args: ['/path/ke/najja-editor/mcp-stdio.js'], env: { NAJJA_URL: base, ...(auth ? { NAJJA_TOKEN: '<TOKEN_AI_KAMU>' } : {}) } }
       : (stdio ? { command: stdio.command, args: stdio.args } : { command: 'node', args: ['/path/ke/najja-editor/mcp-stdio.js'] });
     const desktopCfg = JSON.stringify({ mcpServers: { 'najja-editor': desktopEntry } }, null, 2);
-    const ccCmd = `claude mcp add --transport http najja-editor ${http}${auth ? ' --header "Authorization: Bearer <NAJJA_TOKEN>"' : ''}`;
+    const ccCmd = `claude mcp add --transport http najja-editor ${http}${auth ? ' --header "Authorization: Bearer <TOKEN_AI_KAMU>"' : ''}`;
     const log = st.log.slice(0, 30);
     return `
       <div class="mcp-status ${st.connected ? 'ok' : st.available === false ? 'off' : 'wait'}">
@@ -209,7 +210,7 @@ export class Library {
       <div class="lib-section"><h4>Claude Desktop / Cursor (stdio)</h4>
         <pre class="code">${escapeHtml(desktopCfg)}</pre><button class="btn sm" data-copy="${escapeHtml(desktopCfg)}">${icon('copy', 14)} Salin konfigurasi</button>
         ${remote ? '<p class="hint">mcp-stdio.js dijalankan dari salinan Najja di komputer kamu; ia meneruskan perintah ke server ini.</p>' : ''}</div>
-      ${auth ? `<p class="hint">Server ini memakai token. Ganti <code>&lt;NAJJA_TOKEN&gt;</code> dengan token yang kamu set di server. <a class="link" href="/logout">Keluar</a></p>` : ''}
+      ${auth ? `<p class="hint">Ganti <code>&lt;TOKEN_AI_KAMU&gt;</code> dengan token AI pribadimu: AI hanya bisa mengedit proyek di akunmu.</p><button class="btn sm" data-aitoken>${icon('ai', 14)} Buat / kelola token AI</button>` : ''}
       <div class="lib-section"><h4>Contoh perintah ke AI</h4>
         ${['Buat video promo 15 detik rasio 9:16 dengan judul "DISKON 50%" dan efek konfeti', 'Tambahkan subtitle dari naskah ini dan beri filter Sinematik ke semua klip', 'Potong klip pertama di detik 4, beri transisi Larut, lalu ekspor 1080p'].map((p) => `<button class="prompt-chip" data-copy="${escapeHtml(p)}">“${escapeHtml(p)}”</button>`).join('')}</div>
       <div class="lib-section"><h4>Aktivitas AI ${log.length ? `<span class="count">${st.log.length}</span>` : ''}</h4>
@@ -380,6 +381,7 @@ export class Library {
         if (r && typeof r === 'object' && 'id' in r) { store.select(r.id); this.opts.onPick?.(r); }
       } catch (err) { toast(err.message, { type: 'error', timeout: 4000 }); }
     };
+    if ('aitoken' in d) { account.aiToken(); return; }
     if (d.copy) { navigator.clipboard?.writeText(d.copy).then(() => toast('Disalin', { type: 'ok' })).catch(() => toast('Gagal menyalin', { type: 'error' })); return; }
     if (d.mfilter) { this.mediaFilter = d.mfilter; this.render(); return; }
     if (d.fxcat) { this.fxCat = d.fxcat; this.render(); return; }

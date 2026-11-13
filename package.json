@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node server.js",
     "mcp": "node mcp-stdio.js",
-    "test": "node --test test/mcp.test.js test/security.test.js test/storage.test.js test/proxy.test.js",
+    "test": "node --test test/mcp.test.js test/security.test.js test/storage.test.js test/proxy.test.js test/tenancy.test.js",
     "test:e2e": "node test/e2e/get-frame.mjs && node test/e2e/ipad-ui.mjs"
   },
   "engines": {

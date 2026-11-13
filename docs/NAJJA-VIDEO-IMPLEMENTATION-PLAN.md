@@ -41,9 +41,9 @@ Identitas selalu dari sesi/token yang diverifikasi server, tidak pernah dari bod
 | `lib/storage.js` | Semua operasi proyek/media/upload menerima `ownerId`; akses milik orang lain → 404 (tidak membocorkan keberadaan); `ownerId` ditulis server; `deleteMedia` hanya melihat proyek pemilik yang sama. |
 | `server.js` | `authenticate()` → `{ id, email, role, via }`; server token = pemilik utama (admin pertama); token pribadi = pengguna itu. Semua route meneruskan identitas. Bridge MCP: editor & perintah dipisah per pemilik; `/bridge/result` divalidasi. `/api/status` per pemilik. `/exports/*` & `/media-cache/*` diperiksa pemiliknya. Impor file lokal server (`path`) hanya untuk admin. Endpoint token pribadi `/api/me/token`. |
 | `public/js/account.js`, `library.js` | Menu akun "Token AI (MCP)" untuk membuat/mengganti token pribadi; panel AI memakai token pribadi. |
-| Tes | `test/tenancy.test.js` (migrasi, aturan pemilik), `test/security.test.js` (user A vs user B: list/get/put/delete proyek, semua route media, upload, ekspor, cache, MCP bridge, token pribadi). |
+| Tes | `test/tenancy.test.js`: migrasi + aturan pemilik, dan tes negatif user A vs user B (list/get/put/delete proyek, semua route media, upload, ekspor, cache, MCP bridge, token pribadi, impor URL internal). |
 
-**Migrasi data lama:** dijalankan otomatis saat server start (idempoten). Semua proyek/media tanpa `ownerId` (atau milik mode lokal) diberikan ke **admin pertama**. Sebelum menulis apa pun, salinan semua `projects/*.json`, `library/*/meta.json`, dan `users.json` disimpan ke `data/backups/v1.7-owner-migration-<waktu>/`. Field baru hanya **ditambahkan**, sehingga v1.6 tetap bisa membaca data (rollback = pasang v1.6 lagi).
+**Migrasi data lama:** dijalankan otomatis saat server start (idempoten). Semua proyek/media tanpa `ownerId` (atau milik mode lokal) diberikan ke **admin pertama**. Sebelum menulis apa pun, `users.json` disalin ke `data/backups/v1.7-user-ids-<waktu>/` dan semua `projects/*.json`, `library/*/meta.json` yang diubah ke `data/backups/v1.7-owner-migration-<waktu>/`. Field baru hanya **ditambahkan**, sehingga v1.6 tetap bisa membaca data (rollback = pasang v1.6 lagi).
 
 **Exit gate:** User A tidak bisa mengakses aset User B lewat API, file, maupun MCP (tes negatif otomatis); backup + migrasi terverifikasi di tes.
 

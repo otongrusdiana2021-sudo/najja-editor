@@ -151,7 +151,7 @@ Contoh perintah ke AI:
 |---|---|---|
 | `PORT` | `3333` | Port server |
 | `HOST` | `127.0.0.1` | Alamat yang didengarkan server. Selain localhost, wajib memakai `NAJJA_TOKEN`. |
-| `NAJJA_TOKEN` | | Mengaktifkan login. MCP memakai `Authorization: Bearer <token>`. **Wajib untuk VPS.** |
+| `NAJJA_TOKEN` | | Mengaktifkan login (email + password, data terpisah per akun). MCP memakai `Authorization: Bearer <token>`: token AI pribadi (menu akun → **Token AI (MCP)**) atau token server ini (= admin pertama). **Wajib untuk VPS.** |
 | `NAJJA_PUBLIC_URL` | | URL publik, misalnya `https://editor.domainkamu.com` |
 | `NAJJA_DATA_DIR` | `data` | Folder data server |
 | `NAJJA_EXPORT_DIR` | `data/exports` | Folder hasil ekspor dari AI |
@@ -226,6 +226,7 @@ test/              npm test
 - **Ekspor MP4 cepat** dengan WebCodecs (Chrome/Edge): frame di-decode, dirender, dan di-encode H.264 secepat kemampuan perangkat (GPU), lalu file langsung terunduh; salinan ke server diupload di background. Browser tanpa WebCodecs, atau format WebM, memakai perekaman real-time (durasi ekspor ≈ durasi video). Biarkan tab editor tetap terbuka.
 - MP4 dipakai jika browser bisa merekamnya (Chrome/Edge terbaru, Safari). Jika tidak, hasilnya WebM.
 - Proyek dan media disimpan di server (folder `data/`, atau `NAJJA_DATA_DIR`), bukan di browser, jadi bisa dibuka dari perangkat mana pun.
+- **Data per akun (v1.7):** di mode VPS setiap akun hanya melihat proyek, media, dan ekspornya sendiri; AI yang tersambung dengan token AI pribadi hanya bisa mengedit akun itu. Data dari versi sebelumnya otomatis jadi milik admin pertama, dengan cadangan di `data/backups/` (lihat [docs/DEPLOY.md](docs/DEPLOY.md#pindah-dari-v16-ke-v17-migrasi-pemilik-data)).
 - Belum tersedia (tampil abu-abu *Segera* di toolbar):
   - Butuh pemrosesan di server: putar mundur, stabilkan, pisah suara, kurangi kebisingan.
   - Butuh model AI: hapus latar otomatis, retouch, lipsync, teks otomatis dari suara.

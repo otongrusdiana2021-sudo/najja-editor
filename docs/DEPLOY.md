@@ -170,7 +170,9 @@ Semua data ada **di VPS kamu**, tidak di layanan luar (tidak memakai Supabase at
 |---|---|
 | Proyek | `/data/projects/*.json` |
 | Media (file asli, salinan pratinjau 720p, salinan H.264 1080p, thumbnail, waveform) | `/data/library/<id>/` |
-| Hasil ekspor | `/data/exports/` |
+| Hasil ekspor | `/data/exports/` (pemiliknya dicatat di `/data/exports-index.json`) |
+| Akun & token AI (hanya hash) | `/data/users.json` |
+| Cadangan otomatis sebelum migrasi | `/data/backups/` |
 
 Karena itu proyek bisa dibuka dari laptop, HP, atau browser mana pun setelah login. Upload video besar dipecah per 8 MB, jadi tidak terkena batas upload nginx/aaPanel.
 
@@ -231,8 +233,22 @@ Buka editornya di Chrome atau Edge, lalu klik ikon **Install** di address bar, a
 
 Saat pertama kali membuka editor, muncul halaman **Buat akun admin**. Isi email, password, dan **token server** sekali saja (token ada di `/opt/najja-editor/.env`). Setelah itu kamu masuk dengan email dan password.
 
-- Menu akun ada di bulatan inisial di kanan atas: **Ganti password**, **Kelola pengguna** (admin bisa menambah atau menghapus pengguna), dan **Keluar**.
-- Semua pengguna memakai proyek dan media yang sama di server.
+- Menu akun ada di bulatan inisial di kanan atas: **Token AI (MCP)**, **Ganti password**, **Kelola pengguna** (admin bisa menambah atau menghapus pengguna), dan **Keluar**.
+- Sejak v1.7 **setiap pengguna punya proyek, media, dan hasil ekspor sendiri**. Pengguna lain tidak bisa melihat, membuka, atau mengunduhnya (server menjawab "tidak ditemukan").
+- Menghapus pengguna memindahkan proyek dan medianya ke admin yang menghapus. File yang berubah dicadangkan dulu ke `/data/backups/transfer-…`.
+
+### Pindah dari v1.6 ke v1.7 (migrasi pemilik data)
+
+Saat v1.7 pertama kali jalan, server otomatis:
+
+1. Mencadangkan `users.json` ke `/data/backups/v1.7-user-ids-<waktu>/`, lalu memberi setiap akun ID tetap.
+2. Mencadangkan semua file proyek/media yang belum punya pemilik ke `/data/backups/v1.7-owner-migration-<waktu>/`.
+3. Memberikan semua proyek, media, dan ekspor lama ke **admin pertama** (akun admin yang paling awal dibuat).
+4. Memeriksa ulang bahwa tidak ada data tanpa pemilik, lalu menulis laporan `migration.json` di folder cadangan.
+
+Yang diubah hanya isi JSON kecil (ditambah kolom `ownerId`); file video tidak disentuh, tidak dipindah, dan tidak dihapus. Migrasi aman dijalankan berulang (yang sudah punya pemilik dilewati).
+
+**Rollback ke v1.6:** cukup jalankan versi lama lagi. v1.6 mengabaikan kolom `ownerId` dan `id`, jadi semua data tetap terbaca (dan semua pengguna kembali melihat semua proyek seperti dulu). Untuk mengembalikan file persis seperti sebelum migrasi, salin isi folder `/data/backups/v1.7-owner-migration-<waktu>/` dan `/data/backups/v1.7-user-ids-<waktu>/` kembali ke `/data/`.
 
 **Lupa password?** Jalankan perintah di bawah. Akunnya terhapus, tapi proyek dan media tidak. Setelah itu buka editor dan buat akun admin lagi.
 
@@ -248,16 +264,18 @@ Jalankan installer lagi dengan `--token-baru`:
 curl -fsSL https://raw.githubusercontent.com/otongrusdiana2021-sudo/najja-editor/main/deploy/install.sh | sudo bash -s editor.domainkamu.com --token-baru
 ```
 
-Token server dipakai untuk Claude Code/MCP dan untuk membuat akun admin pertama. Token lama langsung tidak berlaku, jadi perintah Claude Code perlu diperbarui. Login email tidak terpengaruh, dan data tidak berubah.
+Token server dipakai untuk membuat akun admin pertama dan sebagai token MCP milik admin pertama. Untuk AI sehari-hari, pakai **token AI pribadi** (lihat di bawah). Token lama langsung tidak berlaku, jadi perintah Claude Code perlu diperbarui. Login email tidak terpengaruh, dan data tidak berubah.
 
 ## Hubungkan AI ke editor di VPS
 
-> Perintah AI dijalankan oleh **tab editor yang sedang terbuka**. Buka editornya di browser dulu sebelum menyuruh AI.
+> Perintah AI dijalankan oleh **tab editor yang sedang terbuka di akun yang sama**. Buka editornya di browser dulu sebelum menyuruh AI.
+
+**Token AI pribadi (disarankan):** menu akun → **Token AI (MCP)** → **Buat token**. Token berawalan `najja_pat_`, hanya ditampilkan sekali, dan server hanya menyimpan hash-nya. AI yang memakai token ini hanya bisa mengedit proyek di akun kamu, lewat editor yang kamu buka. Bisa dicabut kapan saja dari menu yang sama. Token server (`NAJJA_TOKEN`) tetap berlaku dan bertindak sebagai admin pertama.
 
 **Claude Code:**
 
 ```bash
-claude mcp add --transport http najja-editor https://editor.domainkamu.com/mcp --header "Authorization: Bearer TOKEN_KAMU"
+claude mcp add --transport http najja-editor https://editor.domainkamu.com/mcp --header "Authorization: Bearer TOKEN_AI_KAMU"
 ```
 
 **Claude Desktop atau Cursor (stdio):** simpan salinan folder `najja-editor` di laptop (cukup untuk `mcp-stdio.js`), lalu isi konfigurasi MCP:
@@ -270,7 +288,7 @@ claude mcp add --transport http najja-editor https://editor.domainkamu.com/mcp -
       "args": ["/path/di/laptop/najja-editor/mcp-stdio.js"],
       "env": {
         "NAJJA_URL": "https://editor.domainkamu.com",
-        "NAJJA_TOKEN": "TOKEN_KAMU"
+        "NAJJA_TOKEN": "TOKEN_AI_KAMU"
       }
     }
   }
@@ -286,7 +304,10 @@ Dengan `NAJJA_URL` terisi, `mcp-stdio.js` hanya meneruskan perintah ke VPS dan t
   - Halaman editor butuh login. Sesi disimpan di cookie HttpOnly + Secure selama 30 hari.
   - `/mcp` butuh header `Authorization: Bearer`.
   - Login salah 10 kali dari satu IP akan diblokir selama 15 menit.
-- Impor file lokal lewat AI dibatasi ke folder `/data/media` di server.
+- Setiap proyek, media, upload, dan ekspor punya pemilik yang ditulis server dari sesi login/token (tidak pernah dari isi request). Data milik akun lain dijawab 404.
+- Perintah MCP hanya dikirim ke editor milik akun pemilik token; hasilnya hanya diterima dari editor akun itu.
+- Impor file lokal lewat AI hanya untuk admin dan dibatasi ke folder `/data/media` di server. Impor URL oleh akun editor hanya boleh ke internet publik (bukan localhost/jaringan internal VPS).
+- Folder server (`exportsDir`, path `mcp-stdio.js`, path file ekspor) hanya ditampilkan ke admin.
 - **Ganti token:** edit `.env`, lalu jalankan `docker compose up -d`. Semua sesi lama otomatis keluar.
 - Proyek, media, dan hasil ekspor tersimpan di server kamu sendiri (volume `najja-data`), tidak di layanan luar.
 - Tombol **Keluar** ada di menu akun (bulatan inisial di kanan atas), atau buka `/logout`.

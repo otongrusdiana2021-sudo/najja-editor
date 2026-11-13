@@ -1,4 +1,4 @@
-// Account menu (VPS mode): who is logged in, change password, manage users, log out.
+// Account menu (VPS mode): who is logged in, personal AI token, change password, manage users, log out.
 import { icon } from './icons.js';
 import { modal, toast, contextMenu, confirmDialog } from './ui.js';
 import { escapeHtml, fmtBytes } from './util.js';
@@ -32,6 +32,7 @@ export const account = {
     contextMenu(r.right - 230, r.bottom + 6, [
       { label: this.me.email, icon: 'ai', disabled: true },
       'sep',
+      { label: 'Token AI (MCP)', icon: 'ai', run: () => this.aiToken() },
       { label: 'Ganti password', icon: 'lock', run: () => this.changePassword() },
       ...(this.me.role === 'admin' ? [{ label: 'Kelola pengguna', icon: 'layers', run: () => this.users() }] : []),
       { label: 'Penyimpanan perangkat', icon: 'download', run: () => this.storage() },
@@ -71,6 +72,47 @@ export const account = {
     render();
   },
 
+  /**
+   * Personal AI (MCP) token: an AI agent connected with it works only in this account's projects.
+   * The token is shown once; the server keeps only a hash.
+   */
+  async aiToken() {
+    const m = modal({ title: 'Token AI (MCP)', body: '<div class="tok-body"><p class="hint">Memuat…</p></div>' });
+    const body = m.el.querySelector('.tok-body');
+    const when = (t) => (t ? new Date(t).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+    const copyBtn = (text, label) => `<button class="btn sm" data-copy="${escapeHtml(text)}">${icon('copy', 14)}${label ? ` ${label}` : ''}</button>`;
+    const render = async (fresh = null) => {
+      let info;
+      try { info = await api('/api/me/token'); } catch (err) { body.innerHTML = `<p class="hint danger">${escapeHtml(err.message)}</p>`; return; }
+      const cmd = fresh ? `claude mcp add --transport http najja-editor ${location.origin}/mcp --header "Authorization: Bearer ${fresh}"` : '';
+      body.innerHTML = `
+        <p class="hint">AI agent (Claude Code, Claude Desktop, Cursor) yang memakai token ini hanya bisa membuka dan mengedit proyek di akun <b>${escapeHtml(this.me?.email || "ini")}</b>, dan hanya lewat editor yang kamu buka di browser.</p>
+        ${fresh ? `<div class="tok-fresh"><b>Salin sekarang — token ini hanya ditampilkan sekali.</b>
+            <div class="copy-row"><code>${escapeHtml(fresh)}</code>${copyBtn(fresh)}</div>
+            <p class="hint">Perintah Claude Code:</p><div class="copy-row"><code>${escapeHtml(cmd)}</code>${copyBtn(cmd)}</div></div>`
+          : info.exists ? `<div class="user-row"><div><b>Token aktif ••••${escapeHtml(info.hint || '')}</b><span>Dibuat ${when(info.createdAt)} · terakhir dipakai ${when(info.lastUsedAt)}</span></div></div>`
+            : '<p class="hint">Belum ada token AI untuk akun ini.</p>'}
+        <div class="tok-actions">
+          <button class="btn btn-primary" data-new>${icon('ai', 15)} ${info.exists ? 'Buat token baru' : 'Buat token'}</button>
+          ${info.exists ? `<button class="btn" data-revoke>${icon('x', 14)} Cabut token</button>` : ''}
+        </div>
+        ${info.exists && !fresh ? '<p class="hint">Membuat token baru otomatis mencabut token lama.</p>' : ''}`;
+      for (const b of body.querySelectorAll('[data-copy]')) {
+        b.onclick = () => navigator.clipboard?.writeText(b.dataset.copy).then(() => toast('Disalin', { type: 'ok' })).catch(() => toast('Gagal menyalin', { type: 'error' }));
+      }
+      body.querySelector('[data-new]').onclick = async () => {
+        if (info.exists && !(await confirmDialog('Buat token baru?', 'AI agent yang memakai token lama harus diatur ulang.', 'Buat baru'))) return;
+        try { render((await api('/api/me/token', { method: 'POST' })).token); } catch (err) { toast(err.message, { type: 'error' }); }
+      };
+      const rv = body.querySelector('[data-revoke]');
+      if (rv) rv.onclick = async () => {
+        if (!(await confirmDialog('Cabut token AI?', 'AI agent yang memakai token ini tidak bisa mengedit lagi.', 'Cabut', true))) return;
+        try { await api('/api/me/token', { method: 'DELETE' }); toast('Token dicabut'); render(); } catch (err) { toast(err.message, { type: 'error' }); }
+      };
+    };
+    render();
+  },
+
   changePassword() {
     const m = modal({
       title: 'Ganti password',
@@ -101,7 +143,7 @@ export const account = {
       let list = [];
       try { list = await api('/api/users'); } catch (err) { body.innerHTML = `<p class="hint danger">${escapeHtml(err.message)}</p>`; return; }
       body.innerHTML = `
-        <p class="hint">Semua pengguna memakai proyek dan media yang sama di server ini. Admin bisa menambah atau menghapus pengguna.</p>
+        <p class="hint">Setiap pengguna punya proyek, media, dan hasil ekspor sendiri; pengguna lain tidak bisa melihatnya. Menghapus pengguna memindahkan datanya ke akun kamu (dicadangkan dulu).</p>
         <div class="user-list">${list.map((u) => `<div class="user-row">
           <span class="avatar sm">${escapeHtml(u.email[0].toUpperCase())}</span>
           <div><b>${escapeHtml(u.email)}</b><span>${u.role === 'admin' ? 'Admin' : 'Editor'} · sejak ${new Date(u.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span></div>
@@ -122,8 +164,12 @@ export const account = {
       };
       for (const b of body.querySelectorAll('[data-del]')) {
         b.onclick = async () => {
-          if (!(await confirmDialog('Hapus pengguna?', `${b.dataset.del} tidak bisa masuk lagi.`, 'Hapus', true))) return;
-          try { await api(`/api/users/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' }); render(); } catch (err) { toast(err.message, { type: 'error' }); }
+          if (!(await confirmDialog('Hapus pengguna?', `${b.dataset.del} tidak bisa masuk lagi. Proyek dan medianya dipindah ke akun kamu.`, 'Hapus', true))) return;
+          try {
+            const r = await api(`/api/users/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' });
+            if (r.moved?.projects || r.moved?.media) toast(`Dipindah ke akun kamu: ${r.moved.projects} proyek, ${r.moved.media} media`, { type: 'ok' });
+            render();
+          } catch (err) { toast(err.message, { type: 'error' }); }
         };
       }
     };
