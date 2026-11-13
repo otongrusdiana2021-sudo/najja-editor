@@ -59,14 +59,15 @@ async function mcp(name, args = {}) {
 // ---- browser
 const PROFILES = {
   desktop: { ctx: { viewport: { width: 1280, height: 800 } }, cpu: 1 },
-  ipad: { ctx: { ...devices['iPad Pro 11'], userAgent: undefined }, cpu: 2 },
-  phone: { ctx: { ...devices['Pixel 7'] }, cpu: 4 },
+  // landscape editing on an iPad (2× pixels); the main thread is assumed 2× slower than the lab machine
+  ipad: { ctx: { ...devices['iPad Pro 11 landscape'], userAgent: undefined }, cpu: 2, dpr: true },
+  phone: { ctx: { ...devices['Pixel 7'] }, cpu: 4, dpr: true },
 };
 const prof = PROFILES[PROFILE] || PROFILES.desktop;
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--enable-precise-memory-info'] });
 
 async function openEditor({ user = ADMIN, profile = prof } = {}) {
-  const ctx = await browser.newContext({ ...profile.ctx, deviceScaleFactor: 1 });
+  const ctx = await browser.newContext({ ...profile.ctx, ...(profile.dpr ? {} : { deviceScaleFactor: 1 }) });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -149,10 +150,41 @@ function memWatch(page) {
 async function measurePlayback(page, secs, from = 0) {
   await page.evaluate(async (t) => { const E = window.najja.engine; E.pause(); E.seek(t); await E.settle(8000); }, from);
   await resetMetrics(page);
-  await page.evaluate((s) => new Promise((done) => { const E = window.najja.engine; E.play(); setTimeout(() => { E.pause(); done(); }, s * 1000); }), secs);
+  // Main-thread time the timeline spends following the playhead (ruler, filmstrips, waveforms, scroll), and the
+  // spacing of animation frames (a gap > 25 ms is a visible hitch on a 60 Hz screen).
+  const tl = await page.evaluate((s) => new Promise((done) => {
+    const T = window.najja.timeline;
+    const acc = { ms: 0, calls: 0, by: {} };
+    const keys = ['paintRuler', 'paintMedia', 'syncScroll', 'onScroll', 'updateTime', 'placeOverlays'];
+    const orig = {};
+    for (const k of keys) {
+      if (typeof T[k] !== 'function') continue;
+      orig[k] = T[k];
+      T[k] = function (...a) { const t0 = performance.now(); try { return orig[k].apply(this, a); } finally { const d = performance.now() - t0; acc.ms += d; acc.calls++; acc.by[k] = (acc.by[k] || 0) + d; } };
+    }
+    const raf = [];
+    let last = 0;
+    let on = true;
+    const loop = (t) => { if (last) raf.push(t - last); last = t; if (on) requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+    const E = window.najja.engine;
+    E.play();
+    setTimeout(() => {
+      E.pause();
+      on = false;
+      for (const k of Object.keys(orig)) T[k] = orig[k];
+      raf.sort((a, b) => a - b);
+      done({ ms: acc.ms, calls: acc.calls, by: acc.by, frames: raf.length, raf95: raf[Math.floor(raf.length * 0.95)] || null, hitches: raf.filter((x) => x > 25).length });
+    }, s * 1000);
+  }), secs);
   const snap = await snapshot(page);
   const S = snap.series;
   return {
+    timeline_ms_per_s: r1(tl.ms / secs),
+    timeline_ms_per_frame: tl.frames ? Math.round((tl.ms / tl.frames) * 100) / 100 : null,
+    timeline_ms_per_s_by_part: Object.fromEntries(Object.entries(tl.by).map(([k, v]) => [k, r1(v / secs)])),
+    raf_p95_ms: tl.raf95 != null ? r1(tl.raf95) : null,
+    frame_hitches_over_25ms: tl.hitches,
     seconds: secs,
     fps_rendered: S.fps_rendered?.avg ?? null,
     frames_missed_pct: S.preview_frames_missed_pct?.avg ?? null,

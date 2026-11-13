@@ -151,8 +151,9 @@ export class Timeline {
       el.querySelectorAll('.kf-dots i').forEach((i, n) => { const k = c.keyframes?.[n]; if (k) i.style.left = `${k.t * this.pps}px`; });
     }
     for (const m of this.lanes.querySelectorAll('.tr-mark')) { const c = store.clip(m.dataset.tr); if (c) m.style.left = `${this.xOf(c.start)}px`; }
+    this.rulerWrap.style.width = this.content.style.width;
     this.updateTime();
-    this.paintRuler();
+    this.paintRuler(true);
     this.paintMedia();
   }
 
@@ -179,8 +180,10 @@ export class Timeline {
   }
 
   updateTime() {
-    this.tCur.textContent = fmtShort(this.engine.time);
-    this.tDur.textContent = fmtShort(store.duration());
+    const cur = fmtShort(this.engine.time);
+    const dur = fmtShort(store.duration());
+    if (cur !== this.lastCur) { this.lastCur = cur; this.tCur.textContent = cur; }
+    if (dur !== this.lastDurTxt) { this.lastDurTxt = dur; this.tDur.textContent = dur; }
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -217,7 +220,8 @@ export class Timeline {
     const dur = store.duration();
     this.content.style.width = `${this.pad * 2 + dur * this.pps}px`;
     this.content.style.height = `${Math.max(this.scroll.clientHeight, bottom + 8)}px`;
-    this.rulerWrap.style.width = `${vw}px`;
+    this.rulerWrap.style.width = `${this.pad * 2 + dur * this.pps}px`; // scrolls with the content (see paintRuler)
+    this.viewW = vw;
     this.playhead.style.left = `${this.pad}px`;
     this.body.classList.toggle('focused', !!this.focus);
 
@@ -250,9 +254,10 @@ export class Timeline {
     }
     this.lanes.innerHTML = html.join('');
     this.lanes.style.height = `${bottom}px`;
+    this.mediaEls = null; // new clip elements: collect again
     this.updateSelection();
     this.updateTime();
-    this.paintRuler();
+    this.paintRuler(true);
     this.paintMedia();
     this.placeOverlays();
     // Re-centre on the playhead after a layout change, but never fight a scrub or a drag in progress.
@@ -327,36 +332,53 @@ export class Timeline {
     const main = this.layoutRows[0];
     if (!main) return;
     const y = main.top - this.scroll.scrollTop + (MAIN_H - 44) / 2;
+    if (y === this.lastAddY) return; // only vertical scrolling moves it: not every frame of playback
+    this.lastAddY = y;
     this.addBtn.style.transform = `translateY(${y}px)`;
     this.addBtn.style.visibility = y < RULER_H - 10 ? 'hidden' : 'visible';
   }
 
   // ---------------------------------------------------------------------------------------------
-  paintRuler() {
-    const w = this.rulerWrap.clientWidth;
-    const h = this.rulerWrap.clientHeight;
-    if (!w || !h) return;
+  /**
+   * The ruler is part of the scrolled content (sticky only vertically), drawn as a tile three screens wide.
+   * While the timeline scrolls — every frame of playback with the centred playhead, 120 times a second on an iPad —
+   * the compositor just moves it; it is drawn again only when the view nears the edge of the tile, or when zoom,
+   * frame rate or theme change (force).
+   */
+  paintRuler(force = false) {
+    const vw = this.viewW || this.scroll.clientWidth;
+    const h = RULER_H;
+    if (!vw) return;
+    const sl = this.scroll.scrollLeft;
     const dpr = window.devicePixelRatio || 1;
+    const fps = store.P.fps || 30;
+    const key = `${this.pps}|${fps}|${this.pad}|${dpr}|${vw}`;
+    const tile = this.rulerTile;
+    if (!force && tile && tile.key === key && sl >= tile.x0 + 0.25 * vw && sl + vw <= tile.x0 + tile.w - 0.25 * vw) return;
+    const w = Math.min(vw * 3, Math.floor(8192 / dpr)); // stay under canvas size limits (Safari)
+    const x0 = Math.max(0, Math.round(sl - (w - vw) / 2));
+    this.rulerTile = { key, x0, w };
     if (this.ruler.width !== Math.round(w * dpr)) { this.ruler.width = Math.round(w * dpr); this.ruler.style.width = `${w}px`; }
     if (this.ruler.height !== Math.round(h * dpr)) { this.ruler.height = Math.round(h * dpr); this.ruler.style.height = `${h}px`; }
+    this.ruler.style.left = `${x0}px`;
     const ctx = this.ruler.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    const cs = getComputedStyle(this.root);
-    const fg = cs.getPropertyValue('--text-3').trim() || '#777';
-    const fg2 = cs.getPropertyValue('--text-2').trim() || '#aaa';
-    const fps = store.P.fps || 30;
+    if (force || !this.rulerColors) {
+      const cs = getComputedStyle(this.root);
+      this.rulerColors = [cs.getPropertyValue('--text-3').trim() || '#777', cs.getPropertyValue('--text-2').trim() || '#aaa'];
+    }
+    const [fg, fg2] = this.rulerColors;
     const steps = [1 / fps, 2 / fps, 5 / fps, 10 / fps, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
-    const major = steps.find((s) => s * this.pps >= 70) || 1800;
+    const major = steps.find((st) => st * this.pps >= 70) || 1800;
     const minor = major / 2;
-    const sl = this.scroll.scrollLeft;
-    const t0 = Math.max(0, Math.floor((sl - this.pad) / this.pps / minor) * minor);
-    const t1 = (sl + w - this.pad) / this.pps;
+    const t0 = Math.max(0, Math.floor((x0 - this.pad) / this.pps / minor) * minor);
+    const t1 = (x0 + w - this.pad) / this.pps;
     ctx.font = '500 10.5px Poppins, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
     for (let t = t0; t <= t1 + minor; t += minor) {
-      const x = Math.round(this.pad + t * this.pps - sl) + 0.5;
+      const x = Math.round(this.pad + t * this.pps - x0) + 0.5;
       const isMajor = Math.abs(t / major - Math.round(t / major)) < 1e-6;
       const tt = Math.round(t * fps) / fps;
       const fr = Math.round((tt % 1) * fps);
@@ -373,37 +395,54 @@ export class Timeline {
     }
   }
 
-  /** Filmstrips and waveforms for the visible part of each clip. */
+  /**
+   * Filmstrips and waveforms for the visible part of each clip. Drawn in blocks (16 filmstrip cells, 1024 px of
+   * waveform) around the view, and only redrawn when the view enters another block — not on every frame while the
+   * timeline follows the playhead.
+   */
   paintMedia() {
     const sl = this.scroll.scrollLeft;
-    const vw = this.scroll.clientWidth;
+    const vw = this.viewW || this.scroll.clientWidth;
     const P = store.P;
-    for (const el of this.lanes.querySelectorAll('.clip.has-strip, .clip-audio')) {
-      const c = store.clip(el.dataset.id);
+    if (!this.mediaEls) {
+      this.mediaEls = [...this.lanes.querySelectorAll('.clip.has-strip, .clip-audio')];
+      this.mediaH = new WeakMap();
+    }
+    const clips = new Map(P.clips.map((c) => [c.id, c]));
+    const BLOCK = 1024;
+    for (const el of this.mediaEls) {
+      const c = clips.get(el.dataset.id);
       if (!c) continue;
       const rt = mediaRT.get(c.mediaId);
-      const m = getMedia(P, c.mediaId);
       const left = this.xOf(c.start);
       const width = c.duration * this.pps;
-      const x0 = Math.max(0, sl - left - 200);
-      const x1 = Math.min(width, sl + vw - left + 200);
+      let x0 = Math.max(0, sl - left - 200);
+      let x1 = Math.min(width, sl + vw - left + 200);
       if (x1 <= x0) continue;
+      let h = this.mediaH.get(el);
+      if (h == null) { h = el.clientHeight; this.mediaH.set(el, h); }
       if (c.type === 'audio') {
-        this.paintWave(el.querySelector('.clip-wave'), c, rt, x0, x1, el.clientHeight);
+        x0 = Math.floor(x0 / BLOCK) * BLOCK;
+        x1 = Math.min(width, Math.ceil(x1 / BLOCK) * BLOCK);
+        const cv = el.querySelector('.clip-wave');
+        const key = `${x0}:${x1}:${this.pps}:${c.in}:${c.speed}:${c.volume}:${h}:${rt?.peaks?.length || 0}`;
+        if (!cv || cv.dataset.key === key) continue;
+        cv.dataset.key = key;
+        this.paintWave(cv, c, rt, x0, x1, h);
         continue;
       }
       const strip = el.querySelector('.clip-strip');
       if (!strip || !rt) continue;
-      const h = el.clientHeight;
       if (c.type === 'image' || !rt.sprite) {
-        strip.style.backgroundImage = rt.poster ? `url(${rt.poster})` : '';
-        strip.innerHTML = '';
+        const bg = rt.poster ? `url(${rt.poster})` : '';
+        if (strip.dataset.bg !== bg) { strip.dataset.bg = bg; strip.style.backgroundImage = bg; strip.innerHTML = ''; }
         continue;
       }
+      const m = getMedia(P, c.mediaId);
       const cellW = Math.max(24, (rt.spriteW / rt.spriteH) * h);
-      const j0 = Math.floor(x0 / cellW);
-      const j1 = Math.ceil(x1 / cellW);
-      const key = `${j0}:${j1}:${cellW}:${this.pps}:${c.in}:${c.speed}:${h}`;
+      const j0 = Math.floor(x0 / cellW / 16) * 16;
+      const j1 = Math.min(Math.ceil(width / cellW), Math.ceil(x1 / cellW / 16) * 16);
+      const key = `${j0}:${j1}:${cellW}:${this.pps}:${c.in}:${c.speed}:${h}:${rt.sprite}`;
       if (strip.dataset.key === key) continue;
       strip.dataset.key = key;
       let out = '';

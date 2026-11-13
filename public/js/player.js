@@ -119,7 +119,7 @@ export class Player {
   updateBox() {
     const c = this.selectedVisual();
     const b = c && this.engine.boxes.get(c.id);
-    if (!b || this.engine.playing) { this.box.style.display = 'none'; return; }
+    if (!b || this.engine.playing) { if (this.box.style.display !== 'none') this.box.style.display = 'none'; return; } // called on every drawn frame
     const k = this.cssScale || 1;
     this.box.style.display = 'block';
     this.box.style.width = `${Math.abs(b.w) * k}px`;

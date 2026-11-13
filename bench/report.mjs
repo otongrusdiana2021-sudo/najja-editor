@@ -16,6 +16,8 @@ export function keyNumbers(r) {
     add('FPS pratinjau', r.playback.fps_rendered, false); add('frame proyek terlewat (%)', r.playback.frames_missed_pct);
     add('gambar frame p50 (ms)', r.playback.frame_draw_p50_ms); add('gambar frame p95 (ms)', r.playback.frame_draw_p95_ms);
     add('long task saat putar', r.playback.long_tasks); add('tunggu buffer', r.playback.buffer_waits);
+    add('timeline: main thread per frame (ms)', r.playback.timeline_ms_per_frame); add('frame tersendat > 25 ms', r.playback.frame_hitches_over_25ms);
+    add('jarak frame p95 (ms)', r.playback.raf_p95_ms);
   }
   if (r.seek) { add('seek → frame p50 (ms)', r.seek.p50_ms); add('seek → frame p95 (ms)', r.seek.p95_ms); }
   if (r.export) {

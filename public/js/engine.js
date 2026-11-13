@@ -73,7 +73,7 @@ export class Engine {
     this.clockBase = this.time;
     this.clockStart = performance.now();
     this.sync();
-    this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, vq: this.videoQuality() };
+    this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, shown: 0, vq: this.videoQuality() };
     this.emit('play');
   }
   pause() {
@@ -99,7 +99,10 @@ export class Engine {
     const secs = (performance.now() - S.at) / 1000;
     if (secs < 1) return;
     const fps = store.P?.fps || 30;
-    const expected = Math.max(1, (this.time - S.t) * fps);
+    // Missed = pictures the video presented that never reached the preview (or, without video, project frames
+    // skipped). Not "project frame numbers that jumped": with a 30 fps video and 30 fps project, the phase between
+    // the clock and the decoder makes numbers jump while every picture is drawn.
+    const expected = S.shown > 0 ? S.shown : Math.max(1, (this.time - S.t) * fps);
     metrics.sample('fps_rendered', S.draws / secs);
     metrics.sample('preview_frames_missed_pct', (100 * S.skipped) / expected);
     const q = this.videoQuality();
@@ -186,7 +189,11 @@ export class Engine {
         if (M.frames !== M.drawn || fi - this.lastFi >= 2) draw = true; // video late: keep overlays moving
       } else if (fi !== this.lastFi) draw = true;
       if (draw) {
-        if (this.session && this.lastFi >= 0 && fi - this.lastFi > 1) this.session.skipped += fi - this.lastFi - 1;
+        const S = this.session;
+        if (S && M && M.frames != null && !this.buffering) {
+          const n = M.drawn >= 0 ? M.frames - M.drawn : 0;
+          if (n > 0) { S.shown += n; if (n > 1) S.skipped += n - 1; }
+        } else if (S && this.lastFi >= 0 && fi - this.lastFi > 1) S.skipped += fi - this.lastFi - 1;
         this.lastFi = fi;
         if (M) M.drawn = M.frames;
       }

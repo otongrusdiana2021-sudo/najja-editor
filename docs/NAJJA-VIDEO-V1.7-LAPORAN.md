@@ -575,3 +575,38 @@ P6: revisi proyek + deteksi konflik antar-perangkat (sekarang simpan terakhir me
 ### Berikutnya
 
 Rilis v1.7.0: tes lengkap, ringkasan, versi 1.7.0. P3 (render worker/WebGL2) dan P7 (cloud render) tetap ditunda dengan alasan di rencana.
+
+---
+
+## Perbaikan setelah rilis: pratinjau tersendat di iPad saat timeline berjalan
+
+**Laporan pengguna:** di iPad, pratinjau "patah-patah" saat timeline diputar.
+
+**Penyebab (diukur dengan profil iPad: landscape, DPR 2, CPU 2× lebih lambat).** Dengan playhead di tengah, timeline bergulir di setiap frame layar (120×/dtk di iPad ProMotion). Setiap guliran:
+- menggambar ulang **ruler** penuh, termasuk `getComputedStyle` (50 ms main thread per detik di 60 Hz);
+- **mengalokasi ulang kanvas waveform** dan menggambarnya lagi;
+- membangun ulang **filmstrip** (`innerHTML`) setiap kali bergeser satu sel;
+- menulis teks waktu dan posisi tombol "+".
+
+Totalnya ±90–100 ms/dtk di 60 Hz, dan di 120 Hz dua kali lipat. Semuanya berebut main thread dengan pemutaran.
+
+**Perbaikan (`public/js/timeline.js`, `public/css/app.css`, `public/js/player.js`):**
+- **Ruler** menjadi bagian konten yang bergulir (sticky hanya vertikal), digambar sebagai tile 3× lebar layar. Compositor yang menggeser; tile digambar ulang hanya saat mendekati tepi, atau saat zoom/fps/ukuran berubah. Warna tema di-cache.
+- **Waveform** digambar per blok 1.024 px dan **filmstrip** per blok 16 sel, hanya diulang saat masuk blok baru. Tinggi elemen di-cache, dan pencarian klip memakai Map.
+- Teks waktu, tombol "+", dan kotak seleksi hanya ditulis kalau nilainya berubah.
+
+Tampilan tidak berubah: screenshot timeline lama vs baru di 5 posisi/zoom tidak punya piksel yang berbeda > 40 level, hanya antialiasing teks ruler.
+
+**Metrik dibetulkan (`engine.js`).** `preview_frames_missed_pct` sebelumnya menghitung lompatan nomor frame proyek. Dengan video 30 fps dan proyek 30 fps, fase antara jam dan decoder membuat nomor melompat walau semua gambar tergambar, sehingga kode yang sama memberi 0,3% dan 45,7%. Sekarang yang dihitung adalah gambar yang sudah ditampilkan video tapi tidak sempat digambar ke pratinjau (atau frame proyek yang terlewati bila tidak ada video).
+
+**A/B bergantian** (B1, profil iPad, timeline lama vs baru, 2× masing-masing; `bench/results/2026-11-13-tl-{old,new}-*`):
+
+| | Lama | Baru |
+|---|---|---|
+| Main thread timeline saat play | 91,4 / 86,2 ms/dtk | **38,6 / 38,4 ms/dtk (−56%)** |
+| Per frame | 1,60 / 1,49 ms | **0,65 ms** |
+| Jeda frame > 25 ms (15 dtk) | 42 / 32 | **11 / 16 (≈ −65%)** |
+| Long task | 1 / 0 | 0 / 0 |
+| Gambar video tidak tergambar | 0% / 0% | 0% / 0% |
+
+**Batas pengukuran.** Lab memakai Chromium tanpa GPU dan tanpa layar 120 Hz. Biaya gambar frame pratinjau (filter, teks) di GPU iPad bisa berbeda. Kalau setelah update iPad masih tersendat, menu **⋯ → Diagnostik performa → Salin JSON** dari iPad itu menunjukkan bagian mana yang lambat: *Menunggu buffer* (jaringan/salinan belum di perangkat), *Waktu gambar per frame* (efek/filter), atau *Long task*.
