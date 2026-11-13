@@ -169,7 +169,7 @@ Semua data ada **di VPS kamu**, tidak di layanan luar (tidak memakai Supabase at
 | Data | Lokasi di dalam container (volume Docker `najja-editor_najja-data`) |
 |---|---|
 | Proyek | `/data/projects/*.json` |
-| Media (file asli, salinan H.264, thumbnail, waveform) | `/data/library/<id>/` |
+| Media (file asli, salinan pratinjau 720p, salinan H.264 1080p, thumbnail, waveform) | `/data/library/<id>/` |
 | Hasil ekspor | `/data/exports/` |
 
 Karena itu proyek bisa dibuka dari laptop, HP, atau browser mana pun setelah login. Upload video besar dipecah per 8 MB, jadi tidak terkena batas upload nginx/aaPanel.
@@ -184,14 +184,36 @@ Supaya refresh atau buka ulang browser tidak mengunduh video lagi, tiap perangka
 - Lihat atau hapus salinan: menu akun (bulatan inisial) → **Penyimpanan perangkat**. Salinan tetap ada setelah *Keluar*.
 - Pasang editor sebagai aplikasi (PWA) supaya Chrome menandai penyimpanannya permanen dan tidak membersihkannya saat disk penuh.
 
-### Video iPhone (HEVC) dan format lain
+### Salinan ringan untuk pratinjau (supaya edit lancar di semua perangkat)
 
-Video iPhone `.MOV` biasanya memakai codec HEVC (H.265). Tidak semua PC bisa memutarnya di browser: preview jadi hitam walaupun filenya ada. Karena itu server otomatis membuat **salinan MP4 H.264** untuk video seperti ini (juga AVI, video 10-bit/HDR, ProRes), lalu editor memakai salinan itu untuk preview dan ekspor.
+Video dari HP biasanya berat: 1080p–4K dengan bitrate 10–50 Mbps. Kalau pratinjau memutar file asli, iPad dan HP harus mengunduh dan men-decode file besar itu, sehingga impor dan play terasa lambat. Karena itu server menyiapkan beberapa versi untuk tiap video:
 
-- File asli tetap disimpan dan tidak diubah.
-- Konversi berjalan sekali per video di VPS (±1,5× durasi video di 1 vCPU) dengan prioritas rendah, jadi aplikasi lain di VPS tidak terganggu. Selama proses, kartu media menampilkan **Konversi xx%**.
-- Video yang sudah ada sebelum fitur ini dikonversi otomatis saat proyeknya dibuka.
-- Butuh `ffmpeg`. Image Docker sudah memasangnya; installer menampilkan *Konversi video otomatis … aktif ✓*. Untuk Cara B (tanpa Docker), pasang dengan `apt install -y ffmpeg` lalu `systemctl restart najja-editor`.
+| Versi | Untuk apa | Kapan dibuat |
+|---|---|---|
+| **Salinan pratinjau 720p** (`edit.mp4`) | Diputar di editor. Kecil diunduh, ringan di-decode, keyframe tiap 0,5 detik sehingga geser timeline langsung tepat. | Untuk setiap video yang lebih besar dari 720p, bitrate di atas 8 Mbps, atau codec-nya tidak didukung browser. Dibuat **paling dulu**. |
+| Thumbnail timeline, gambar kartu, waveform | Tampil di timeline dan pustaka. HP tidak perlu men-decode seluruh video. | Sesudah salinan pratinjau. |
+| **Salinan H.264 1080p** (`proxy.mp4`) | Dipakai saat ekspor, kalau file aslinya tidak bisa dibaca browser. | Hanya untuk video iPhone HEVC, AVI, 10-bit/HDR, ProRes. Dibuat **paling akhir**, prioritas rendah. |
+
+- **Ekspor tetap kualitas penuh.** Hasil ekspor membaca file asli; kalau file asli tidak bisa dibaca browser, ekspor memakai salinan H.264 1080p. Salinan 720p hanya untuk pratinjau.
+- **Impor tidak menunggu.** Begitu browser selesai membaca header file, klip langsung bisa dipakai. Upload (3 potongan paralel), thumbnail, dan salinan ringan berjalan di belakang.
+  - Di perangkat yang mengimpor, file asli langsung diputar dari perangkat.
+  - Begitu salinan 720p siap, salinan itu diunduh sekali lalu dipakai otomatis.
+- **Waktu proses** untuk video HEVC 47 detik:
+  - Salinan 720p: ±11 detik di 4 core, ±36 detik di 1 core.
+  - Sebelumnya, salinan 1080p butuh ±85 detik di 1 core sebelum video bisa diputar di PC.
+- Selama salinan dibuat, kartu media menampilkan **Konversi xx%**, tapi hanya kalau perangkat itu memang tidak bisa memutar file aslinya.
+- Video yang sudah ada sebelum versi 1.6 diproses otomatis saat proyeknya dibuka.
+- Semua proses berjalan **satu per satu** dengan prioritas rendah, jadi aplikasi lain di VPS tidak terganggu.
+- Butuh `ffmpeg`. Image Docker sudah memasangnya, dan installer menampilkan *Konversi video otomatis … aktif ✓*. Untuk Cara B (tanpa Docker), pasang dengan `apt install -y ffmpeg` lalu `systemctl restart najja-editor`.
+
+Pengaturan (opsional, di `.env`):
+
+| Variabel | Default | Isi |
+|---|---|---|
+| `NAJJA_EDIT_MAX` | `1280` | Sisi terpanjang salinan pratinjau (px) |
+| `NAJJA_EDIT_THREADS` | jumlah core (maks. 4) | Thread ffmpeg untuk salinan pratinjau |
+| `NAJJA_PROXY_THREADS` | `2` | Thread ffmpeg untuk salinan 1080p |
+| `NAJJA_PROXY` | | Isi `0` untuk mematikan semua konversi |
 
 **Backup** satu file ke folder home:
 
@@ -278,5 +300,5 @@ Dengan `NAJJA_URL` terisi, `mcp-stdio.js` hanya meneruskan perintah ke VPS dan t
 | Setelah login kembali lagi ke halaman login | Buka lewat **https://**. Cookie aman tidak dikirim lewat http. |
 | AI menjawab "editor is not open" | Buka editor di browser dan pastikan sudah login. Titik di tombol **MCP** harus hijau. |
 | Ekspor berhenti atau lambat | Ekspor berjalan di tab browser: biarkan tab terbuka dan terlihat. MP4 dirender cepat di Chrome/Edge (makin cepat dengan GPU; cek *Settings → System → Use graphics acceleration* aktif). File langsung terunduh; salinan ke server menyusul di background. |
-| Preview video hitam di PC lain (video iPhone) | Codec HEVC tidak didukung browser PC itu. Tunggu kartu media selesai **Konversi**; kalau muncul "Tidak bisa diputar", jalankan installer lagi agar ffmpeg terpasang. |
+| Preview video hitam di PC lain (video iPhone) | Codec HEVC tidak didukung browser PC itu. Tunggu kartu media selesai **Konversi** (salinan 720p, biasanya kurang dari durasi videonya); kalau muncul "Tidak bisa diputar", jalankan installer lagi agar ffmpeg terpasang. |
 | Pakai nginx, bukan Caddy | Tambahkan `proxy_set_header Host $host;`, `proxy_set_header X-Forwarded-Proto $scheme;`, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, `proxy_buffering off;`, `proxy_read_timeout 1h;`, dan `client_max_body_size 2g;`. |

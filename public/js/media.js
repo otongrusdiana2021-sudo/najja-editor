@@ -83,69 +83,116 @@ async function canPlayVideo(url) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Server playback proxies: when a browser cannot decode a file (e.g. iPhone HEVC .MOV on many PCs),
-// the server makes an H.264 copy and the editor switches to it. The original stays on the server.
+// Server renditions (lib/media-proxy.js). For every heavy video the server makes a light 720p copy that the
+// preview plays (small to download, cheap to decode and draw, keyframe every 0.5 s so seeks are instant), plus
+// the filmstrip, poster and waveform. Files a browser may not decode (iPhone HEVC on many PCs...) also get a
+// full-quality H.264 copy, which exports use. The original stays on the server untouched.
+//   rt.url        what the preview plays now (a device copy when there is one)
+//   rt.src        the copy chosen for the preview (rt.url becomes its device copy once downloaded)
+//   rt.local      the original file on the device that imported it, when this browser decodes it
+//   rt.exportSrc  the copy exports read (full quality); rt.exportUrl: its device copy, during an export
 const watching = new Set();
 /** The library entry for a media id; during project load the project is not installed yet, so callers pass it. */
 const entryOf = (id, fallback) => store.P?.media?.find((m) => m.id === id) || fallback;
 const NO_CONVERTER = 'Video ini (mis. HEVC dari iPhone) tidak bisa diputar di browser ini, dan server belum bisa mengonversinya. Jalankan ulang installer Najja di VPS agar konversi otomatis aktif.';
+const busy = (s) => s === 'pending' || s === 'running';
 
-function useProxy(id, v) {
+/**
+ * Apply the server's state of a media item: thumbnails, waveform, and which copy to play and to export.
+ * Resolves once the preview source is set up (a device copy is used straight away when there is one).
+ */
+async function applyServerState(id, st, { entry, announce = false } = {}) {
   const rt = mediaRT.get(id);
-  if (!rt) return;
-  rt.url = remote.proxyUrl(id, v);
+  if (!rt || !st) return;
+  rt.server = st;
+  const e = entryOf(id, entry);
+  if (st.probe && e && e.type === 'video') {
+    if (!e.duration && st.probe.duration) e.duration = st.probe.duration;
+    if (!e.width && st.probe.width) { e.width = st.probe.width; e.height = st.probe.height; }
+    if (st.probe.hasVideo) e.hasAudio = !!st.probe.hasAudio;
+  }
+  const a = st.assets;
+  if (a) {
+    const q = `?v=${a.v || 0}`;
+    // Server filmstrip replaces the quick one made while importing (it has more frames).
+    if (a.sprite && (!rt.sprite || rt.spriteQuick)) Object.assign(rt, { sprite: remote.assetUrl(id, 'sprite', q), spriteN: a.sprite.n, spriteW: a.sprite.w, spriteH: a.sprite.h, spriteQuick: false });
+    if (a.poster && !rt.poster) rt.poster = remote.assetUrl(id, 'poster', q);
+    if (a.peaks && !rt.peaks && !rt.peaksLoading) {
+      rt.peaksLoading = true;
+      remote.getPeaks(id).then((p) => { rt.peaks = p; changed(id); }).catch(() => {}).finally(() => { rt.peaksLoading = false; });
+    }
+  }
+  if (e?.type === 'image') { changed(id); return; }
+
+  const ed = st.edit;
+  const safe = st.state === 'none' || rt.originalOk;
+  const editUrl = ed?.state === 'ready' ? remote.editUrl(id, ed.v) : null;
+  const hiUrl = st.state === 'ready' ? remote.proxyUrl(id, st.v) : null;
+  const fileUrl = remote.mediaUrl(id);
+  const preview = editUrl || rt.local || hiUrl || (safe ? fileUrl : null);
+  // Exports read full quality: the H.264 copy of a file browsers may not decode, else the original.
+  rt.exportSrc = hiUrl || (st.state === 'none' && rt.local) || (safe ? fileUrl : null) || rt.local || editUrl || preview;
+  const waiting = busy(ed?.state) || busy(st.state) || !a;
+  if (!preview) {
+    const name = e?.name || 'video';
+    if (busy(ed?.state) || busy(st.state)) {
+      rt.convert = { progress: busy(ed?.state) ? (ed.progress || 0) : (st.progress || 0) };
+      if (announce) toast(`"${name}" sedang disiapkan server supaya bisa diputar di perangkat ini. Cukup sekali.`, { timeout: 6000 });
+      watchServer(id);
+    } else if (st.state === 'unavailable') {
+      rt.convert = null;
+      rt.playError = NO_CONVERTER;
+      toast(`"${name}": ${NO_CONVERTER}`, { type: 'warn', timeout: 12000 });
+    } else if (st.state === 'error' || ed?.state === 'error') {
+      rt.convert = null;
+      rt.playError = st.error || ed?.error || 'Konversi gagal';
+      toast(`Konversi "${name}" gagal: ${rt.playError}`, { type: 'error', timeout: 10000 });
+    }
+    changed(id);
+    return;
+  }
+  const wasWaiting = !!rt.convert;
   rt.convert = null;
   rt.playError = null;
   if (rt.status !== 'missing') rt.status = 'ready';
+  await setPreview(id, preview);
+  if (wasWaiting) toast(`"${e?.name || 'Video'}" siap diputar`, { type: 'ok', timeout: 3500 });
+  if (waiting) watchServer(id);
+  changed(id);
+}
+
+/** Point the preview at `src`; plays a device copy right away, otherwise streams while one is downloaded. */
+async function setPreview(id, src) {
+  const rt = mediaRT.get(id);
+  if (!rt || !src || rt.src === src) return;
+  rt.src = src;
+  if (src.startsWith('blob:')) { rt.url = src; rt.cacheKey = null; changed(id); return; }
+  const key = deviceCache.keyFor(id, src);
+  const local = key ? await deviceCache.open(key).catch(() => null) : null;
+  if (rt.src !== src) { if (local) URL.revokeObjectURL(local); return; }
+  if (local) { useLocal(id, rt, local, src, key); return; }
+  // Keep playing what is already on this device (e.g. the original just imported) until the new copy is here.
+  if (!rt.url || !rt.url.startsWith('blob:')) rt.url = src;
   changed(id);
   cacheLocally(id);
 }
 
-/** Apply a proxy state from the server; start watching while it converts. Returns true once usable. */
-function applyProxyState(id, st, { announce = false, entry } = {}) {
-  const rt = mediaRT.get(id);
-  if (!rt || !st) return false;
-  const name = entryOf(id, entry)?.name || 'video';
-  if (st.state === 'ready') { useProxy(id, st.v); return true; }
-  if (st.state === 'pending' || st.state === 'running') {
-    rt.convert = { progress: st.progress || 0 };
-    changed(id);
-    if (announce) toast(`"${name}" sedang dikonversi ke MP4 (H.264) supaya bisa diputar di perangkat ini. Cukup sekali.`, { timeout: 6000 });
-    watchProxy(id);
-    return false;
-  }
-  rt.convert = null;
-  if (st.state === 'unavailable') {
-    rt.playError = NO_CONVERTER;
-    toast(`"${name}": ${NO_CONVERTER}`, { type: 'warn', timeout: 12000 });
-  } else if (st.state === 'error') {
-    rt.playError = st.error || 'Konversi gagal';
-    toast(`Konversi "${name}" gagal: ${rt.playError}`, { type: 'error', timeout: 10000 });
-  }
-  changed(id);
-  return false;
-}
-
-async function watchProxy(id) {
+/** Poll the server while copies or thumbnails are being made. */
+async function watchServer(id) {
   if (watching.has(id)) return;
   watching.add(id);
   try {
     for (let i = 0; i < 1800; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
-      if (!mediaRT.has(id)) return;
+      await new Promise((r) => setTimeout(r, i < 30 ? 1500 : 3000));
+      const rt = mediaRT.get(id);
+      if (!rt) return;
       let st;
       try { st = await remote.proxyStatus(id); } catch { continue; }
-      const rt = mediaRT.get(id);
-      if (st.state === 'pending' || st.state === 'running') {
-        if (rt && Math.abs((rt.convert?.progress || 0) - (st.progress || 0)) > 0.005) { rt.convert = { progress: st.progress || 0 }; changed(id); }
-        continue;
-      }
-      if (st.state === 'ready') {
-        useProxy(id, st.v);
-        await cacheLocally(id); // thumbnails are then made from the local copy
-        await ensurePreview(id);
-        toast(`"${entryOf(id)?.name || 'Video'}" siap diputar`, { type: 'success', timeout: 3500 });
-      } else applyProxyState(id, st);
+      const before = JSON.stringify([rt.convert, rt.src, rt.exportSrc, !!rt.sprite, !!rt.peaks]);
+      if (rt.convert && busy(st.edit?.state || '') && Math.abs((rt.convert.progress || 0) - (st.edit.progress || 0)) > 0.005) { rt.convert = { progress: st.edit.progress || 0 }; changed(id); }
+      watching.delete(id); // applyServerState may start a new watch; this one ends either way
+      await applyServerState(id, st);
+      if (JSON.stringify([rt.convert, rt.src, rt.exportSrc, !!rt.sprite, !!rt.peaks]) !== before && store.P?.media?.some((m) => m.id === id)) store.scheduleSave();
       return;
     }
   } finally {
@@ -153,62 +200,39 @@ async function watchProxy(id) {
   }
 }
 
-/** Filmstrip/poster for media whose original could not be decoded here (made from the proxy once it exists). */
-async function ensurePreview(id, fallback) {
+/** A browser-safe original with no light copy: make sure it really decodes here, else ask for an H.264 copy. */
+async function checkPlayable(id, entry) {
   const rt = mediaRT.get(id);
-  const entry = entryOf(id, fallback);
-  if (!rt || !entry || entry.type !== 'video' || (rt.sprite && rt.poster)) return;
+  if (!rt?.url || rt.server?.edit?.state === 'ready') return;
+  await cacheLocally(id); // check the device copy (no extra download just to probe)
+  if (await canPlayVideo(rt.url)) return;
   try {
-    const v = await probeVideo(rt.url);
-    if (!entry.duration && Number.isFinite(v.duration)) entry.duration = v.duration;
-    if (!entry.width) { entry.width = v.videoWidth; entry.height = v.videoHeight; }
-    Object.assign(rt, await makeSprite(v, entry.duration || v.duration));
-    v.removeAttribute('src');
-    v.load();
-    changed(id);
-    await remote.putMeta(id, { entry, sprite: rt.sprite, spriteN: rt.spriteN, spriteW: rt.spriteW, spriteH: rt.spriteH, poster: rt.poster, hasPeaks: !!rt.peaks });
-    if (store.P) store.scheduleSave();
-  } catch { /* the preview is optional */ }
-}
-
-/** Check that a server video plays here; if not, ask the server for an H.264 copy. */
-async function checkPlayable(id, entry, { cacheFirst = false } = {}) {
-  const rt = mediaRT.get(id);
-  if (!rt?.url) return;
-  // The server already judged this codec browser-safe: save it to this device first, then check the local
-  // copy (no extra download just to probe it).
-  if (cacheFirst && !rt.url.startsWith('blob:')) await cacheLocally(id);
-  if (await canPlayVideo(rt.url)) { cacheLocally(id); return; }
-  try {
-    if (applyProxyState(id, await remote.requestProxy(id, true), { announce: true, entry })) { await cacheLocally(id); await ensurePreview(id, entry); }
+    await applyServerState(id, await remote.requestProxy(id, true), { announce: true, entry });
   } catch (err) {
     rt.playError = err.message;
     changed(id);
   }
 }
 
+/** The server marked the codec unsafe but has no copy yet: some browsers (Safari + HEVC) play the original anyway. */
+async function tryOriginal(id, entry) {
+  const rt = mediaRT.get(id);
+  if (!rt || rt.src) return;
+  if (await canPlayVideo(remote.mediaUrl(id))) {
+    rt.originalOk = true;
+    await applyServerState(id, rt.server || { state: 'none' }, { entry });
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
-// Device cache: each server media file is downloaded once (one request, in the background) and then
-// played from memory. Streaming the same file to several players at once over a home connection is
-// what made video drop out mid-way; after the download, playback and export never wait on the network.
+// Device cache: each server copy is downloaded once (one request, in the background) and then played from
+// disk. Streaming the same file to several players at once over a home connection is what made video drop out
+// mid-way; after the download, playback and export never wait on the network.
 const DEVICE_FILE_MAX = 1024 ** 3; // larger files keep streaming
 const DEVICE_TOTAL_MAX = 2 * 1024 ** 3;
 let deviceBytes = 0;
 let cacheChain = Promise.resolve();
-const caching = new Map(); // id -> promise<boolean>
-
-/** Download a server media file to this device (queued, one at a time). Resolves true once it plays locally. */
-export function cacheLocally(id) {
-  const rt = mediaRT.get(id);
-  if (!remote.enabled || !rt?.url || rt.status === 'missing') return Promise.resolve(false);
-  if (rt.url.startsWith('blob:')) return Promise.resolve(true);
-  if (caching.has(id)) return caching.get(id);
-  const job = cacheChain.then(() => downloadToDevice(id)).catch(() => false);
-  cacheChain = job;
-  caching.set(id, job);
-  job.finally(() => caching.delete(id));
-  return job;
-}
+const caching = new Map(); // `${id}|${src}` -> promise<blob url | null>
 
 /** Downloads yield to playback: while the preview plays, the player gets the whole connection. */
 let cacheGate = () => true;
@@ -228,21 +252,42 @@ function useLocal(id, rt, url, src, key = null) {
   changed(id);
 }
 
-async function downloadToDevice(id) {
-  const rt = mediaRT.get(id);
-  if (!rt?.url) return false;
-  if (rt.url.startsWith('blob:')) return true;
-  const src = rt.url;
-  const stillWanted = () => mediaRT.get(id) === rt && rt.url === src;
+/** Download one server copy of a media item to this device (queued, one at a time). Resolves its blob: URL. */
+function fetchToDevice(id, src, { onProgress, stillWanted = () => true } = {}) {
+  const k = `${id}|${src}`;
+  if (caching.has(k)) return caching.get(k);
+  const job = cacheChain.then(() => downloadToDevice(id, src, onProgress, stillWanted)).catch(() => null);
+  cacheChain = job;
+  caching.set(k, job);
+  job.finally(() => caching.delete(k));
+  return job;
+}
 
+/** Download the preview copy to this device, then play from it. Resolves true once it plays locally. */
+export async function cacheLocally(id) {
+  const rt = mediaRT.get(id);
+  if (!remote.enabled || !rt?.url || rt.status === 'missing') return false;
+  const src = rt.src || rt.url;
+  if (src.startsWith('blob:')) return true;
+  if (rt.cacheKey && rt.remoteUrl === src) return true;
+  const url = await fetchToDevice(id, src, {
+    stillWanted: () => mediaRT.get(id) === rt && (rt.src || src) === src,
+    onProgress: (p) => { rt.cache = p == null ? null : { progress: p }; changed(id); },
+  });
+  if (!url) return false;
+  if (mediaRT.get(id) !== rt || (rt.src || src) !== src) { if (url !== rt.exportUrl) URL.revokeObjectURL(url); return false; }
+  useLocal(id, rt, url, src, deviceCache.keyFor(id, src));
+  return true;
+}
+
+async function downloadToDevice(id, src, onProgress, stillWanted) {
   // Persistent copy on this device (survives refresh and browser restarts), limited to 5 GB.
   const key = deviceCache.keyFor(id, src);
   if (key && await deviceCache.available()) {
     let last = 0;
     try {
       const url = (await deviceCache.open(key)) || await (async () => {
-        rt.cache = { progress: 0 };
-        changed(id);
+        onProgress?.(0);
         return deviceCache.download(key, {
           id,
           name: entryOf(id)?.name || '',
@@ -251,25 +296,23 @@ async function downloadToDevice(id) {
           waitResume: waitGate,
           stillWanted,
           protect: projectIds(),
-          onProgress: (p) => { if (performance.now() - last > 400) { last = performance.now(); rt.cache = { progress: p }; changed(id); } },
+          onProgress: (p) => { if (performance.now() - last > 400) { last = performance.now(); onProgress?.(p); } },
         });
       })();
+      onProgress?.(null);
       if (url) {
-        rt.cache = null;
-        if (!stillWanted()) { URL.revokeObjectURL(url); changed(id); return false; }
-        useLocal(id, rt, url, src, key);
-        return true;
+        if (!stillWanted()) { URL.revokeObjectURL(url); return null; }
+        return url;
       }
     } catch { /* fall through to the in-memory copy */ }
-    rt.cache = null;
-    changed(id);
-    if (!stillWanted()) return false;
+    onProgress?.(null);
+    if (!stillWanted()) return null;
   }
-  return downloadToMemory(id, rt, src, stillWanted);
+  return downloadToMemory(src, onProgress, stillWanted);
 }
 
 /** Fallback when the browser has no persistent storage (or no room): keep a copy in memory for this tab. */
-async function downloadToMemory(id, rt, src, stillWanted) {
+async function downloadToMemory(src, onProgress, stillWanted) {
   const parts = [];
   let got = 0;
   let total = 0;
@@ -278,7 +321,7 @@ async function downloadToMemory(id, rt, src, stillWanted) {
   try {
     for (let attempt = 0; attempt < 30; attempt++) {
       await waitGate();
-      if (!stillWanted()) return false;
+      if (!stillWanted()) return null;
       let r;
       try {
         r = await fetch(src, { credentials: 'same-origin', headers: got ? { Range: `bytes=${got}-` } : {} });
@@ -286,14 +329,13 @@ async function downloadToMemory(id, rt, src, stillWanted) {
         await new Promise((res) => setTimeout(res, 2000));
         continue;
       }
-      if (!r.ok || !r.body) return false;
+      if (!r.ok || !r.body) return null;
       if (got && r.status !== 206) { parts.length = 0; got = 0; } // no range support: start over
       if (!total) {
         total = Number((r.headers.get('content-range') || '').split('/')[1]) || Number(r.headers.get('content-length')) || 0;
         type = r.headers.get('content-type') || '';
-        if (total > DEVICE_FILE_MAX || deviceBytes + total > DEVICE_TOTAL_MAX) { r.body.cancel().catch(() => {}); return false; }
-        rt.cache = { progress: 0 };
-        changed(id);
+        if (total > DEVICE_FILE_MAX || deviceBytes + total > DEVICE_TOTAL_MAX) { r.body.cancel().catch(() => {}); return null; }
+        onProgress?.(0);
       }
       const reader = r.body.getReader();
       let paused = false;
@@ -303,8 +345,8 @@ async function downloadToMemory(id, rt, src, stillWanted) {
           if (done) break;
           parts.push(value);
           got += value.length;
-          if (!stillWanted()) { reader.cancel().catch(() => {}); return false; }
-          if (total && performance.now() - last > 400) { last = performance.now(); rt.cache = { progress: got / total }; changed(id); }
+          if (!stillWanted()) { reader.cancel().catch(() => {}); return null; }
+          if (total && performance.now() - last > 400) { last = performance.now(); onProgress?.(got / total); }
           if (!gateOpen()) { paused = true; reader.cancel().catch(() => {}); break; } // resume later from `got`
         }
       } catch {
@@ -313,13 +355,12 @@ async function downloadToMemory(id, rt, src, stillWanted) {
       if (!paused && (!total || got >= total)) break;
     }
   } finally {
-    rt.cache = null;
+    onProgress?.(null);
   }
-  if (!stillWanted() || (total && got !== total)) { changed(id); return false; }
+  if (!stillWanted() || (total && got !== total)) return null;
   const blob = new Blob(parts, { type });
   deviceBytes += blob.size;
-  useLocal(id, rt, URL.createObjectURL(blob), src);
-  return true;
+  return URL.createObjectURL(blob);
 }
 
 /** Remove every copy kept on this device; media in use goes back to streaming from the server. */
@@ -332,20 +373,38 @@ export async function clearDeviceCache() {
       changed(id);
       setTimeout(() => URL.revokeObjectURL(local), 2000);
     }
+    if (rt.exportUrl && rt.exportUrl !== rt.local && rt.exportUrl !== rt.url) URL.revokeObjectURL(rt.exportUrl);
+    rt.exportUrl = null;
   }
   await deviceCache.clear();
 }
 
-/** Make sure every audio/video file used in the project plays from this device (export calls this first). */
+/**
+ * Before an export: every audio/video file used in the project at full quality on this device, so rendering
+ * never waits on the network. Sets rt.exportUrl (falls back to the preview copy when that is all there is).
+ */
 export async function cacheProjectMedia(P, onProgress = () => {}) {
-  if (!remote.enabled) return;
-  const ids = [...new Set(P.clips.filter((c) => c.type === 'video' || c.type === 'audio').map((c) => c.mediaId))]
-    .filter((id) => mediaRT.get(id)?.url && !mediaRT.get(id).url.startsWith('blob:') && !mediaRT.get(id).convert);
+  const ids = [...new Set(P.clips.filter((c) => c.type === 'video' || c.type === 'audio').map((c) => c.mediaId))].filter((id) => mediaRT.get(id));
   forceCache++;
   try {
     for (let i = 0; i < ids.length; i++) {
-      const timer = setInterval(() => onProgress((i + (mediaRT.get(ids[i])?.cache?.progress || 0)) / ids.length), 300);
-      try { await cacheLocally(ids[i]); } finally { clearInterval(timer); }
+      const id = ids[i];
+      const rt = mediaRT.get(id);
+      // The full-quality copy of a file browsers cannot read is still being made: wait for it rather than
+      // export from the light preview copy.
+      for (let k = 0; remote.enabled && rt.server && busy(rt.server.state) && k < 3600; k++) {
+        onProgress((i + (rt.server.progress || 0)) / ids.length, 'quality');
+        await new Promise((r) => setTimeout(r, 2000));
+        try { await applyServerState(id, await remote.proxyStatus(id)); } catch { /* retry */ }
+      }
+      const src = rt.exportSrc || rt.src || rt.url;
+      if (!src) continue;
+      if (src.startsWith('blob:')) { rt.exportUrl = src; continue; }
+      if (src === (rt.src || rt.url) && await cacheLocally(id)) { rt.exportUrl = rt.url; continue; }
+      if (!remote.enabled || rt.convert) continue;
+      const url = await fetchToDevice(id, src, { onProgress: (p) => { if (p != null) onProgress((i + p) / ids.length); } });
+      rt.exportUrl = url || null;
+      onProgress((i + 1) / ids.length);
     }
   } finally {
     forceCache--;
@@ -359,8 +418,9 @@ async function seekTo(v, t) {
   await waitEvent(v, 'seeked', 4000);
 }
 
-async function makeSprite(v, duration) {
-  const N = clamp(Math.ceil(duration / 1.5), 4, 48);
+/** Filmstrip from a video element (n frames; each one a seek). */
+async function makeSprite(v, duration, maxFrames = 48) {
+  const N = clamp(Math.ceil(duration / 1.5), 4, maxFrames);
   const h = 72;
   const w = Math.max(24, Math.round((v.videoWidth / v.videoHeight) * h));
   const c = document.createElement('canvas');
@@ -371,13 +431,17 @@ async function makeSprite(v, duration) {
     await seekTo(v, Math.min(duration - 0.05, ((i + 0.5) * duration) / N));
     try { ctx.drawImage(v, i * w, 0, w, h); } catch { /* ignore */ }
   }
+  return { sprite: c.toDataURL('image/jpeg', 0.72), spriteN: N, spriteW: w, spriteH: h };
+}
+/** Library thumbnail: one frame near the start. */
+async function makePoster(v, duration) {
+  await seekTo(v, Math.min(duration * 0.1, 1));
   const poster = document.createElement('canvas');
   const pw = 320;
   poster.width = pw;
-  poster.height = Math.round((pw * v.videoHeight) / v.videoWidth);
-  await seekTo(v, Math.min(duration * 0.1, 1));
+  poster.height = Math.max(1, Math.round((pw * v.videoHeight) / v.videoWidth));
   try { poster.getContext('2d').drawImage(v, 0, 0, poster.width, poster.height); } catch { /* ignore */ }
-  return { sprite: c.toDataURL('image/jpeg', 0.72), spriteN: N, spriteW: w, spriteH: h, poster: poster.toDataURL('image/jpeg', 0.8) };
+  return poster.toDataURL('image/jpeg', 0.8);
 }
 
 function imagePoster(img) {
@@ -390,8 +454,9 @@ function imagePoster(img) {
 }
 
 let decodeCtx = null;
-async function computePeaks(blob) {
-  if (blob.size > 400 * 1024 * 1024) return null;
+/** Waveform by decoding the whole file in the browser: only for small files (the server does it otherwise). */
+async function computePeaks(blob, limit = 150 * 1024 * 1024) {
+  if (blob.size > limit) return null;
   try {
     decodeCtx = decodeCtx || new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 44100);
     const buf = await decodeCtx.decodeAudioData(await blob.arrayBuffer());
@@ -417,10 +482,20 @@ async function computePeaks(blob) {
   }
 }
 
-/** Import a File/Blob into the project's media library. Returns the media entry. */
+// ---------------------------------------------------------------------------------------------
+// Import. The clip is usable as soon as the browser has read the file's header: upload, thumbnails, waveform
+// and the server's light copy all happen in the background.
+const metaOf = (entry, rt, { sprite = true } = {}) => ({
+  entry,
+  ...(sprite && rt.sprite && !rt.spriteQuick ? { sprite: rt.sprite, spriteN: rt.spriteN, spriteW: rt.spriteW, spriteH: rt.spriteH } : {}),
+  poster: rt.poster && rt.poster.startsWith('data:') ? rt.poster : undefined,
+  hasPeaks: !!rt.peaks,
+});
+
 /** Save a freshly imported media item: to the VPS (server mode) or this browser (IndexedDB). */
 async function persistMedia(entry, file, rt, { adoptFrom } = {}) {
   if (!remote.enabled) {
+    await rt.ready; // thumbnails and waveform are stored with the file
     await db.putMedia({ id: entry.id, blob: file, meta: entry, sprite: rt.sprite, spriteN: rt.spriteN, spriteW: rt.spriteW, spriteH: rt.spriteH, poster: rt.poster, peaks: rt.peaks || null });
     return;
   }
@@ -438,11 +513,14 @@ async function persistMedia(entry, file, rt, { adoptFrom } = {}) {
         },
       });
     }
-    await remote.putMeta(entry.id, { entry, sprite: rt.sprite, spriteN: rt.spriteN, spriteW: rt.spriteW, spriteH: rt.spriteH, poster: rt.poster, hasPeaks: !!rt.peaks });
-    if (rt.peaks) await remote.putPeaks(entry.id, rt.peaks);
+    // The server makes the filmstrip and waveform of videos from its light copy; audio/image keep the browser's.
+    await remote.putMeta(entry.id, metaOf(entry, rt, { sprite: entry.type !== 'video' }));
+    if (rt.peaks && entry.type === 'audio') await remote.putPeaks(entry.id, rt.peaks);
     rt.upload = null;
+    rt.uploaded = true;
     changed(entry.id);
     store.scheduleSave();
+    if (entry.type !== 'image') applyServerState(entry.id, await remote.proxyStatus(entry.id), { entry });
   } catch (err) {
     rt.upload = { state: 'error', error: err.message, retry: () => persistMedia(entry, file, rt, { adoptFrom }) };
     changed(entry.id);
@@ -451,11 +529,15 @@ async function persistMedia(entry, file, rt, { adoptFrom } = {}) {
 }
 export const uploadsPending = () => [...mediaRT.values()].some((rt) => rt.upload?.state === 'uploading');
 
-/** Import a video this browser cannot decode: store the original on the server, which converts it to H.264. */
+/** Import a video this browser cannot decode: store the original on the server, which makes copies that play. */
 async function importViaServer(file, entry, rt, { silent, adoptFrom }) {
   const id = entry.id;
   store.P.media.push(entry);
   rt.upload = { state: 'uploading', progress: 0 };
+  rt.local = null;
+  rt.url = null;
+  rt.src = null;
+  rt.exportSrc = null;
   changed(id);
   let last = 0;
   try {
@@ -472,24 +554,21 @@ async function importViaServer(file, entry, rt, { silent, adoptFrom }) {
     rt.upload = null;
     const st = await remote.requestProxy(id, true);
     if (st.state === 'unavailable') throw new Error(NO_CONVERTER);
-    if (st.state === 'error') throw new Error(`Konversi gagal: ${st.error || 'tidak diketahui'}`);
+    if (st.state === 'error' && st.edit?.state !== 'ready') throw new Error(`Konversi gagal: ${st.error || 'tidak diketahui'}`);
     const p = st.probe || {};
     if (!p.hasVideo) throw new Error('File ini tidak berisi video');
     entry.duration = p.duration || 0;
     entry.width = p.width || 0;
     entry.height = p.height || 0;
     entry.hasAudio = !!p.hasAudio;
-    rt.status = 'ready';
-    rt.peaks = await computePeaks(file);
-    await remote.putMeta(id, { entry, hasPeaks: !!rt.peaks });
-    if (rt.peaks) await remote.putPeaks(id, rt.peaks);
-    if (applyProxyState(id, st, { announce: true, entry })) { await cacheLocally(id); await ensurePreview(id, entry); }
+    await remote.putMeta(id, { entry });
+    rt.uploaded = true;
+    await applyServerState(id, st, { announce: true, entry });
     changed(id);
     if (!silent) store.scheduleSave();
     return entry;
   } catch (err) {
     mediaRT.delete(id);
-    URL.revokeObjectURL(rt.url);
     const idx = store.P.media.findIndex((m) => m.id === id);
     if (idx >= 0) store.P.media.splice(idx, 1);
     changed(id);
@@ -498,13 +577,14 @@ async function importViaServer(file, entry, rt, { silent, adoptFrom }) {
   }
 }
 
+/** Import a File/Blob into the project's media library. Returns the media entry as soon as it can be used. */
 export async function importFile(file, { name, silent = false, adoptFrom } = {}) {
   const type = detectType(file);
   if (!type) throw new Error(`Jenis file tidak didukung: ${file.name || file.type}`);
   const id = uid('m');
   const url = URL.createObjectURL(file);
   const entry = { id, name: name || file.name || `${type}-${id}`, type, duration: 0, width: 0, height: 0, size: file.size, hasAudio: type !== 'image', createdAt: Date.now() };
-  const rt = { url, status: 'processing' };
+  const rt = { url, src: url, local: url, exportSrc: url, status: 'processing' };
   mediaRT.set(id, rt);
   try {
     if (type === 'video') {
@@ -512,6 +592,7 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
       try {
         v = await probeVideo(url);
       } catch (err) {
+        URL.revokeObjectURL(url);
         if (!remote.enabled) throw err;
         return await importViaServer(file, entry, rt, { silent, adoptFrom });
       }
@@ -519,12 +600,24 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
       entry.width = v.videoWidth;
       entry.height = v.videoHeight;
       store.P.media.push(entry);
-      changed(id);
-      Object.assign(rt, await makeSprite(v, entry.duration));
-      v.removeAttribute('src');
-      v.load();
-      rt.peaks = await computePeaks(file);
-      entry.hasAudio = !!rt.peaks;
+      rt.status = 'ready';
+      // Background: library thumbnail, then a filmstrip (a quick one when the server will make the full one).
+      rt.ready = (async () => {
+        try {
+          rt.poster = await makePoster(v, entry.duration);
+          changed(id);
+          if (!rt.sprite || rt.spriteQuick) {
+            const s = await makeSprite(v, entry.duration, remote.enabled ? 16 : 48);
+            if (!rt.sprite || rt.spriteQuick) Object.assign(rt, s, { spriteQuick: remote.enabled });
+          }
+          if (!remote.enabled) { rt.peaks = await computePeaks(file); entry.hasAudio = !!rt.peaks; }
+        } catch { /* thumbnails are optional */ } finally {
+          v.removeAttribute('src');
+          v.load();
+          changed(id);
+          if (remote.enabled && rt.uploaded) remote.putMeta(id, metaOf(entry, rt, { sprite: false })).catch(() => {});
+        }
+      })();
     } else if (type === 'image') {
       const img = await loadImage(url);
       entry.width = img.naturalWidth;
@@ -532,13 +625,14 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
       rt.img = img;
       rt.poster = imagePoster(img);
       store.P.media.push(entry);
+      rt.status = 'ready';
+      rt.ready = Promise.resolve();
     } else {
       entry.duration = await probeAudio(url);
       store.P.media.push(entry);
-      changed(id);
-      rt.peaks = await computePeaks(file);
+      rt.status = 'ready';
+      rt.ready = computePeaks(file, 60 * 1024 * 1024).then((p) => { rt.peaks = p; changed(id); });
     }
-    rt.status = 'ready';
   } catch (err) {
     mediaRT.delete(id);
     URL.revokeObjectURL(url);
@@ -548,12 +642,12 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
     throw err;
   }
   changed(id);
-  persistMedia(entry, file, rt, { adoptFrom });
+  (type === 'audio' ? rt.ready.catch(() => {}) : Promise.resolve()).then(() => persistMedia(entry, file, rt, { adoptFrom }));
   if (!silent) store.scheduleSave();
   return entry;
 }
 
-/** Restore runtime data for media listed in the project from IndexedDB. */
+/** Restore runtime data for the media of a project (server: copies, thumbnails; browser: IndexedDB). */
 export async function restoreMedia(P) {
   const missing = [];
   if (remote.enabled) {
@@ -562,22 +656,18 @@ export async function restoreMedia(P) {
       try {
         const meta = await remote.getMeta(m.id);
         if (!meta.file) throw new Error('upload belum selesai');
-        const pr = meta.proxy;
-        const url = pr?.state === 'ready' && m.type !== 'image' ? remote.proxyUrl(m.id, pr.v) : remote.mediaUrl(m.id);
-        const rt = { url, status: 'ready', sprite: meta.sprite, spriteN: meta.spriteN, spriteW: meta.spriteW, spriteH: meta.spriteH, poster: meta.poster, peaks: null };
-        // Already on this device? Play it from disk: nothing is downloaded again after a refresh.
-        const key = m.type !== 'image' ? deviceCache.keyFor(m.id, url) : null;
-        const local = key ? await deviceCache.open(key).catch(() => null) : null;
-        if (local) Object.assign(rt, { url: local, remoteUrl: url, cacheKey: key });
-        if (meta.hasPeaks) rt.peaks = await remote.getPeaks(m.id).catch(() => null);
-        if (m.type === 'image') rt.img = await loadImage(url).catch(() => { rt.status = 'error'; return null; });
+        const rt = { url: null, src: null, status: 'ready', sprite: meta.sprite, spriteN: meta.spriteN, spriteW: meta.spriteW, spriteH: meta.spriteH, poster: meta.poster, peaks: null, uploaded: true };
         mediaRT.set(m.id, rt);
-        if (m.type === 'video' || m.type === 'audio') {
-          if (pr?.state === 'pending' || pr?.state === 'running') applyProxyState(m.id, pr, { announce: true, entry: m });
-          else if (pr?.state === 'ready') cacheLocally(m.id).then(() => ensurePreview(m.id, m));
-          else if (m.type === 'video') checkPlayable(m.id, m, { cacheFirst: pr?.state === 'none' });
-          else cacheLocally(m.id);
+        const peaks = meta.hasPeaks ? remote.getPeaks(m.id).then((p) => { rt.peaks = p; }).catch(() => {}) : null;
+        if (m.type === 'image') {
+          rt.img = await loadImage(remote.mediaUrl(m.id)).catch(() => { rt.status = 'error'; return null; });
+        } else {
+          const st = meta.proxy || { state: 'none' };
+          await applyServerState(m.id, st, { entry: m, announce: busy(st.state) || busy(st.edit?.state) });
+          if (!rt.src && m.type === 'video' && !rt.convert) tryOriginal(m.id, m);
+          else if (m.type === 'video' && st.state === 'none' && st.edit?.state !== 'ready' && rt.src) checkPlayable(m.id, m);
         }
+        await peaks;
       } catch {
         missing.push(m.id);
         mediaRT.set(m.id, { status: 'missing' });
@@ -591,7 +681,7 @@ export async function restoreMedia(P) {
     const rec = await db.getMedia(m.id);
     if (!rec || !rec.blob) { missing.push(m.id); return; }
     const url = URL.createObjectURL(rec.blob);
-    const rt = { url, status: 'ready', sprite: rec.sprite, spriteN: rec.spriteN, spriteW: rec.spriteW, spriteH: rec.spriteH, poster: rec.poster, peaks: rec.peaks || null };
+    const rt = { url, src: url, local: url, exportSrc: url, status: 'ready', sprite: rec.sprite, spriteN: rec.spriteN, spriteW: rec.spriteW, spriteH: rec.spriteH, poster: rec.poster, peaks: rec.peaks || null };
     if (m.type === 'image') {
       try { rt.img = await loadImage(url); } catch { rt.status = 'error'; }
     }

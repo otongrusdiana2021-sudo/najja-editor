@@ -187,6 +187,7 @@ async function realtimeExport(engine, { P, wantMp4, fmts, fps, width, height, vi
 
   const wasLoop = engine.loop;
   engine.loop = false;
+  engine.useExportSources = true; // full-quality copies instead of the light preview ones
   engine.sync();
   engine.seek(r0);
   await preloadFonts(P);
@@ -221,6 +222,8 @@ async function realtimeExport(engine, { P, wantMp4, fmts, fps, width, height, vi
   } finally {
     engine.exportTarget = null;
     engine.loop = wasLoop;
+    engine.useExportSources = false;
+    engine.sync();
     if (dest) { try { engine.master.disconnect(dest); } catch { /* ignore */ } }
     if (engine.monitor) engine.monitor.gain.value = 1;
     vTrack.stop();

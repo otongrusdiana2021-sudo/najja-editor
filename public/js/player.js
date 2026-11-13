@@ -6,6 +6,8 @@ import { ASPECTS } from './presets.js';
 import { icon } from './icons.js';
 import { clamp } from './util.js';
 
+const PREVIEW_LONG = 1280;
+
 export class Player {
   constructor(root, engine) {
     this.root = root;
@@ -38,8 +40,10 @@ export class Player {
     this.kfBtn = root.querySelector('[data-act="kf"]');
     this.undoBtn = root.querySelector('[data-act="undo"]');
     this.redoBtn = root.querySelector('[data-act="redo"]');
+    this.quality = 1;
     this.bind();
     new ResizeObserver(() => this.layout()).observe(this.stage);
+    setInterval(() => this.adapt(), 1000);
     store.on('project', () => { this.layout(); this.updateCtrls(); });
     store.on('selection', () => { this.updateBox(); this.updateCtrls(); });
     engine.on((kind) => {
@@ -61,8 +65,12 @@ export class Player {
     const cssH = Math.max(1, Math.floor(P.height * k));
     this.inner.style.width = `${cssW}px`;
     this.inner.style.height = `${cssH}px`;
+    // Preview resolution: screen pixels (at most 2x), never above 1280 on the long side (the preview does not
+    // need more), and lower still while a slow device cannot keep up (this.quality, see adapt()).
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const pw = Math.min(P.width, Math.round(cssW * dpr));
+    let pw = Math.min(P.width, Math.round(cssW * dpr * this.quality));
+    pw = Math.min(pw, Math.round((PREVIEW_LONG * P.width) / Math.max(P.width, P.height)));
+    pw = Math.max(2, pw);
     const ph = Math.round((pw * P.height) / P.width);
     if (this.canvas.width !== pw || this.canvas.height !== ph) {
       this.canvas.width = pw;
@@ -71,6 +79,21 @@ export class Player {
     this.cssScale = cssW / P.width;
     this.root.classList.toggle('is-empty', !P.clips.length);
     this.engine.requestRender();
+  }
+
+  /**
+   * Keep playback smooth on slow devices: when drawing a frame takes too long, lower the preview resolution
+   * (down to half); raise it again once there is room. Exports always render at full resolution.
+   */
+  adapt() {
+    const E = this.engine;
+    if (!E.playing || E.drawMs == null) { this.slowRuns = 0; this.fastRuns = 0; return; }
+    if (E.drawMs > 16 && this.quality > 0.5) {
+      if (++this.slowRuns >= 2) { this.quality = Math.max(0.5, this.quality * 0.75); this.slowRuns = 0; E.drawMs = null; this.layout(); }
+    } else this.slowRuns = 0;
+    if (E.drawMs != null && E.drawMs < 6 && this.quality < 1) {
+      if (++this.fastRuns >= 4) { this.quality = Math.min(1, this.quality / 0.75); this.fastRuns = 0; E.drawMs = null; this.layout(); }
+    } else this.fastRuns = 0;
   }
 
   /** Undo/redo availability and whether the playhead sits on a keyframe of the selected clip. */

@@ -71,8 +71,11 @@ export const deviceCache = {
   },
   async available() { return !!(await root()); },
 
+  /** Cache key per server copy: _e<v> light preview copy, _p<v> full-quality H.264 copy, _f original file. */
   keyFor(id, url) {
     if (!id || !url || url.startsWith('blob:')) return null;
+    const e = /\/edit\?v=(\d+)/.exec(url);
+    if (e) return `${id}_e${e[1]}`;
     const v = /\/proxy\?v=(\d+)/.exec(url);
     if (v) return `${id}_p${v[1]}`;
     if (/\/file(\?|$)/.test(url)) return `${id}_f`;
@@ -117,9 +120,14 @@ export const deviceCache = {
     const r = await root();
     if (r) await r.removeEntry(key, { recursive: true }).catch(() => {});
   },
-  /** Drop every copy of a media item (e.g. it was deleted), except `keep`. */
-  async removeMedia(id, keep = null) {
-    for (const e of await this.list()) if (e.id === id && e.key !== keep) await this.remove(e.key);
+  /** Drop every copy of a media item (e.g. it was deleted), except `keep`; with `sameKind`, only older versions of keep's kind. */
+  async removeMedia(id, keep = null, { sameKind = false } = {}) {
+    const kind = (k) => (k || '').slice(id.length + 1, id.length + 2);
+    for (const e of await this.list()) {
+      if (e.id !== id || e.key === keep) continue;
+      if (sameKind && kind(e.key) !== kind(keep)) continue;
+      await this.remove(e.key);
+    }
   },
   async clear() {
     for (const e of await this.list()) await this.remove(e.key);
@@ -212,7 +220,7 @@ export const deviceCache = {
       meta.complete = true;
       meta.lastUsed = Date.now();
       await writeMeta(dir, meta);
-      await this.removeMedia(id, key); // older versions of this media
+      await this.removeMedia(id, key, { sameKind: true }); // older versions of this copy (the preview and export copies stay)
       return this.open(key);
     });
   },

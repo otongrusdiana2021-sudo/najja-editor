@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createStorage } from '../lib/storage.js';
-import { createProxyManager, capabilities, probe, proxyReasons } from '../lib/media-proxy.js';
+import { createProxyManager, capabilities, probe, proxyReasons, editReasons } from '../lib/media-proxy.js';
 
 const caps = await capabilities();
 const hasHevc = caps.ffmpeg && /\blibx265\b/.test(execFileSync('ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8' }));
@@ -29,6 +29,15 @@ async function waitDone(id) {
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error('proxy timed out');
+}
+/** Until the preview copy and the thumbnails are done. */
+async function waitEdit(id) {
+  for (let i = 0; i < 600; i++) {
+    const s = await proxies.status(id);
+    if (!['pending', 'running'].includes(s.edit?.state) && s.assets) return s;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('preview copy timed out');
 }
 
 test('reasons: only codecs browsers may not play need a proxy', () => {
@@ -61,6 +70,48 @@ test('H.264 file needs no proxy; force still makes one on request', { skip }, as
   assert.equal((await proxies.status('m_h2640001')).state, 'none');
   assert.equal((await proxies.ensure('m_h2640001', { force: true })).state, 'pending');
   assert.equal((await waitDone('m_h2640001')).state, 'ready');
+});
+
+test('preview copy only for heavy videos', () => {
+  const v = (codec, w, h, bitrate) => ({ container: 'mov,mp4', video: { codec, pix: 'yuv420p', transfer: 'bt709' }, audio: { codec: 'aac' }, width: w, height: h, bitrate });
+  assert.deepEqual(editReasons(v('h264', 720, 1280, 3e6)), []);
+  assert.deepEqual(editReasons(v('h264', 1080, 1920, 3e6)), ['size']);
+  assert.deepEqual(editReasons(v('h264', 720, 1280, 15e6)), ['bitrate']);
+  assert.ok(editReasons(v('hevc', 720, 1280, 3e6)).includes('codec'));
+  assert.deepEqual(editReasons({ container: 'mp3', video: null, audio: { codec: 'mp3' }, width: 0, height: 0, bitrate: 128e3 }), []);
+});
+
+test('1080p video gets a light 720p preview copy (keyframe every 0.5 s), filmstrip, poster and waveform', { skip }, async () => {
+  makeMedia('m_big00001', 'big.mp4', ['-f', 'lavfi', '-i', 'testsrc2=size=1080x1920:rate=30:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=3',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest']);
+  const first = await proxies.ensure('m_big00001');
+  assert.equal(first.state, 'none', 'H.264 needs no full-quality copy');
+  assert.ok(['pending', 'running'].includes(first.edit.state));
+  const s = await waitEdit('m_big00001');
+  assert.equal(s.edit.state, 'ready', s.edit.error);
+  const info = await probe(proxies.editPath('m_big00001'));
+  assert.equal(info.video.codec, 'h264');
+  assert.equal(info.height, 1280);
+  assert.equal(info.width, 720);
+  assert.equal(info.audio.codec, 'aac');
+  const keys = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-skip_frame', 'nokey', '-show_entries', 'frame=pts_time', '-of', 'csv=p=0', proxies.editPath('m_big00001')], { encoding: 'utf8' })
+    .trim().split('\n').map(Number);
+  assert.ok(keys.length >= 6, `keyframes at ${keys.join(', ')}`);
+  assert.deepEqual(s.assets.sprite, { n: 4, w: 41, h: 72 });
+  assert.ok(s.assets.poster && s.assets.peaks);
+  assert.ok(fs.statSync(proxies.assetPath('m_big00001', 'sprite.jpg')).size > 500);
+  assert.ok(fs.statSync(proxies.assetPath('m_big00001', 'peaks.bin')).size >= 290); // 100 peaks per second
+});
+
+test('HEVC .mov: preview copy first, then the full-quality copy', { skip }, async () => {
+  makeMedia('m_hevc0002', 'clip.mov', ['-f', 'lavfi', '-i', 'testsrc2=size=240x426:rate=30:duration=1.5', '-c:v', 'libx265', '-x265-params', 'log-level=error', '-pix_fmt', 'yuv420p']);
+  const st = await proxies.ensure('m_hevc0002');
+  assert.equal(st.state, 'pending');
+  assert.ok(['pending', 'running'].includes(st.edit.state));
+  const done = await waitDone('m_hevc0002');
+  assert.equal(done.state, 'ready');
+  assert.equal(done.edit.state, 'ready', 'the preview copy was made before the full-quality one');
+  assert.ok(fs.existsSync(proxies.editPath('m_hevc0002')));
 });
 
 test('missing media reports unknown instead of throwing', async () => {

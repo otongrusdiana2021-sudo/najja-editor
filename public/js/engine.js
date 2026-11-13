@@ -67,6 +67,7 @@ export class Engine {
     this.ensureAudio();
     this.playing = true;
     this.buffering = false;
+    this.lastFi = -1;
     this.clockBase = this.time;
     this.clockStart = performance.now();
     this.sync();
@@ -139,7 +140,18 @@ export class Engine {
       this.emit('time');
     }
     if (this.exportTarget) this.renderExport();
-    if (this.playing || this.needsRender) {
+    // Redraw only when the picture can have changed: a new video frame, or the next project frame for clips
+    // without video (text, images, effects). A 120 Hz screen no longer means 120 redraws a second.
+    let draw = this.needsRender;
+    if (this.playing) {
+      const fi = Math.floor(this.time * (store.P?.fps || 30) + 1e-6);
+      const M = this.masterEl();
+      if (M && M.frames != null && !this.buffering && !M.el.paused) {
+        if (M.frames !== M.drawn || fi - this.lastFi >= 2) draw = true; // video late: keep overlays moving
+      } else if (fi !== this.lastFi) draw = true;
+      if (draw) { this.lastFi = fi; if (M) M.drawn = M.frames; }
+    }
+    if (draw) {
       this.needsRender = false;
       this.render();
     }
@@ -171,7 +183,11 @@ export class Engine {
   render() {
     const P = store.P;
     if (!this.canvas.width) return;
+    const t0 = performance.now();
     renderFrame(this.ctx, this.time, this.env(this.canvas.width / P.width, this.boxes));
+    const ms = performance.now() - t0;
+    // Draw time while playing (moving average): the player lowers the preview resolution when it is too slow.
+    if (this.playing) this.drawMs = this.drawMs == null ? ms : this.drawMs * 0.9 + ms * 0.1;
     this.emit('render');
   }
 
@@ -208,17 +224,28 @@ export class Engine {
   }
   keyFor(clip) { return this.keys?.get(clip.id) || clip.id; }
 
+  /** The file an element plays: the preview copy, or the full-quality one during a real-time export. */
+  urlFor(rt) { return (this.useExportSources && rt?.exportUrl) || rt?.url; }
+
   createEl(key, clip) {
     const rt = mediaRT.get(clip.mediaId);
-    if (!rt?.url) return null;
+    const url = this.urlFor(rt);
+    if (!url) return null;
     const el = document.createElement(clip.type === 'audio' ? 'audio' : 'video');
     // A local copy can buffer freely. A file still on the server is being saved to this device in the
     // background; the player then only fetches what it shows (play, seek), so it is not downloaded twice.
-    el.preload = rt.url.startsWith('blob:') ? 'auto' : 'metadata';
+    el.preload = url.startsWith('blob:') ? 'auto' : 'metadata';
     el.playsInline = true;
     el.crossOrigin = 'anonymous';
-    el.src = rt.url;
-    const E = { el, mediaId: clip.mediaId, url: rt.url, clip, gain: null, src: null, vol: -1, hold: null };
+    el.src = url;
+    const E = { el, mediaId: clip.mediaId, url, clip, gain: null, src: null, vol: -1, hold: null, frames: null, drawn: -1 };
+    // Count the frames the video presents: during playback the preview redraws when the video has a new
+    // picture (≈30 times a second) instead of on every screen refresh (60–120 times a second).
+    if (clip.type !== 'audio' && typeof el.requestVideoFrameCallback === 'function') {
+      E.frames = 0;
+      const onFrame = () => { E.frames++; if (this.els.get(key) === E) el.requestVideoFrameCallback(onFrame); };
+      el.requestVideoFrameCallback(onFrame);
+    }
     const ctx = this.ensureAudio();
     if (ctx) {
       try {
@@ -325,7 +352,7 @@ export class Engine {
       const tr = store.track(clip.trackId);
       const end = clip.start + clip.duration;
       let E = this.els.get(key);
-      const want = mediaRT.get(clip.mediaId)?.url;
+      const want = this.urlFor(mediaRT.get(clip.mediaId));
       if (E && E.mediaId !== clip.mediaId) { this.disposeEl(key); E = null; }
       // New source for this media (H.264 copy, or the copy saved on this device): swap it in when that
       // cannot cause a visible gap — while paused, or when the current element shows no picture anyway.

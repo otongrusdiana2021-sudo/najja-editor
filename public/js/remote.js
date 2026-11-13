@@ -42,6 +42,10 @@ export const remote = {
   mediaUrl: (id) => `/api/media/${encodeURIComponent(id)}/file`,
   /** H.264 playback copy made by the server for files a browser may not decode (e.g. HEVC). */
   proxyUrl: (id, v) => `/api/media/${encodeURIComponent(id)}/proxy${v ? `?v=${v}` : ''}`,
+  /** Light 720p copy the preview plays (made by the server for heavy videos). */
+  editUrl: (id, v) => `/api/media/${encodeURIComponent(id)}/edit?v=${v || 0}`,
+  /** Filmstrip / poster made by the server. */
+  assetUrl: (id, kind, q = '') => `/api/media/${encodeURIComponent(id)}/${kind}${q}`,
   async proxyStatus(id) { return (await api(`/api/media/${encodeURIComponent(id)}/proxy-status`)).json(); },
   async requestProxy(id, force = false) { return (await api(`/api/media/${encodeURIComponent(id)}/proxy`, { method: 'POST', ...json({ force }) })).json(); },
   async getMeta(id) { return (await api(`/api/media/${encodeURIComponent(id)}/meta`)).json(); },
@@ -68,21 +72,32 @@ export const remote = {
   async upload(blob, { target, mediaId, filename, mime, onProgress } = {}) {
     const id = rid();
     const parts = Math.max(1, Math.ceil(blob.size / CHUNK));
+    const loaded = new Float64Array(parts);
+    const report = () => onProgress?.(Math.min(1, loaded.reduce((a, b) => a + b, 0) / Math.max(1, blob.size)));
     this.pending++;
     try {
-      for (let i = 0; i < parts; i++) {
-        const chunk = blob.slice(i * CHUNK, Math.min(blob.size, (i + 1) * CHUNK));
-        for (let attempt = 1; ; attempt++) {
-          try {
-            await putChunk(`/api/upload/${id}/${i}`, chunk, (loaded) => onProgress?.(Math.min(1, (i * CHUNK + loaded) / Math.max(1, blob.size))));
-            break;
-          } catch (err) {
-            if (err.status === 401) { location.href = '/login'; throw err; }
-            if (err.status === 507 || err.status === 413 || attempt >= 5) throw err;
-            await sleep(1000 * 2 ** (attempt - 1));
+      // Three chunks in flight: much faster to a far-away VPS than one request at a time.
+      let next = 0;
+      const worker = async () => {
+        while (next < parts) {
+          const i = next++;
+          const chunk = blob.slice(i * CHUNK, Math.min(blob.size, (i + 1) * CHUNK));
+          for (let attempt = 1; ; attempt++) {
+            try {
+              await putChunk(`/api/upload/${id}/${i}`, chunk, (n) => { loaded[i] = n; report(); });
+              loaded[i] = chunk.size;
+              report();
+              break;
+            } catch (err) {
+              loaded[i] = 0;
+              if (err.status === 401) { location.href = '/login'; throw err; }
+              if (err.status === 507 || err.status === 413 || attempt >= 5) throw err;
+              await sleep(1000 * 2 ** (attempt - 1));
+            }
           }
         }
-      }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, parts) }, worker));
       onProgress?.(1);
       return (await api(`/api/upload/${id}/finish`, { method: 'POST', ...json({ parts, size: blob.size, target, mediaId, filename, mime }) })).json();
     } finally {

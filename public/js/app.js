@@ -59,6 +59,7 @@ Object.assign(actions.app, { engine, player, timeline, inspector, library, sheet
 const toolbar = new Toolbar($('#toolbar'), { engine, timeline });
 actions.app.toolbar = toolbar;
 player.app = actions.app;
+if (new URLSearchParams(location.search).has('debug')) window.najja = actions.app; // console access for profiling
 
 // A sheet that edits one clip closes when another clip (or nothing) gets selected.
 store.on('selection', (id) => {
@@ -494,8 +495,10 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
       fg.style.strokeDashoffset = `${C * (1 - p)}`;
       const el = (performance.now() - started) / 1000;
       if (p > 0.03) ov.querySelector('.ex-sub').textContent = `${exportState.mode === 'fast' ? 'Merender cepat' : 'Merender real-time'} · sisa ±${Math.max(0, Math.round(el / p - el))} detik · jangan tutup tab ini`;
-    }, (p) => {
-      ov.querySelector('.ex-sub').textContent = `Menyiapkan media di perangkat ini… ${Math.round(p * 100)}%`;
+    }, (p, what) => {
+      ov.querySelector('.ex-sub').textContent = what === 'quality'
+        ? `Server menyiapkan salinan kualitas penuh… ${Math.round(p * 100)}%`
+        : `Menyiapkan media di perangkat ini… ${Math.round(p * 100)}%`;
       started = performance.now();
     });
     const toServer = (saveToServer || storage.server) && storage.server;

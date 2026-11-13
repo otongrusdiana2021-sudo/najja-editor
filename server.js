@@ -290,6 +290,23 @@ function publicProxy(st, withProbe = false) {
   if (!st) return null;
   const out = { state: st.state, progress: st.progress ?? (st.state === 'ready' ? 1 : 0), error: st.error || null, v: st.updatedAt || 0 };
   if (withProbe && st.probe) out.probe = { duration: st.probe.duration, width: st.probe.width, height: st.probe.height, hasVideo: !!st.probe.video, hasAudio: !!st.probe.audio };
+  // Light 720p preview copy, and thumbnails/waveform made on the server.
+  const e = st.edit;
+  out.edit = e ? { state: e.state, progress: e.progress ?? (e.state === 'ready' ? 1 : 0), v: e.updatedAt || 0, error: e.error || null } : null;
+  const a = st.assets;
+  out.assets = a ? { sprite: a.sprite || null, poster: !!a.poster, peaks: !!a.peaks, v: a.updatedAt || 0 } : null;
+  return out;
+}
+
+/** Thumbnails and waveform the server made, for media whose meta has none from the browser that uploaded it. */
+function withServerAssets(id, meta, st) {
+  const a = st?.assets;
+  if (!a) return meta;
+  const out = { ...meta };
+  const q = `?v=${a.updatedAt || 0}`;
+  if (!out.sprite && a.sprite) Object.assign(out, { sprite: `/api/media/${id}/sprite${q}`, spriteN: a.sprite.n, spriteW: a.sprite.w, spriteH: a.sprite.h });
+  if (!out.poster && a.poster) out.poster = `/api/media/${id}/poster${q}`;
+  if (a.peaks) out.hasPeaks = true;
   return out;
 }
 
@@ -620,12 +637,17 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       }
       if (req.method === 'DELETE') return sendJson(res, 200, await storage.deleteProject(m[1]));
     }
-    if ((m = /^\/api\/media\/([\w-]+)\/(meta|peaks|file|adopt|proxy|proxy-status)$/.exec(p))) {
+    if ((m = /^\/api\/media\/([\w-]+)\/(meta|peaks|file|adopt|proxy|proxy-status|edit|sprite|poster)$/.exec(p))) {
       const [, id, part] = m;
       if (part === 'meta' && req.method === 'GET') {
         const meta = await storage.getMeta(id);
-        return sendJson(res, 200, { ...meta, proxy: meta.file ? publicProxy(await proxies.status(id)) : null });
+        const st = meta.file ? await proxies.status(id) : null;
+        return sendJson(res, 200, { ...withServerAssets(id, meta, st), proxy: publicProxy(st) });
       }
+      const immutable = { 'Cache-Control': 'private, max-age=31536000, immutable' };
+      if (part === 'edit' && (req.method === 'GET' || req.method === 'HEAD')) return sendFile(req, res, proxies.editPath(id), { 'Content-Type': 'video/mp4', ...immutable });
+      if (part === 'sprite' && req.method === 'GET') return sendFile(req, res, proxies.assetPath(id, 'sprite.jpg'), { 'Content-Type': 'image/jpeg', ...immutable });
+      if (part === 'poster' && req.method === 'GET') return sendFile(req, res, proxies.assetPath(id, 'poster.jpg'), { 'Content-Type': 'image/jpeg', ...immutable });
       if (part === 'proxy-status' && req.method === 'GET') return sendJson(res, 200, publicProxy(await proxies.status(id)));
       if (part === 'proxy' && req.method === 'POST') {
         const body = await readJson(req).catch(() => ({}));

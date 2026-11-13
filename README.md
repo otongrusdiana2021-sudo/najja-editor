@@ -39,7 +39,7 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 - **Keyframe** untuk posisi, skala, rotasi, dan opasitas.
 - **Chroma key** untuk menghapus latar hijau.
 - Kecepatan 0.1x sampai 10x.
-- Video iPhone (HEVC) dan format lain yang tidak didukung browser otomatis dikonversi server ke MP4 H.264 (butuh ffmpeg di server).
+- **Pratinjau ringan**: video HP yang berat (1080p–4K, bitrate tinggi, HEVC iPhone) diputar dari salinan 720p buatan server. Hasilnya kecil diunduh, ringan di-decode, dan seek-nya instan. Ekspor tetap memakai kualitas penuh. Video yang tidak didukung browser juga dibuatkan salinan H.264 1080p untuk ekspor (butuh ffmpeg di server).
 - Salinan video disimpan di perangkat (maks. 5 GB, OPFS): refresh dan buka ulang browser tidak mengunduh video lagi.
 - Volume hingga 200%, fade in/out.
 
@@ -205,10 +205,10 @@ public/
   js/library.js    Panel aset (musik, efek suara, rekam, template teks, keterangan, efek, transisi, filter, AI)
   js/api.js        Implementasi tool MCP di dalam editor
   js/store.js      Model proyek, undo/redo, autosave
-  js/media.js      Impor, thumbnail, waveform, audio sintetis, salinan H.264 dari server
+  js/media.js      Impor instan, pilihan sumber (pratinjau ringan / kualitas ekspor), salinan di perangkat, audio sintetis
   js/devicecache.js  Salinan video permanen di perangkat (OPFS, 5 GB, LRU, bisa dilanjutkan)
   js/fastexport.js   Ekspor MP4 cepat (WebCodecs: demux, decode, encode, mux)
-lib/               Penyimpanan server, akun login, konversi video (ffmpeg)
+lib/               Penyimpanan server, akun login, salinan pratinjau 720p / H.264 1080p / thumbnail / waveform (ffmpeg)
 Dockerfile, docker-compose.yml, deploy/   Deploy VPS (Docker + Caddy, atau systemd)
 docs/DEPLOY.md            Panduan deploy
 docs/capcut-analysis.md   Hasil analisis CapCut Web (REA) yang memandu desain
@@ -217,6 +217,12 @@ test/              npm test
 
 ## Catatan
 
+- **Kelancaran edit**:
+  - Impor langsung bisa dipakai (upload dan thumbnail di belakang).
+  - Pratinjau memakai salinan 720p.
+  - Frame pratinjau hanya digambar ulang saat videonya punya frame baru (iPad 120 Hz tidak lagi menggambar 120× per detik).
+  - Resolusi pratinjau turun otomatis kalau perangkat kewalahan, lalu naik lagi.
+  - Detail: [docs/DEPLOY.md](docs/DEPLOY.md#salinan-ringan-untuk-pratinjau-supaya-edit-lancar-di-semua-perangkat).
 - **Ekspor MP4 cepat** dengan WebCodecs (Chrome/Edge): frame di-decode, dirender, dan di-encode H.264 secepat kemampuan perangkat (GPU), lalu file langsung terunduh; salinan ke server diupload di background. Browser tanpa WebCodecs, atau format WebM, memakai perekaman real-time (durasi ekspor ≈ durasi video). Biarkan tab editor tetap terbuka.
 - MP4 dipakai jika browser bisa merekamnya (Chrome/Edge terbaru, Safari). Jika tidak, hasilnya WebM.
 - Proyek dan media disimpan di server (folder `data/`, atau `NAJJA_DATA_DIR`), bukan di browser, jadi bisa dibuka dari perangkat mana pun.

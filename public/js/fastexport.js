@@ -454,7 +454,8 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   const bytesCache = new Map();
   const bytes = async (id) => {
     if (!bytesCache.has(id)) {
-      const url = mediaRT.get(id)?.url;
+      const rt = mediaRT.get(id);
+      const url = rt?.exportUrl || rt?.url; // full-quality copy on this device (exporter prepares it)
       if (!url) throw unsupported('media not loaded');
       bytesCache.set(id, fetch(url).then((r) => r.arrayBuffer()));
     }
