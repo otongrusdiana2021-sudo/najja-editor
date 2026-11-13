@@ -5,7 +5,7 @@ import { prefs, db } from './db.js';
 import { storage } from './storage.js';
 import { account } from './account.js';
 import { remote } from './remote.js';
-import { restoreMedia, importFile, detectType, uploadsPending, setCacheGate } from './media.js';
+import { restoreMedia, importFile, detectType, uploadsPending, setCacheGate, previewSource } from './media.js';
 import { Engine } from './engine.js';
 import { Player } from './player.js';
 import { Timeline } from './timeline.js';
@@ -48,7 +48,9 @@ topbar.innerHTML = `
 const engine = new Engine(document.createElement('canvas'));
 // Background downloads of media to this device pause while the preview plays or a frame is being
 // captured (the player and the seek need the bandwidth).
-setCacheGate(() => !engine.playing && !engine.capturing);
+// Copies are saved to this device while the editor is idle — and also while it plays, when everything it plays
+// is already on the device (then playback uses no network and the light copy arrives sooner).
+setCacheGate(() => !engine.capturing && (!engine.playing || engine.playingLocal()));
 const player = new Player($('#viewer'), engine);
 engine.canvas = player.canvas;
 engine.ctx = player.canvas.getContext('2d', { alpha: false });
@@ -343,7 +345,9 @@ async function diagnosticsSnapshot() {
   try { const r = await fetch('/api/jobs', { cache: 'no-store', credentials: 'same-origin' }); if (r.ok) jobs = (await r.json()).jobs; } catch { /* offline */ }
   return metrics.snapshot({
     app: bridge.state.status?.version || null,
-    preview: { canvas: `${engine.canvas.width}x${engine.canvas.height}`, quality: player.quality, activeMediaElements: engine.els.size, project: store.P ? { clips: store.P.clips.length, media: store.P.media.length, tracks: store.P.tracks.length, duration: Math.round(store.duration()) } : null },
+    preview: { canvas: `${engine.canvas.width}x${engine.canvas.height}`, quality: player.quality, activeMediaElements: engine.els.size, videoClock: engine.videoClock,
+      sources: (store.P?.media || []).filter((m) => m.type === 'video').slice(0, 12).map((m) => ({ name: String(m.name || '').slice(0, 40), size: `${m.width}x${m.height}`, duration: Math.round(m.duration || 0), plays: previewSource(m.id) })),
+      project: store.P ? { clips: store.P.clips.length, media: store.P.media.length, tracks: store.P.tracks.length, duration: Math.round(store.duration()) } : null },
     server,
     jobs,
   });
@@ -371,10 +375,11 @@ async function diagnosticsDialog() {
       <p class="hint">Diukur di perangkat ini sejak editor dibuka (${snap.uptimeS} dtk). Tidak ada data yang dikirim ke mana pun; salin JSON untuk laporan masalah atau benchmark.</p>
       <div class="diag-grid">
         <section>${table('Pemutaran', [
-          row('FPS pratinjau', 'fps_rendered', ''), row('Frame proyek terlewat', 'preview_frames_missed_pct', '%'), row('Frame video di-drop', 'video_dropped_frames_pct', '%'),
+          row('FPS pratinjau', 'fps_rendered', ''), row('Gambar dari decoder video', 'video_presented_fps', ' fps'), row('Kecepatan putar', 'playback_speed_pct', '%'),
+          row('Frame proyek terlewat', 'preview_frames_missed_pct', '%'), row('Frame video di-drop', 'video_dropped_frames_pct', '%'),
           row('Waktu gambar per frame', 'frame_draw_ms'), row('Menunggu buffer', 'buffer_wait_ms'), row('Seek → frame tepat', 'seek_to_frame_ms'),
-        ])}<p class="hint">Buffer: awal klip ${c.buffer_at_clip_start || 0} · tengah klip ${c.buffer_mid_clip || 0} · dari perangkat ${c.buffer_src_local || 0} · dari server ${c.buffer_src_server || 0} · jeda singkat dilewati ${c.stall_ridden_out || 0}${Object.keys(c).filter((k) => k.startsWith('play_rejected_')).map((k) => ` · play ditolak (${escapeHtml(k.slice(14))}) ${c[k]}`).join('')}</p></section>
-        <section>${table('Respons UI', [row('Interaksi → tampil', 'interaction_ms'), row('Geser klip → tampil', 'timeline_drag_ms'), row('Trim klip → tampil', 'timeline_trim_ms'), row('Long task', 'long_task_ms')])}
+        ])}${snap.preview.sources.length ? `<p class="hint">Diputar: ${snap.preview.sources.map((x) => `${escapeHtml(x.name)} (${x.size}) → ${escapeHtml(x.plays)}`).join(' · ')}</p>` : ''}<p class="hint">Seek koreksi: ${c.drift_seek || 0} · jeda frame &gt; 50 ms: ${c.raf_gap_over_50ms || 0} · Buffer: awal klip ${c.buffer_at_clip_start || 0} · tengah klip ${c.buffer_mid_clip || 0} · dari perangkat ${c.buffer_src_local || 0} · dari server ${c.buffer_src_server || 0} · jeda singkat dilewati ${c.stall_ridden_out || 0}${Object.keys(c).filter((k) => k.startsWith('play_rejected_')).map((k) => ` · play ditolak (${escapeHtml(k.slice(14))}) ${c[k]}`).join('')}</p></section>
+        <section>${table('Respons UI', [row('Lag event loop', 'event_loop_lag_ms'), row('Interaksi → tampil', 'interaction_ms'), row('Geser klip → tampil', 'timeline_drag_ms'), row('Trim klip → tampil', 'timeline_trim_ms'), row('Long task', 'long_task_ms')])}
           <p class="hint">Long task &gt; 50 ms: ${c.long_tasks_over_50ms || 0} · main thread terblokir ${c.main_thread_blocked_ms || 0} ms</p></section>
         <section>${table('Impor & simpan', [
           row('Impor → bisa dipakai', 'import_visible_ms'), row('Salinan ringan siap', 'asset_ready_ms'), row('Durasi upload', 'upload_ms'), row('Kecepatan upload', 'upload_mbps', ' Mbps'), row('Simpan → diterima server', 'save_ack_ms'),

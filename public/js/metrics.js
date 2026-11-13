@@ -115,4 +115,14 @@ try {
   }).observe({ type: 'event', durationThreshold: 40, buffered: true });
 } catch { /* no Event Timing API */ }
 
-if (typeof window !== 'undefined') window.najjaMetrics = metrics;
+// Event-loop lag (works in Safari, which has no long-task API): how late a 250 ms timer fires.
+if (typeof window !== 'undefined') {
+  let expect = performance.now() + 250;
+  setInterval(() => {
+    const now = performance.now();
+    const lag = now - expect;
+    expect = now + 250;
+    if (document.visibilityState === 'visible') { metrics.sample('event_loop_lag_ms', Math.max(0, lag)); if (lag > 100) metrics.count('event_loop_stalls_over_100ms'); }
+  }, 250);
+  window.najjaMetrics = metrics;
+}

@@ -39,5 +39,7 @@ files.b2o = [8, 8].map((d, i) => ff(`b2-overlay${i + 1}-720p.mp4`, video(1280, 7
 // B3 — long form: one long 1080p recording + 2 audio tracks of the same length.
 files.b3 = ff(`b3-long-${longMin}m-1080p.mp4`, [...video(1920, 1080, longMin * 60, 30), ...tone(longMin * 60, 220)], [...h264(6), ...aac, '-shortest']);
 files.b3a = [ff(`b3-audio1-${longMin}m.m4a`, tone(longMin * 60, 262), aac), ff(`b3-audio2-${longMin}m.m4a`, tone(longMin * 60, 392), aac)];
+// B7 — a heavy camera original (4K 60 fps): decoding it can be slower than real time on a tablet.
+files.b7 = ff('b7-4k60-20s.mp4', [...video(3840, 2160, 20, 90, 60), ...tone(20, 350)], [...h264(40, 60), ...aac, '-shortest']);
 fs.writeFileSync(path.join(out, 'fixtures.json'), JSON.stringify({ longMinutes: longMin, files }, null, 2));
 console.log(`fixture siap di ${out}`);

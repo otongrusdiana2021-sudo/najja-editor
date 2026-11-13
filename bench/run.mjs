@@ -16,12 +16,13 @@ import { toMarkdown } from './report.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=').slice(1).join('=') || d;
-const ONLY = arg('only', 'B0,B1,B2,B3,B4,B5,B6').split(',').map((s) => s.trim().toUpperCase());
+const ONLY = arg('only', 'B0,B1,B2,B3,B4,B5,B6,B7').split(',').map((s) => s.trim().toUpperCase());
 const PROFILE = arg('profile', 'desktop');
 const LABEL = arg('label', 'run');
 const FIX = path.resolve(arg('fixtures', path.join(ROOT, 'bench', '.fixtures')));
 const B3_EXPORT_S = Number(arg('b3-export-seconds', 120));
-const HIDE_TIMELINE = process.argv.includes('--hide-timeline'); // diagnosis: is a stutter caused by the timeline UI?
+const HIDE_TIMELINE = process.argv.includes('--hide-timeline');
+const OLD_CLOCK = process.argv.includes('--old-clock'); // A/B: the wall clock that seeks lagging videos (before v1.7.1) // diagnosis: is a stutter caused by the timeline UI?
 const TOKEN = `tok-bench-${Date.now().toString(36)}-0123456789`;
 const ADMIN = { email: 'bench@najja.id', password: 'bench-najja-123' };
 
@@ -151,6 +152,7 @@ function memWatch(page) {
 async function measurePlayback(page, secs, from = 0) {
   await page.evaluate(async (t) => { const E = window.najja.engine; E.pause(); E.seek(t); await E.settle(8000); }, from);
   if (HIDE_TIMELINE) await page.evaluate(() => { document.querySelector('.tl-body').style.display = 'none'; });
+  if (OLD_CLOCK) await page.evaluate(() => { window.najja.engine.videoClock = false; });
   await resetMetrics(page);
   // Main-thread time the timeline spends following the playhead (ruler, filmstrips, waveforms, scroll), and the
   // spacing of animation frames (a gap > 25 ms is a visible hitch on a 60 Hz screen).
@@ -194,6 +196,10 @@ async function measurePlayback(page, secs, from = 0) {
     frame_draw_p50_ms: S.frame_draw_ms?.p50 ?? null,
     frame_draw_p95_ms: S.frame_draw_ms?.p95 ?? null,
     buffer_waits: S.buffer_wait_ms?.n || 0,
+    buffer_wait_total_ms: S.buffer_wait_ms ? Math.round(S.buffer_wait_ms.avg * S.buffer_wait_ms.n) : 0,
+    playback_speed_pct: S.playback_speed_pct?.avg ?? null,
+    video_presented_fps: S.video_presented_fps?.avg ?? null,
+    drift_seeks: snap.counters.drift_seek || 0,
     buffer_causes: Object.fromEntries(Object.entries(snap.counters).filter(([k]) => /^(buffer_|stall_|play_rejected)/.test(k))),
     long_tasks: snap.counters.long_tasks_over_50ms || 0,
     preview_canvas: await page.evaluate(() => `${window.najja.engine.canvas.width}x${window.najja.engine.canvas.height}`),
@@ -430,6 +436,23 @@ await run('B6', async () => {
   await waitMediaReady(page);
   const P = await mcp('get_project');
   return { project: { clips: P.clips.length, duration: P.duration }, playback: await measurePlayback(page, 15), seek: await measureSeeks(page, 20) };
+});
+
+// B7: a heavy original (4K 60 fps) right after import, played from the file on this device before the light copy
+// exists — the decoder may be slower than real time (as on a tablet).
+await run('B7', async () => {
+  await mcp('new_project', { name: 'B7 heavy original', aspect_ratio: '16:9' });
+  await uploadFiles(page, [fixtures.b7]);
+  await page.waitForFunction(async () => { const { mediaRT } = await import('/js/media.js'); const { store } = await import('/js/store.js'); const m = store.P.media[0]; const rt = m && mediaRT.get(m.id); return rt?.url?.startsWith('blob:') && rt.status === 'ready'; }, null, { timeout: 60000 });
+  const src = await page.evaluate(async () => { const { mediaRT } = await import('/js/media.js'); const { store } = await import('/js/store.js'); const rt = mediaRT.get(store.P.media[0].id); return rt.url === rt.local ? 'original' : 'copy'; });
+  const original = await measurePlayback(page, 12, 1);
+  // then: the server's light copy (720p, ≤ 30 fps) replaces the heavy original in the preview (v1.7.1)
+  const t0 = Date.now();
+  const sourceNow = () => page.evaluate(async () => { const { previewSource } = await import('/js/media.js'); const { store } = await import('/js/store.js'); return previewSource(store.P.media[0].id); });
+  let switched = await sourceNow();
+  while (/asli/.test(switched) && Date.now() - t0 < 600000) { await sleep(500); switched = await sourceNow(); }
+  const switchMs = Date.now() - t0;
+  return { source: src, playback: original, light: { source: switched, after_ms: switchMs, playback: await measurePlayback(page, 12, 1) } };
 });
 
 results.page_errors = mainEditor.errors;

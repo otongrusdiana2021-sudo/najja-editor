@@ -117,3 +117,12 @@ test('HEVC .mov: preview copy first, then the full-quality copy', { skip }, asyn
 test('missing media reports unknown instead of throwing', async () => {
   assert.equal((await proxies.ensure('m_nothere01')).state, 'unknown');
 });
+
+test('light preview copy also for 60 fps and HDR camera footage; at most 30 fps', async () => {
+  const { previewFps } = await import('../lib/media-proxy.js');
+  const base = { container: 'mov,mp4,m4a,3gp,3g2,mj2', audio: { codec: 'aac' }, bitrate: 4e6 };
+  assert.deepEqual(editReasons({ ...base, video: { codec: 'h264', pix: 'yuv420p', transfer: '', fps: 30 }, width: 1280, height: 720 }), []);
+  assert.deepEqual(editReasons({ ...base, video: { codec: 'h264', pix: 'yuv420p', transfer: '', fps: 60 }, width: 1280, height: 720 }), ['fps']);
+  assert.ok(editReasons({ ...base, video: { codec: 'hevc', pix: 'yuv420p10le', transfer: 'arib-std-b67', fps: 30 }, width: 1080, height: 1920 }).includes('hdr'));
+  assert.deepEqual([60, 59.94, 50, 120, 30, 25, 24].map(previewFps), [30, 29.97, 25, 30, 30, 25, 24]);
+});

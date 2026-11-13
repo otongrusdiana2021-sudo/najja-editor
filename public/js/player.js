@@ -6,6 +6,7 @@ import { ASPECTS } from './presets.js';
 import { icon } from './icons.js';
 import { clamp } from './util.js';
 import { metrics } from './metrics.js';
+import { preparingLight } from './media.js';
 
 const PREVIEW_LONG = 1280;
 
@@ -17,6 +18,7 @@ export class Player {
       <div class="stage" tabindex="-1">
         <div class="stage-inner">
           <canvas class="preview-canvas"></canvas>
+          <div class="prep-pill" hidden></div>
           <div class="overlay"><div class="guide gv"></div><div class="guide gh"></div><div class="sel-box"><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i><i class="h rot">${icon('rotate', 12)}</i></div></div>
         </div>
         <button class="stage-empty" data-act="addMedia">${icon('plus', 30)}<b>Mulai berkreasi</b><span>Ketuk untuk menambah video atau foto — atau minta AI lewat MCP.</span></button>
@@ -35,6 +37,7 @@ export class Player {
     this.inner = root.querySelector('.stage-inner');
     this.overlay = root.querySelector('.overlay');
     this.box = root.querySelector('.sel-box');
+    this.prep = root.querySelector('.prep-pill');
     this.gv = root.querySelector('.gv');
     this.gh = root.querySelector('.gh');
     this.playBtn = root.querySelector('[data-act="play"]');
@@ -44,7 +47,7 @@ export class Player {
     this.quality = 1;
     this.bind();
     new ResizeObserver(() => this.layout()).observe(this.stage);
-    setInterval(() => this.adapt(), 1000);
+    setInterval(() => { this.adapt(); this.updatePrep(); }, 1000);
     store.on('project', () => { this.layout(); this.updateCtrls(); });
     store.on('selection', () => { this.updateBox(); this.updateCtrls(); });
     engine.on((kind) => {
@@ -114,6 +117,20 @@ export class Player {
     const t = this.engine.time;
     if (t < c.start || t >= clipEnd(c)) return null;
     return c;
+  }
+
+  /** A heavy camera original still plays while its light copy is made: say so (it explains a choppy start). */
+  updatePrep() {
+    const P = store.P;
+    let p = null;
+    for (const m of P?.media || []) {
+      if (m.type !== 'video') continue;
+      const v = preparingLight(m.id);
+      if (v != null && P.clips.some((c) => c.mediaId === m.id)) p = Math.max(p ?? 0, v);
+    }
+    const txt = p == null ? '' : `Menyiapkan versi ringan untuk pratinjau lancar… ${Math.round(p * 100)}%`;
+    if (this.prep.textContent !== txt) this.prep.textContent = txt;
+    this.prep.hidden = p == null;
   }
 
   updateBox() {

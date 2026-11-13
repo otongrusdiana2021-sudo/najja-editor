@@ -142,6 +142,29 @@ export function revokeUrl(url) {
 }
 export const blobOfUrl = (url) => blobsByUrl.get(url) || null;
 
+/**
+ * Let the user choose files (<input type=file>). The input is in the page and kept until the choice arrives:
+ * on iPad, preparing a video from Photos (or iCloud) can take a while, and a detached input may be gone by then —
+ * the choice then never arrives and nothing is imported.
+ */
+const pickers = new Set();
+export function pickFiles({ accept = '', multiple = false } = {}) {
+  for (const old of pickers) { old.remove(); pickers.delete(old); } // an earlier picker that was dismissed
+  return new Promise((resolve) => {
+    const fi = document.createElement('input');
+    fi.type = 'file';
+    fi.accept = accept;
+    fi.multiple = multiple;
+    fi.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(fi);
+    pickers.add(fi);
+    const done = (files) => { pickers.delete(fi); fi.remove(); resolve(files); };
+    fi.addEventListener('change', () => done([...(fi.files || [])]), { once: true });
+    fi.addEventListener('cancel', () => done([]), { once: true });
+    fi.click();
+  });
+}
+
 export function downloadBlob(blob, filename) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);

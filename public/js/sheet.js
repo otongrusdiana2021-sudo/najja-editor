@@ -5,7 +5,7 @@ import { store } from './store.js';
 import { importFile, onMediaChange, removeMedia, mediaRT } from './media.js';
 import { SOLIDS, GRADIENTS } from './presets.js';
 import { icon } from './icons.js';
-import { escapeHtml } from './util.js';
+import { escapeHtml, pickFiles } from './util.js';
 import { toast, confirmDialog } from './ui.js';
 import * as actions from './actions.js';
 import { Library } from './library.js';
@@ -147,12 +147,7 @@ function mediaSheet(sheet, mode) {
         } catch (err) { toast(err.message, { type: 'error', timeout: 4000 }); return false; }
       };
       const fromDevice = () => {
-        const fi = document.createElement('input');
-        fi.type = 'file';
-        fi.multiple = mode === 'append' || mode === 'overlay';
-        fi.accept = mode === 'extract' ? 'video/*,.mov,.mkv' : 'video/*,image/*,.mov,.mkv';
-        fi.onchange = async () => {
-          const files = [...fi.files];
+        pickFiles({ multiple: mode === 'append' || mode === 'overlay', accept: mode === 'extract' ? 'video/*,.mov,.mkv' : 'video/*,image/*,.mov,.mkv' }).then(async (files) => {
           if (!files.length) return;
           sheet.close();
           const done = toast(files.length > 1 ? `Mengimpor ${files.length} file…` : 'Mengimpor…', { timeout: 0 });
@@ -163,8 +158,7 @@ function mediaSheet(sheet, mode) {
               if (mode === 'replace') break;
             }
           } finally { done(); }
-        };
-        fi.click();
+        });
       };
       const onClick = (e) => {
         const b = e.target.closest('button, [data-media]');

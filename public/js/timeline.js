@@ -586,7 +586,7 @@ export class Timeline {
     // The person moved the timeline: the time under the centre line is the new playhead position.
     this.userScrollUntil = performance.now() + 180;
     if (this.engine.playing) this.engine.pause();
-    this.engine.seek(clamp(sl / this.pps, 0, store.duration()));
+    this.engine.scrub(clamp(sl / this.pps, 0, store.duration()));
   }
 
   /** Scroll so time t is under the playhead. */
@@ -732,7 +732,7 @@ export class Timeline {
     if (y < TOP_PAD || row?.track.kind === 'main') return null;
     // A new lane of this kind, shown under the last lane of that kind (or at the bottom).
     const same = this.layoutRows.filter((rw) => rw.track.kind === kind);
-    const last = same.at(-1) || this.layoutRows.at(-1);
+    const last = same[same.length - 1] || this.layoutRows[this.layoutRows.length - 1]; // (no .at(): older iPadOS)
     return { newTrack: true, y: last.top + last.h + 2 };
   }
 

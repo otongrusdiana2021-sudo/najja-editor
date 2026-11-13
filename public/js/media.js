@@ -41,13 +41,29 @@ async function probeVideo(url) {
   v.preload = 'auto';
   v.muted = true;
   v.playsInline = true;
+  v.setAttribute('playsinline', '');
+  // In the page (invisible) and loaded explicitly: some iPadOS versions do not load a detached video's metadata.
+  v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
+  document.body.appendChild(v);
   v.src = url;
+  try { v.load(); } catch { /* ignore */ }
   const ok = await Promise.race([
     waitEvent(v, 'loadedmetadata', 15000),
     new Promise((r) => v.addEventListener('error', () => r(false), { once: true })),
   ]);
-  if (!ok || !v.videoWidth) throw new Error('Format video tidak didukung browser ini');
-  return v;
+  if (!ok || !v.videoWidth) { v.remove(); throw new Error('Format video tidak didukung browser ini'); }
+  return v; // still in the page: the caller makes thumbnails from it, then removes it
+}
+
+/** What the preview plays for a media item (Diagnostik). */
+export function previewSource(id) {
+  const rt = mediaRT.get(id);
+  const u = String(rt?.url || '');
+  if (!u) return 'belum ada';
+  if (u.startsWith('blob:')) return u === rt.local ? 'file asli di perangkat' : 'salinan ringan di perangkat';
+  if (u.includes('/edit')) return 'salinan ringan (stream server)';
+  if (u.includes('/proxy')) return 'salinan H.264 (stream server)';
+  return 'file asli (stream server)';
 }
 
 async function probeAudio(url) {
@@ -163,6 +179,20 @@ async function applyServerState(id, st, { entry, announce = false } = {}) {
   changed(id);
 }
 
+/** Did the server judge the original too heavy to play smoothly (and make the light copy for that reason)? */
+function heavyOriginal(rt, state = 'ready') {
+  const ed = rt.server?.edit;
+  const p = rt.server?.probe;
+  if (state === 'ready' ? ed?.state !== 'ready' : !['pending', 'running'].includes(ed?.state)) return false;
+  return (ed.reasons || []).some((r) => ['codec', 'fps', 'hdr', 'bitrate'].includes(r)) || Math.max(p?.width || 0, p?.height || 0) > 1920;
+}
+/** Progress (0..1) of the light copy of a heavy original the preview still plays, or null. */
+export function preparingLight(id) {
+  const rt = mediaRT.get(id);
+  if (!rt || !rt.url || rt.url !== rt.local || !heavyOriginal(rt, 'busy')) return null;
+  return rt.server.edit.progress || 0;
+}
+
 /** Point the preview at `src`; plays a device copy right away, otherwise streams while one is downloaded. */
 async function setPreview(id, src) {
   const rt = mediaRT.get(id);
@@ -173,8 +203,10 @@ async function setPreview(id, src) {
   const local = key ? await deviceCache.open(key).catch(() => null) : null;
   if (rt.src !== src) { if (local) revokeUrl(local); return; }
   if (local) { useLocal(id, rt, local, src, key); return; }
-  // Keep playing what is already on this device (e.g. the original just imported) until the new copy is here.
-  if (!rt.url || !rt.url.startsWith('blob:')) rt.url = src;
+  // Keep playing what is already on this device (e.g. the original just imported) until the new copy is here —
+  // unless that original is heavy for a browser (HEVC/HDR/60 fps/4K/high bitrate camera footage): like Canva or
+  // CapCut, the preview then plays the light copy right away (streamed) while it is saved to this device.
+  if (!rt.url || !rt.url.startsWith('blob:') || (rt.url === rt.local && heavyOriginal(rt))) rt.url = src;
   changed(id);
   cacheLocally(id);
 }
@@ -623,6 +655,7 @@ export async function importFile(file, { name, silent = false, adoptFrom } = {})
         } catch { /* thumbnails are optional */ } finally {
           v.removeAttribute('src');
           v.load();
+          v.remove();
           changed(id);
           if (remote.enabled && rt.uploaded) remote.putMeta(id, metaOf(entry, rt, { sprite: false })).catch(() => {});
         }

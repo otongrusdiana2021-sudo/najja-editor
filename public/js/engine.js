@@ -11,6 +11,8 @@ const AC = window.AudioContext || window.webkitAudioContext;
 // just started or Safari hesitating for a moment. Holding the playhead and pausing the video for such dips is what
 // made playback stutter on iPad (10 holds of ~50 ms in 10 seconds).
 const STALL_GRACE_MS = 300;
+// Furthest the timeline clock may run ahead of the picture of the main video (see tick).
+const VIDEO_LEAD = 0.15;
 
 export class Engine {
   constructor(canvas) {
@@ -21,6 +23,10 @@ export class Engine {
     this.loop = false;
     this.els = new Map(); // element key (first clip of a chain) -> { el, mediaId, url, clip, gain, src, hold }
     this.buffering = false;
+    // The main video's picture drives the timeline while it plays (see tick). false: the old wall clock that
+    // seeks videos which fall behind — kept as a switch for A/B measurements.
+    this.videoClock = true;
+    this.scrubUntil = 0;
     this.boxes = new Map();
     this.needsRender = true;
     this.exportTarget = null;
@@ -83,7 +89,7 @@ export class Engine {
     this.clockBase = this.time;
     this.clockStart = performance.now();
     this.sync();
-    this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, shown: 0, vq: this.videoQuality() };
+    this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, shown: 0, vq: this.videoQuality(), lastTick: 0, gaps: 0 };
     this.emit('play');
   }
   pause() {
@@ -114,6 +120,10 @@ export class Engine {
     // the clock and the decoder makes numbers jump while every picture is drawn.
     const expected = S.shown > 0 ? S.shown : Math.max(1, (this.time - S.t) * fps);
     metrics.sample('fps_rendered', S.draws / secs);
+    if (S.shown > 0) metrics.sample('video_presented_fps', S.shown / secs); // pictures the video decoder delivered
+    metrics.sample('playback_speed_pct', (100 * (this.time - S.t)) / secs); // timeline seconds per real second
+    metrics.count('raf_gap_over_50ms', S.gaps);
+    if (S.held) metrics.count('clock_held_for_video', S.held); // ticks the clock waited for a slow decoder
     metrics.sample('preview_frames_missed_pct', (100 * S.skipped) / expected);
     const q = this.videoQuality();
     if (q && S.vq && q.total > S.vq.total) metrics.sample('video_dropped_frames_pct', (100 * (q.dropped - S.vq.dropped)) / (q.total - S.vq.total));
@@ -136,6 +146,18 @@ export class Engine {
     this.requestRender();
     this.emit('time');
   }
+  /** A scrub (finger/mouse moving the timeline) seeks here: quick seeks while moving, the exact frame after. */
+  scrub(t) {
+    this.scrubUntil = performance.now() + 180;
+    this.seek(t);
+    clearTimeout(this.scrubDone);
+    this.scrubDone = setTimeout(() => { this.scrubUntil = 0; if (!this.playing) { this.sync(); this.requestRender(); } }, 200);
+  }
+  /** Every element on screen plays from a copy on this device (no network used while playing). */
+  playingLocal() {
+    for (const E of this.els.values()) if (!E.el.paused && !String(E.el.currentSrc || E.url).startsWith('blob:')) return false;
+    return true;
+  }
   step(frames) {
     const fps = store.P.fps || 30;
     this.pause();
@@ -144,6 +166,7 @@ export class Engine {
   requestRender() { this.needsRender = true; }
 
   tick(now) {
+    if (this.session) { if (this.session.lastTick && now - this.session.lastTick > 50) this.session.gaps++; this.session.lastTick = now; }
     if (this.playing) {
       if (this.buffering) {
         // Hold the playhead until the main video has data again (instead of racing ahead and flashing black).
@@ -163,11 +186,27 @@ export class Engine {
           this.emit('buffer');
         }
       } else {
-        this.time = this.clockBase + (now - this.clockStart) / 1000;
+        const wall = this.clockBase + (now - this.clockStart) / 1000;
+        this.time = wall;
         const M = !this.exportTarget && this.masterEl();
+        // The clock may not run more than VIDEO_LEAD ahead of the main video's picture. A decoder slower than real
+        // time (a 4K/HEVC/HDR original on a tablet) then makes playback a little slower but smooth — instead of the
+        // clock running away, the video being seeked to catch up, stalling on the seek, and the playhead being held
+        // (the stutter seen on iPad). Short start delays at cuts stay below it, so music on other tracks stays in
+        // step with the timeline, as before.
+        if (this.videoClock && M && !M.el.paused && !M.el.seeking && M.el.readyState >= 2) {
+          const c = M.clip;
+          const tt = c.start + (M.el.currentTime - c.in) / (c.speed || 1);
+          if (tt >= c.start - 0.1 && tt < c.start + c.duration && wall - tt > VIDEO_LEAD && wall - tt < 1) {
+            this.time = tt + VIDEO_LEAD;
+            this.clockBase = this.time;
+            this.clockStart = now;
+            if (this.session) this.session.held = (this.session.held || 0) + 1;
+          }
+        }
         const starving = M && !M.noHold && (M.el.played.length || M.el.readyState < 2) && Engine.starved(M.el);
         if (starving) {
-          M.starvedSince ??= now;
+          if (M.starvedSince == null) M.starvedSince = now;
           if (now - M.starvedSince >= STALL_GRACE_MS) {
             this.buffering = true;
             this.bufferSince = now;
@@ -352,7 +391,9 @@ export class Engine {
   seekEl(E, t) {
     this.holdFrame(E);
     const el = E.el;
-    el.currentTime = t;
+    // While a finger scrubs the timeline, Safari's fastSeek (nearest keyframe) keeps the picture moving with the
+    // finger; the exact frame follows when the scrub stops (see scrub()).
+    if (performance.now() < this.scrubUntil && typeof el.fastSeek === 'function' && E.clip?.type === 'video') { E.fastTarget = t; el.fastSeek(t); } else { E.fastTarget = null; el.currentTime = t; }
     // 'seeked' alone does not prove the decoder already shows the new picture (hardware decoders can
     // lag a frame behind), so remember when a frame for this exact position is actually presented.
     E.shownAt = null;
@@ -426,7 +467,9 @@ export class Engine {
       if (E && E.mediaId !== clip.mediaId) { this.disposeEl(key); E = null; }
       // New source for this media (H.264 copy, or the copy saved on this device): swap it in when that
       // cannot cause a visible gap — while paused, or when the current element shows no picture anyway.
-      if (E && want && E.url !== want && (!(this.playing || this.exportTarget) || (clip.type === 'video' && !E.el.videoWidth))) {
+      // (also during playback for an element not on screen, e.g. the next clip, where nobody sees the swap)
+      const offScreen = this.playing && !this.exportTarget && !(t >= clip.start - 0.6 && t < end);
+      if (E && want && E.url !== want && (!(this.playing || this.exportTarget) || offScreen || (clip.type === 'video' && !E.el.videoWidth))) {
         this.disposeEl(key);
         E = null;
       }
@@ -446,12 +489,15 @@ export class Engine {
           el.play().catch((err) => { metrics.count(`play_rejected_${err?.name || 'error'}`); });
         } else if (Math.abs(el.currentTime - local) > 0.3 && !el.seeking && E.starvedSince == null) {
           // (not while it waits for data: a seek would make it wait longer)
+          metrics.count('drift_seek');
           this.seekEl(E, local);
         }
       } else {
         if (!el.paused) el.pause();
         // While buffering, leave positions alone: seeking a starved element only makes it wait longer.
-        if (!this.buffering && el.readyState >= 1 && !el.seeking && Math.abs(el.currentTime - local) > 0.02) this.seekEl(E, local);
+        // (a quick scrub seek lands on a keyframe near `local`: do not ask again for the same target)
+        const quick = performance.now() < this.scrubUntil && E.fastTarget === local;
+        if (!this.buffering && el.readyState >= 1 && !el.seeking && !quick && Math.abs(el.currentTime - local) > 0.02) this.seekEl(E, local);
       }
       let vol = 0;
       if (active && running && !clip.muted && !tr?.muted) {

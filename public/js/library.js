@@ -8,7 +8,7 @@ import {
   TEXT_PRESETS, TEXT_TEMPLATES, STICKERS, BADGES, EFFECTS, TRANSITIONS, FILTERS, SOLIDS, GRADIENTS, SFX,
 } from './presets.js';
 import { icon } from './icons.js';
-import { escapeHtml, fmtDur, fmtBytes } from './util.js';
+import { escapeHtml, fmtDur, fmtBytes, pickFiles } from './util.js';
 import { cssFilterFor } from './render.js';
 import { setDragPayload } from './timeline.js';
 import * as actions from './actions.js';
@@ -36,6 +36,9 @@ export class Library {
     this.fileInput.multiple = true;
     this.fileInput.accept = 'video/*,image/*,audio/*,.mkv,.mov';
     this.fileInput.onchange = () => { this.importFiles([...this.fileInput.files]); this.fileInput.value = ''; };
+    // in the page (hidden): iPadOS may never deliver the choice of a detached input
+    this.fileInput.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(this.fileInput);
     this.onClickH = (e) => this.onClick(e);
     this.onDragStartH = (e) => this.onDragStart(e);
     this.onDragEndH = () => setDragPayload(null);
@@ -437,12 +440,8 @@ export class Library {
     switch (d.do) {
       case 'import': this.fileInput.click(); break;
       case 'importAudio': {
-        const fi = document.createElement('input');
-        fi.type = 'file';
-        fi.multiple = true;
-        fi.accept = 'audio/*,.mp3,.wav,.m4a,.aac,.ogg';
-        fi.onchange = () => this.importFiles([...fi.files], { addAt: this.engine.time });
-        fi.click();
+        const at = this.engine.time;
+        pickFiles({ multiple: true, accept: 'audio/*,.mp3,.wav,.m4a,.aac,.ogg' }).then((files) => { if (files.length) this.importFiles(files, { addAt: at }); });
         break;
       }
       case 'url': this.importUrl(); break;
@@ -450,11 +449,7 @@ export class Library {
       case 'extract': actions.extractAudio(); break;
       case 'makeCaptions': this.makeCaptions(); break;
       case 'srtFile': {
-        const fi = document.createElement('input');
-        fi.type = 'file';
-        fi.accept = '.srt,.vtt,text/plain';
-        fi.onchange = async () => { this.capText = await fi.files[0].text(); this.capMode = 'srt'; this.render(); };
-        fi.click();
+        pickFiles({ accept: '.srt,.vtt,text/plain' }).then(async (files) => { if (!files.length) return; this.capText = await files[0].text(); this.capMode = 'srt'; this.render(); });
         break;
       }
       case 'clearCaptions':
