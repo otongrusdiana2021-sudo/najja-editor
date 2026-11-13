@@ -158,6 +158,10 @@ Contoh perintah ke AI:
 | `NAJJA_MEDIA_DIR` | `data/media` (mode token) | Batas folder untuk `import_media` dengan `path` |
 | `NAJJA_NO_OPEN` | | Isi `1` agar browser tidak dibuka otomatis |
 | `NAJJA_ALLOW_ORIGINS` | | Daftar origin tambahan yang diizinkan, dipisah koma |
+| `NAJJA_JOB_LIGHT` | 1 (2 bila ≥ 8 core) | Job thumbnail/waveform yang boleh jalan bersamaan |
+| `NAJJA_JOB_FAST` | 1 per 4 core (maks. 3) | Konversi salinan ringan (pratinjau) yang boleh jalan bersamaan |
+| `NAJJA_JOB_SLOW` | 1 (2 bila ≥ 8 core & 8 GB) | Konversi salinan kualitas penuh yang boleh jalan bersamaan |
+| `NAJJA_EXPORT_SPOOL` | | Isi `0` agar ekspor cepat menampung hasil encode di memori, bukan di file sementara browser (OPFS) |
 
 ## Deploy ke VPS
 

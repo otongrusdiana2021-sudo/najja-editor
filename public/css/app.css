@@ -671,6 +671,9 @@ body.kb-open .sheet.size-text { height: min(52vh, calc(100% - var(--kb) - 40px))
 .diag-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; margin: 0; font-size: 12px; }
 .diag-kv dt { color: var(--text-2); }
 .diag-kv dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.diag-jobs { display: grid; gap: 6px; }
+.diag-job { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border); }
+.diag-job > span { min-width: 0; overflow-wrap: anywhere; }
 .about svg { width: 48px; height: 48px; flex: none; }
 .about p { margin: 6px 0 0; }
 

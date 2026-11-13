@@ -173,6 +173,19 @@ Semua data ada **di VPS kamu**, tidak di layanan luar (tidak memakai Supabase at
 | Hasil ekspor | `/data/exports/` (pemiliknya dicatat di `/data/exports-index.json`) |
 | Akun & token AI (hanya hash) | `/data/users.json` |
 | Cadangan otomatis sebelum migrasi | `/data/backups/` |
+| Antrean pekerjaan media (konversi, thumbnail) | `/data/jobs/*.json` (satu file kecil per job; yang selesai dihapus setelah 7 hari) |
+
+### Antrean pekerjaan media
+
+Salinan ringan (pratinjau 720p), thumbnail/waveform, dan salinan kualitas penuh dibuat oleh antrean job di server:
+
+- **Tahan restart.** Job yang antre atau sedang jalan saat server dimatikan (update, reboot) dilanjutkan otomatis.
+- **Gagal → dicoba lagi** sampai 3 kali (jeda 5 dtk, lalu 20 dtk). Tiap job punya batas waktu, dan ffmpeg yang macet dihentikan.
+- **Adil antar-akun:**
+  - Thumbnail punya jalur sendiri, jadi tidak menunggu konversi video panjang.
+  - Klip pendek didahulukan, tapi video panjang tetap dijalankan: makin lama menunggu, makin maju urutannya.
+- **Status per akun:** menu ⋯ → **Diagnostik performa** → *Antrean server* (bisa **Batalkan**/**Ulangi**), atau `GET /api/jobs`.
+- **Batas job bersamaan** mengikuti core/RAM VPS. Ubah lewat `.env` bila perlu: `NAJJA_JOB_LIGHT`, `NAJJA_JOB_FAST`, `NAJJA_JOB_SLOW`. Contoh untuk VPS 8 core yang juga menjalankan aplikasi lain: `NAJJA_JOB_FAST=1`.
 
 Karena itu proyek bisa dibuka dari laptop, HP, atau browser mana pun setelah login. Upload video besar dipecah per 8 MB, jadi tidak terkena batas upload nginx/aaPanel.
 

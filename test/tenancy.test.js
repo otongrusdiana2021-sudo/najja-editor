@@ -2,7 +2,7 @@
 // migrated to the first admin with a backup. Run with: npm test
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -215,6 +215,30 @@ test('imports: server-disk paths are admin only; non-admin URL imports cannot re
     assert.equal(r.isError, true, url);
     assert.match(r.content[0].text, /public internet|Cannot resolve/, url);
   }
+});
+
+test('media jobs are per account: listed, cancelled and retried only by their owner', async () => {
+  let ffmpeg = true;
+  try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch { ffmpeg = false; }
+  if (!ffmpeg) return;
+  const f = path.join(dataDir, 'jobclip.mp4');
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1920x1080:r=30:d=4', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', f]);
+  const bytes = fs.readFileSync(f);
+  assert.equal((await as(A, 'PUT', '/api/media/m_ajob0001/meta', { id: 'm_ajob0001', name: 'a.mp4' })).status, 200);
+  assert.equal((await as(A, 'PUT', '/api/upload/up_ajob001/0', bytes)).status, 200);
+  assert.equal((await as(A, 'POST', '/api/upload/up_ajob001/finish', { parts: 1, size: bytes.length, target: 'media', mediaId: 'm_ajob0001', filename: 'a.mp4', mime: 'video/mp4' })).status, 200);
+  let mine = [];
+  for (let i = 0; i < 50 && !mine.length; i++) { mine = (await as(A, 'GET', '/api/jobs')).json().jobs; if (!mine.length) await new Promise((r) => setTimeout(r, 100)); }
+  assert.ok(mine.some((j) => j.mediaId === 'm_ajob0001' && j.kind === 'edit'), 'a 1080p upload queues a preview copy job');
+  assert.deepEqual((await as(B, 'GET', '/api/jobs')).json().jobs, [], 'B sees none of A\'s jobs');
+  const job = mine.find((j) => j.kind === 'edit');
+  assert.equal((await as(B, 'POST', `/api/jobs/${job.id}/cancel`)).status, 404);
+  assert.equal((await as(B, 'POST', `/api/jobs/${job.id}/retry`)).status, 404);
+  // the owner sees it finish (or can cancel it)
+  let st = null;
+  for (let i = 0; i < 200; i++) { st = (await as(A, 'GET', '/api/jobs')).json().jobs.find((j) => j.id === job.id); if (['succeeded', 'failed', 'cancelled'].includes(st.state)) break; await new Promise((r) => setTimeout(r, 100)); }
+  assert.equal(st.state, 'succeeded');
+  assert.ok(fs.existsSync(path.join(dataDir, 'jobs', `${job.id}.json`)), 'journal entry on disk');
 });
 
 test('deleting an account moves its data to the acting admin (backed up)', async () => {

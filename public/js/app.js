@@ -335,11 +335,14 @@ function shortcutsDialog() {
 /** Everything the metrics collector knows, plus live state of the preview and (for admins) the server. */
 async function diagnosticsSnapshot() {
   let server = null;
+  let jobs = null;
   try { server = (await (await fetch('/api/status', { cache: 'no-store', credentials: 'same-origin' })).json()).metrics || null; } catch { /* offline */ }
+  try { const r = await fetch('/api/jobs', { cache: 'no-store', credentials: 'same-origin' }); if (r.ok) jobs = (await r.json()).jobs; } catch { /* offline */ }
   return metrics.snapshot({
     app: bridge.state.status?.version || null,
     preview: { canvas: `${engine.canvas.width}x${engine.canvas.height}`, quality: player.quality, activeMediaElements: engine.els.size, project: store.P ? { clips: store.P.clips.length, media: store.P.media.length, tracks: store.P.tracks.length, duration: Math.round(store.duration()) } : null },
     server,
+    jobs,
   });
 }
 
@@ -391,6 +394,11 @@ async function diagnosticsDialog() {
           ['Kanvas pratinjau', `${snap.preview.canvas} (kualitas ${Math.round(snap.preview.quality * 100)}%)`], ['Elemen media aktif', snap.preview.activeMediaElements],
           ['Jaringan', d.connection ? `${d.connection.type || '?'} · ${d.connection.downlinkMbps ?? '?'} Mbps · RTT ${d.connection.rttMs ?? '?'} ms` : null],
         ])}</section>
+        ${snap.jobs ? `<section><h4>Antrean server (akun ini)</h4>${snap.jobs.length ? `<div class="diag-jobs">${snap.jobs.slice(0, 8).map((j) => `<div class="diag-job">
+          <span><b>${{ edit: 'Salinan ringan', assets: 'Thumbnail & waveform', proxy: 'Salinan kualitas penuh' }[j.kind] || escapeHtml(j.kind)}</b> · ${escapeHtml(store.media(j.mediaId)?.name || j.mediaId || '')}<br>
+          <span class="hint">${{ queued: j.retryAt ? 'menunggu coba lagi' : 'antre', running: `berjalan ${Math.round(j.progress * 100)}%`, succeeded: 'selesai', failed: 'gagal', cancelled: 'dibatalkan' }[j.state] || j.state}${j.attempts > 1 ? ` · percobaan ${j.attempts}/${j.maxAttempts}` : ''}${j.error && j.state !== 'succeeded' ? ` · ${escapeHtml(j.error)}` : ''}</span></span>
+          ${['queued', 'running'].includes(j.state) ? `<button class="btn sm" data-job-cancel="${j.id}">Batalkan</button>` : ['failed', 'cancelled'].includes(j.state) ? `<button class="btn sm" data-job-retry="${j.id}">Ulangi</button>` : ''}
+        </div>`).join('')}</div>` : '<p class="hint">Tidak ada pekerjaan server.</p>'}</section>` : ''}
         ${srv ? `<section>${kv('Server (admin)', [
           ...Object.entries(srv.jobs || {}).map(([k, j]) => [`Job ${k}`, `${j.done} selesai · ${j.failed} gagal · tunggu p95 ${fmt(j.wait?.p95, ' ms')} · durasi p95 ${fmt(j.run?.p95, ' ms')} · jalan ${j.running}/${j.limit} · antre ${j.queued}`]),
           ['Disk kosong', srv.disk ? `${fmtBytes(srv.disk.free)} dari ${fmtBytes(srv.disk.total)}` : null],
@@ -400,6 +408,18 @@ async function diagnosticsDialog() {
       </div>`;
   };
   await render();
+  body.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-job-cancel],[data-job-retry]');
+    if (!b) return;
+    const [id, action] = b.dataset.jobCancel ? [b.dataset.jobCancel, 'cancel'] : [b.dataset.jobRetry, 'retry'];
+    b.disabled = true;
+    try {
+      const r = await fetch(`/api/jobs/${id}/${action}`, { method: 'POST', credentials: 'same-origin' });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      toast(action === 'cancel' ? 'Pekerjaan dibatalkan' : 'Pekerjaan diulang', { type: 'ok' });
+    } catch (err) { toast(err.message, { type: 'error' }); }
+    render();
+  });
   const json = () => JSON.stringify(snap, null, 2);
   m.el.querySelector('[data-copy]').onclick = async () => { await render(); navigator.clipboard?.writeText(json()).then(() => toast('JSON diagnostik disalin', { type: 'ok' })).catch(() => toast('Gagal menyalin', { type: 'error' })); };
   m.el.querySelector('[data-dl]').onclick = async () => { await render(); downloadBlob(new Blob([json()], { type: 'application/json' }), `najja-diagnostik-${Date.now()}.json`); };

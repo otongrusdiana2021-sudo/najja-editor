@@ -130,4 +130,4 @@ Butuh keputusan biaya/infrastruktur (worker GPU terpisah). Blueprint: hanya sete
 
 - Semua perubahan backward compatible terhadap data v1.6 (field baru hanya ditambahkan).
 - Rollback: pasang ulang v1.6.0; backup migrasi ada di `data/backups/`.
-- Fitur baru yang berisiko punya saklar di `.env`: `NAJJA_JOB_FAST`, `NAJJA_JOB_SLOW` (concurrency), `NAJJA_SYNC_POLL_MS`, `NAJJA_EXPORT_SPOOL=0` (matikan spool OPFS).
+- Fitur baru yang berisiko punya saklar di `.env`: `NAJJA_JOB_LIGHT`, `NAJJA_JOB_FAST`, `NAJJA_JOB_SLOW` (concurrency), `NAJJA_SYNC_POLL_MS`, `NAJJA_EXPORT_SPOOL=0` (matikan spool OPFS).

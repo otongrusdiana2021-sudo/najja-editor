@@ -19,6 +19,7 @@ import { createStorage } from './lib/storage.js';
 import { createAuth } from './lib/auth.js';
 import { createTenancy, LOCAL_OWNER } from './lib/tenancy.js';
 import { createProxyManager, capabilities as mediaTools } from './lib/media-proxy.js';
+import { createJobs } from './lib/jobs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -63,8 +64,14 @@ function extFor(filename, mime) {
 const storage = createStorage(DATA_DIR, { exportDir: EXPORT_DIR, extFor });
 storage.cleanupUploads().catch(() => {});
 setInterval(() => storage.cleanupUploads().catch(() => {}), 6 * 3600 * 1000).unref();
+// Media jobs (preview copies, thumbnails/waveform, full-quality copies): a durable queue in data/jobs/ with bounded
+// concurrency (NAJJA_JOB_FAST / NAJJA_JOB_SLOW), retry, cancel; it resumes after a restart.
+const jobs = createJobs({ dir: path.join(DATA_DIR, 'jobs'), log: (...a) => log(...a) });
 // H.264 playback copies for media some browsers cannot decode (e.g. iPhone HEVC .MOV on many PCs).
-const proxies = createProxyManager({ mediaDir: storage.mediaDir, mediaFile: (id) => storage.mediaFile(id), log: (...a) => log(...a) });
+const proxies = createProxyManager({
+  mediaDir: storage.mediaDir, mediaFile: (id) => storage.mediaFile(id), log: (...a) => log(...a), jobs,
+  ownerOf: async (id) => (await storage.getMeta(id).catch(() => null))?.ownerId || null, // job owner = media owner
+});
 
 // Data ownership: every project/media/upload/export belongs to a user id (see lib/tenancy.js).
 // The primary owner (first admin, or "local" without accounts) owns data from before v1.7 and the server token.
@@ -771,6 +778,17 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       return meta;
     };
     const publicPath = (done) => (who.role === 'admin' ? done : { ...done, path: undefined });
+    // Media jobs of this account (queue status, cancel, retry).
+    const ownJob = (j) => tenancy.owns({ ownerId: j.owner }, who);
+    if (p === '/api/jobs' && req.method === 'GET') {
+      return sendJson(res, 200, { jobs: jobs.list({ owner: ownJob }).slice(0, 200), limits: jobs.limits });
+    }
+    if ((m = /^\/api\/jobs\/(j_[0-9a-f]+)\/(cancel|retry)$/.exec(p)) && req.method === 'POST') {
+      const job = jobs.get(m[1]);
+      if (!job || !ownJob(job)) return sendJson(res, 404, { error: 'Job not found' });
+      const out = m[2] === 'cancel' ? await jobs.cancel(job.id) : await jobs.retry(job.id);
+      return sendJson(res, 200, jobs.publicJob(out));
+    }
     if (p === '/api/projects' && req.method === 'GET') {
       const list = (await storage.listProjects()).filter((x) => tenancy.owns(x, who)).map(({ ownerId, ...x }) => x);
       return sendJson(res, 200, list);
@@ -835,6 +853,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     }
     if ((m = /^\/api\/media\/([\w-]+)$/.exec(p)) && req.method === 'DELETE') {
       await ownMedia(m[1]);
+      for (const kind of ['edit', 'assets', 'proxy']) { const j = jobs.active(`${kind}:${m[1]}`); if (j) await jobs.cancel(j.id); }
       return sendJson(res, 200, await storage.deleteMedia(m[1], url.searchParams.get('project') || '', (proj) => tenancy.owns(proj, who)));
     }
     if ((m = /^\/api\/upload\/([\w-]+)\/(\d+)$/.exec(p)) && req.method === 'PUT') {

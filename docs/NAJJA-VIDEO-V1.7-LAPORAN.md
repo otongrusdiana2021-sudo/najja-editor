@@ -368,3 +368,91 @@ Data lengkap ada di `bench/results/2026-11-13-p4-{before,after}-desktop.*`.
 ### Berikutnya
 
 P5: antrean job media yang tahan restart, dengan konkurensi terbatas, retry, cancel, dan status job. Baseline B5: job thumbnail menunggu sampai 117 dtk di belakang konversi video akun lain.
+
+---
+
+## P5 — Sistem job media
+
+### Masalah (kode sebelum P5)
+
+| Lokasi | Masalah |
+|---|---|
+| `lib/media-proxy.js` `schedule/pump` | Antrean di memori, **satu job sekaligus untuk semua akun**, FIFO. Konversi video 10 menit satu akun menahan klip 10 detik akun lain sampai selesai. |
+| sama | Tidak ada retry, timeout per job, atau cancel. ffmpeg yang macet menahan antrean selamanya, kecuali kena timeout asset 10 menit. |
+| sama | Antrean hilang saat restart. Hanya ada deteksi "pending tanpa antrean" saat media dibuka, jadi job tidak jalan sampai ada yang membuka medianya. |
+| `server.js` | Tidak ada status job untuk pengguna: tidak bisa melihat, membatalkan, atau mengulang. |
+
+Data lab (B5 bertahap: video 10 menit masuk dulu, lalu tiga akun mengunggah klip pendek): klip 9–12 dtk baru siap setelah **111–112 dtk**, dan tunggu antrean p95 110 dtk.
+
+### Keputusan desain
+
+- **`lib/jobs.js` (baru), antrean tahan restart:**
+  - Satu file JSON kecil per job di `data/jobs/`, ditulis atomik. Isinya hanya data (jenis, id media, pemilik), tidak pernah kode.
+  - Handler didaftarkan per jenis.
+  - Saat start, job `queued` dilanjutkan dan job `running` (terputus) dikembalikan ke antrean dengan `interrupted+1`. File jurnal rusak dilewati.
+- **Idempoten:** kunci `edit:<id>`, `assets:<id>`, `proxy:<id>`. Meminta lagi selama masih antre atau berjalan mengembalikan job yang sama.
+- **Status:** `queued → running → succeeded | failed | cancelled`, dengan progres, heartbeat (≤ 5 dtk di jurnal), percobaan, error, dan waktu coba lagi.
+- **Retry dan timeout:**
+  - Retry dengan *backoff* 5 dtk lalu 20 dtk (maks. 3 percobaan). Media yang sudah dihapus gagal permanen tanpa retry.
+  - Timeout per job sebanding durasi media. ffmpeg dihentikan lewat `AbortSignal`.
+  - Selama masih ada percobaan tersisa, status media tetap "pending", jadi editor tidak menampilkan "gagal" palsu.
+- **Cancel:** job yang antre langsung dibatalkan, dan yang berjalan dihentikan (ffmpeg di-kill). Menghapus media membatalkan job-nya.
+- **Konkurensi terbatas per kelas:**
+  - `light` untuk thumbnail/waveform: 1, atau 2 bila ≥ 8 core.
+  - `fast` untuk salinan ringan: 1 per 4 core, maks. 3.
+  - `slow` untuk kualitas penuh: 1, atau 2 bila ≥ 8 core & 8 GB.
+  - Bisa diubah lewat `NAJJA_JOB_LIGHT/FAST/SLOW`.
+  - *Trade-off:* satu konversi ffmpeg memakai semua core. Menambah slot hanya membagi CPU, tidak menambah throughput.
+- **Keadilan antar-akun:**
+  - *Pendek dulu dengan aging:* posisi antre = waktu masuk + 0,5 × durasi media. Video panjang tetap pasti jalan; contoh di tes: video yang sudah menunggu 400 dtk mendahului klip baru.
+  - *Jalur pendek:* media ≤ 90 dtk boleh memakai 1 slot tambahan **hanya** saat semua yang berjalan adalah job panjang. Maksimal limit + 1, jadi VPS tetap terbatas.
+- **Dependensi:** thumbnail menunggu salinan ringan media yang sama (dibuat dari file 720p, lebih cepat) tanpa memakan slot.
+- **API dan tampilan:**
+  - `GET /api/jobs` hanya menampilkan job milik akun.
+  - `POST /api/jobs/:id/cancel|retry` memeriksa pemilik dan menjawab 404 untuk job akun lain.
+  - Diagnostik → **Antrean server** menampilkan job akun ini dengan tombol Batalkan/Ulangi.
+  - Metrik job (kelas, limit, tunggu/durasi p50/p95, retry) ada di `/api/status` untuk admin.
+
+### File yang berubah
+
+| File | Perubahan |
+|---|---|
+| `lib/jobs.js` (baru) | Antrean tahan restart: jurnal, idempotensi, retry/backoff, timeout, cancel, kelas + jalur pendek + aging, dependensi, metrik. |
+| `lib/media-proxy.js` | Memakai `lib/jobs.js`; `run()` menerima `AbortSignal`; progres ke job; status "pending" selama masih ada retry. |
+| `server.js` | Antrean di `data/jobs/`, pemilik job = pemilik media, `/api/jobs`, cancel/retry, batalkan job saat media dihapus. |
+| `public/js/app.js`, `public/css/app.css` | Diagnostik: daftar job akun + Batalkan/Ulangi. |
+| `bench/run.mjs` | B5 bertahap (video panjang dulu, lalu klip pendek dari 3 akun lain). |
+| `test/jobs.test.js` (baru), `test/tenancy.test.js` | 10 tes antrean + tes isolasi job antar-akun. |
+| `README.md`, `docs/DEPLOY.md` | Antrean, saklar `.env`, lokasi `data/jobs/`. |
+
+### Tes
+
+- `test/jobs.test.js` (10 tes): idempoten; batas per kelas (fast tidak tertahan slow); dependensi tanpa memakan slot; retry dengan backoff lalu gagal dengan pesan; timeout menghentikan job; cancel (berjalan dan antre); restart melanjutkan job antre dan terputus serta melewati jurnal rusak; daftar per pemilik; urutan pendek dulu + aging; jalur pendek; batas default dan saklar env.
+- `test/tenancy.test.js`: job upload 1080p milik A tidak terlihat oleh B, B tidak bisa membatalkan atau mengulangnya (404), dan jurnalnya ada di disk.
+- `test/proxy.test.js` (7 tes lama) lolos dengan antrean baru.
+- Total `npm test` **49/49**. `npm run test:e2e` lolos.
+- **Uji crash:** server di-`SIGKILL` saat konversi 10%. Setelah dinyalakan, log mencatat "antrean job dilanjutkan: 2 job", konversi selesai di percobaan ke-2 (`interrupted: 1`), dan salinan ringan siap.
+
+### Benchmark sebelum/sesudah (B5 bertahap, runner sama, kode commit P4 vs P5)
+
+Data lengkap ada di `bench/results/2026-11-13-p5-{before,after}-desktop.*`.
+
+| | Sebelum (FIFO, 1 slot) | Sesudah (P5) |
+|---|---|---|
+| Klip 9 dtk (12 MB) → salinan ringan siap | 112,4 dtk | **7,1 dtk (−94%)** |
+| Klip 12 dtk (18 MB) | 110,9 dtk | **10,7 dtk (−90%)** |
+| Klip 60 dtk (88 MB) | 123,8 dtk | **26,5 dtk (−79%)** |
+| Video 10 menit (439 MB) | 88,3 dtk | 95,6 dtk (+8%, berbagi CPU sebentar) |
+| Tunggu antrean salinan ringan p95 | 110,4 dtk | **6,0 dtk** |
+| Seluruh skenario selesai | 127 dtk | 96 dtk |
+| Latensi API saat antre p50/p95 | 7,5 / 22,5 ms | 6,2 / 38 ms (tetap responsif; 2 ffmpeg di 4 core) |
+
+### Risiko, fallback, rollback
+
+- **Beban VPS:** jalur pendek bisa menjalankan 2 konversi bersamaan, sehingga CPU penuh sebentar. Itu tetap dibatasi (maks. limit + 1, hanya untuk media ≤ 90 dtk). VPS yang juga menjalankan aplikasi lain (misalnya ecom) bisa menurunkan `NAJJA_JOB_FAST`. ffmpeg tetap berjalan dengan prioritas rendah (`nice 10`) kecuali salinan ringan.
+- **Jurnal rusak:** file dilewati dan dihapus. Media yang statusnya masih "pending" tanpa job aktif dibuat ulang otomatis saat statusnya dibaca.
+- **Rollback:** pasang versi sebelumnya. Folder `data/jobs/` tidak dibaca versi lama dan aman dihapus. Status media (`edit.json`/`proxy.json`) tetap kompatibel.
+
+### Berikutnya
+
+P6: revisi proyek + deteksi konflik antar-perangkat (sekarang simpan terakhir menimpa diam-diam).

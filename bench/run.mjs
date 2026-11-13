@@ -342,24 +342,34 @@ await run('B4', async () => {
 });
 
 await run('B5', async () => {
-  // 4 accounts import different sizes at the same time; the admin keeps using the API meanwhile.
-  const files = [fixtures.b0, fixtures.b2[0], fixtures.b1[3], fixtures.b3];
+  // 4 accounts. The long recording is uploaded first and its conversion is already running when three other accounts
+  // upload short clips (the case where a FIFO queue makes them wait minutes). The admin keeps using the API.
+  const files = [fixtures.b3, fixtures.b0, fixtures.b2[0], fixtures.b1[3]];
   const users = files.map((_, i) => ({ email: `user${i + 1}@najja.id`, password: `bench-user-${i + 1}-pw` }));
-  const adminCookie = await page.context().cookies();
-  const cookie = adminCookie.map((c) => `${c.name}=${c.value}`).join('; ');
+  const cookie = (await page.context().cookies()).map((c) => `${c.name}=${c.value}`).join('; ');
   for (const u of users) await fetch(`${BASE}/api/users`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ ...u, role: 'editor' }) });
   const eds = await Promise.all(users.map((u) => openEditor({ user: u, profile: PROFILES.desktop })));
   const lat = [];
   let polling = true;
   const poller = (async () => { while (polling) { const t = performance.now(); await fetch(`${BASE}/api/projects`, { headers: { cookie } }); lat.push(performance.now() - t); await sleep(250); } })();
   const t0 = Date.now();
-  const per = await Promise.all(eds.map(async (e, i) => {
+  const one = async (e, i) => {
     await resetMetrics(e.page);
+    const ts = Date.now();
     await uploadFiles(e.page, [files[i]]);
     const ready = await waitMediaReady(e.page, { timeout: 900000, local: false });
     const s = (await snapshot(e.page)).series;
-    return { file: path.basename(files[i]), size_mb: Math.round(fs.statSync(files[i]).size / 1048576), upload_ms: s.upload_ms?.max ?? null, asset_ready_ms: s.asset_ready_ms?.max ?? null, until_ready_ms: ready };
-  }));
+    return { file: path.basename(files[i]), size_mb: Math.round(fs.statSync(files[i]).size / 1048576), started_s: Math.round((ts - t0) / 100) / 10, upload_ms: s.upload_ms?.max ?? null, asset_ready_ms: s.asset_ready_ms?.max ?? null, until_ready_ms: ready };
+  };
+  const long = one(eds[0], 0);
+  // wait until the long conversion runs
+  for (let i = 0; i < 600; i++) {
+    const st = await (await fetch(`${BASE}/api/status`, { headers: { cookie } })).json();
+    if ((st.metrics?.jobs?.edit?.running || 0) >= 1) break;
+    await sleep(250);
+  }
+  const short = await Promise.all(eds.slice(1).map((e, i) => one(e, i + 1)));
+  const per = [await long, ...short];
   polling = false;
   await poller;
   const st = await (await fetch(`${BASE}/api/status`, { headers: { cookie } })).json();
