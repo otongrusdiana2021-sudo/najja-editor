@@ -1,4 +1,4 @@
-# Analisa: pratinjau patah-patah di iPad (v1.7.1, v1.7.2)
+# Analisa: pratinjau patah-patah di iPad (v1.7.1–v1.7.3)
 
 Sumber data: rekaman layar iPad mini (Safari, potret, proyek 1 klip 25 dtk), Diagnostik dari iPad pengguna, dan pengukuran ulang di lab (Chromium + Playwright, profil iPad).
 
@@ -145,3 +145,87 @@ Perbaikan di v1.7.2:
 - Metrik "frame terlewat" tidak lagi menghitung video 60 fps di proyek 30 fps sebagai terlewat.
 
 Cara cek: buka proyeknya, lalu tunggu ±1 menit per klip (VPS membuat ulang salinan). Putar ±15 dtk, lalu salin Diagnostik. Yang diharapkan: "Gambar dari decoder" ±30 fps, "Kecepatan putar" ±100%, "Frame proyek terlewat" mendekati 0.
+
+## 9. "Playback sudah lumayan smooth, tapi audionya sering delay" (v1.7.3)
+
+### Penyebab: suara diambil dari elemen video
+
+Sampai v1.7.2, suara setiap klip berasal dari elemen `<video>`/`<audio>` klip itu sendiri. Suaranya disalurkan ke Web Audio (`createMediaElementSource`) untuk volume dan fade. Ada tiga kelemahan:
+
+1. **Bug Safari di jalur itu.** WebKit punya laporan yang cocok dengan gejalanya:
+   - suara lewat Web Audio terlambat dan tersendat (bug [221334](https://lists.webkit.org/pipermail/webkit-unassigned/2021-March/967175.html), [239696](https://bugs.webkit.org/show_bug.cgi?id=239696));
+   - `currentTime` elemen tidak sama dengan suara yang terdengar ([204228](https://bugs.webkit.org/show_bug.cgi?id=204228)), jadi engine bahkan tidak bisa melihat selisihnya;
+   - dua elemen audio saling menjauh di Safari, sementara di Chrome tetap sinkron ([301824](https://bugs.webkit.org/show_bug.cgi?id=301824)).
+2. **Setiap potongan menunggu elemen berikutnya mulai.** Elemen klip berikutnya baru diputar tepat di potongan. Jeda mulainya (lab ±35–50 ms, di Safari lebih lama) membuat suara dan gambar masuk terlambat di setiap potongan.
+3. **Track lain hanya dikoreksi kalau sudah 0,3 dtk meleset**, dan koreksinya dengan seek, yang terdengar sebagai lompatan. Jam pratinjau juga sesekali menunggu video (batas 0,15 dtk), sementara musik jalan terus, jadi musik menjauh dari gambar.
+
+Ini bukan masalah server: suara diputar dari file di perangkat, dan server tidak dipakai saat memutar.
+
+### Mekanisme baru, seperti editor web (Canva, CapCut web)
+
+**`public/js/audio.js`:**
+- Suara setiap klip yang terdengar di-**decode per blok 8 detik**, hanya bagian yang diputar, dengan WebCodecs `AudioDecoder` dari track AAC file di perangkat.
+- Suara **dijadwalkan sampel-akurat** di jam Web Audio (`AudioBufferSourceNode`), 1 detik ke depan, dan di-decode 8 detik ke depan.
+- Volume dan fade dibuat sebagai otomasi gain. Mengubah volume saat diputar tidak memulai ulang suara.
+- **Jam pratinjau = suara yang sedang keluar dari speaker** (`getOutputTimestamp`), jadi latensi output ikut terkompensasi.
+
+**`public/js/engine.js`:**
+- Elemen video **dibisukan** dan mengikuti jam suara.
+  - Selisih kecil dikoreksi dengan kecepatan putar 0,8–1,2×. Karena videonya bisu, koreksi ini tidak terdengar.
+  - Selisih diukur pada frame yang benar-benar tampil (`requestVideoFrameCallback`), karena `currentTime` meleset ±20 ms.
+  - Seek hanya kalau selisih > 0,45 dtk.
+- Elemen klip berikutnya **mulai sebelum potongan**, sesuai jeda mulai yang terukur di perangkat itu.
+
+**Fallback per klip ke suara elemen (cara lama):**
+- klip yang dipercepat atau diperlambat (supaya nada suara tetap);
+- file yang belum ada di perangkat (masih di-stream);
+- format yang tidak bisa di-decode, termasuk MP3/WAV yang lebih dari 150 dtk (yang lebih pendek di-decode utuh);
+- AudioContext yang berhenti (misalnya iOS saat ada telepon);
+- file asli berat yang masih diputar sebelum salinan ringannya siap.
+
+Ekspor real-time tetap memakai jalur lama.
+
+**iOS:** saat Play ditekan, sesi audio diatur ke `playback` (Safari 16.4+), jadi suara pratinjau tetap keluar walau perangkat dalam mode senyap.
+
+### Bug lama yang ikut ditemukan
+
+- Saat decode dimulai dari frame pertama file, frame priming AAC punya waktu negatif (−21 ms), dan Chromium melabelinya 0. Akibatnya suara dari awal file terlambat 21 ms.
+- Di pratinjau baru ini muncul sebagai klik di sambungan blok. Di **ekspor cepat**, ini terjadi sejak v1.6: suara bagian awal file terlambat 21 ms.
+- Diperbaiki di `decodeAudioRange` (`public/js/fastexport.js`).
+
+### Bukti
+
+Lab: B8 (fixture bip tepat di setiap detik sumber, detektor AudioWorklet di master mixer), profil iPad. Hasilnya di `bench/results/2026-11-14-av-old-ipad.*` dan `2026-11-14-v173-ipad.*`.
+
+| | v1.7.2 (suara elemen) | v1.7.3 (terjadwal) |
+|---|---|---|
+| 16 potongan: suara terdengar di belakang gambar (p50) | **70 ms** | **8 ms** |
+| 16 potongan: sebaran selisih | 36 ms | 16 ms |
+| Musik di track terpisah: suara di belakang gambar (p50) | **55 ms** | **8 ms** |
+| Bip hilang / bunyi ekstra | 0 / 0 | 0 / 0 |
+| Gambar di belakang suara, dari frame yang tampil (p50 / p95) | — | 7 / 44–57 ms (p95 = sesaat setelah potongan) |
+
+- Chromium tidak punya bug Safari di atas. Di iPad, jalur lama kemungkinan jauh lebih buruk daripada angka lab ini.
+- Kelancaran tidak turun:
+  - B1: 29 fps, 0 buffer, ekspor cepat tetap berhasil;
+  - B6 (48 potongan): 29,7 fps, 0 buffer, 0 seek koreksi;
+  - B7: file asli berat memakai jam lama; salinan ringan berjalan 99%.
+
+`test/e2e/audio.mjs` merekam keluaran mixer:
+- sambungan blok tanpa klik (lompatan sampel 0,031, nada murni 0,029; sebelum perbaikan priming 0,358);
+- tanpa celah;
+- volume yang diubah saat diputar berlaku tanpa memulai ulang suara;
+- track bisu benar-benar diam;
+- klip 2× memakai suara elemen;
+- browser tanpa konversi format sampel tetap bekerja;
+- mode lama masih bisa dipakai.
+
+### Cara cek di iPad
+
+1. Jalankan installer, lalu tutup dan buka lagi tab editor.
+2. Putar proyek yang tadi ±15 dtk.
+3. Buka menu ⋯ → **Diagnostik performa**, bagian **Audio**. Yang diharapkan:
+   - Mode: **terjadwal di jam audio**;
+   - "Gambar tertinggal dari suara" p50 di bawah ±20 ms;
+   - "Suara kosong" dan "terlambat" 0;
+   - "pakai elemen" 0. Kalau bukan 0, ada file yang tidak bisa di-decode di perangkat itu, dan barisnya menunjukkan berapa.

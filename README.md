@@ -201,6 +201,7 @@ public/
   index.html, css/app.css
   js/app.js        Kerangka aplikasi (topbar, pintasan, cari fitur, ekspor, proyek)
   js/engine.js     Jam pemutaran, sinkronisasi media, mixer Web Audio
+  js/audio.js      Suara pratinjau terjadwal di jam audio (decode per blok, sampel-akurat)
   js/render.js     Compositor kanvas: animasi, filter, lapisan penyesuaian, transisi, efek, teks, chroma key
   js/timeline.js   Timeline playhead-tengah: scrub, cubit-zoom, lane per kategori, tekan-lama-pindah
   js/toolbar.js    Toolbar bawah: menu utama, sub-menu kategori, alat per jenis klip

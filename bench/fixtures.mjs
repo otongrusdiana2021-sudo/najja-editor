@@ -41,5 +41,10 @@ files.b3 = ff(`b3-long-${longMin}m-1080p.mp4`, [...video(1920, 1080, longMin * 6
 files.b3a = [ff(`b3-audio1-${longMin}m.m4a`, tone(longMin * 60, 262), aac), ff(`b3-audio2-${longMin}m.m4a`, tone(longMin * 60, 392), aac)];
 // B7 — a heavy camera original (4K 60 fps): decoding it can be slower than real time on a tablet.
 files.b7 = ff('b7-4k60-20s.mp4', [...video(3840, 2160, 20, 90, 60), ...tone(20, 350)], [...h264(40, 60), ...aac, '-shortest']);
+// B8 — A/V sync: a 40 ms beep exactly at every whole second of the source (video sound and a music track), so the
+// runner can hear when each beep is played and compare it with the preview clock.
+const beeps = (secs, f) => ['-f', 'lavfi', '-i', `aevalsrc=0.6*sin(2*PI*${f}*t)*lt(mod(t\\,1)\\,0.04):s=48000:d=${secs}`];
+files.b8 = ff('b8-beeps-720x1280-30s.mp4', [...video(720, 1280, 30, 160), ...beeps(30, 1000)], [...h264(4), ...aac, '-shortest']);
+files.b8m = ff('b8-beeps-music-40s.m4a', beeps(40, 600), aac);
 fs.writeFileSync(path.join(out, 'fixtures.json'), JSON.stringify({ longMinutes: longMin, files }, null, 2));
 console.log(`fixture siap di ${out}`);

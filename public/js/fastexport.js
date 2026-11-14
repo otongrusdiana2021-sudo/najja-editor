@@ -302,13 +302,41 @@ class VideoSource {
 // file for the life of the tab).
 const AUDIO_PAD = 0.25; // seconds decoded around each range (AAC needs a little lead-in)
 
+/**
+ * One channel of decoded audio as float samples. Asks the browser to convert (f32-planar); a browser that only copies
+ * its own format (f32 / s16, planar or interleaved) is converted here.
+ */
+function readPlane(ad, c, out) {
+  const ch = ad.numberOfChannels;
+  const n = ad.numberOfFrames;
+  const k = Math.min(c, ch - 1);
+  try { ad.copyTo(out, { planeIndex: k, format: 'f32-planar' }); return; } catch { /* convert below */ }
+  const f = ad.format;
+  if (f === 'f32-planar') { ad.copyTo(out, { planeIndex: k }); return; }
+  if (f === 'f32' || f === 's16') {
+    const all = f === 'f32' ? new Float32Array(n * ch) : new Int16Array(n * ch);
+    ad.copyTo(all, { planeIndex: 0 });
+    const scale = f === 'f32' ? 1 : 1 / 32768;
+    for (let i = 0; i < n; i++) out[i] = all[i * ch + k] * scale;
+    return;
+  }
+  if (f === 's16-planar') {
+    const p = new Int16Array(n);
+    ad.copyTo(p, { planeIndex: k });
+    for (let i = 0; i < n; i++) out[i] = p[i] / 32768;
+    return;
+  }
+  throw unsupported(`audio sample format ${f}`);
+}
+
 /** Decode [t0, t1] (source seconds) of an MP4 audio track. Returns { start, buffer } or null. */
-async function decodeAudioRange(src, track, t0, t1) {
+export async function decodeAudioRange(src, track, t0, t1) {
   const cfg = { codec: track.codec, sampleRate: track.sampleRate, numberOfChannels: track.channels, ...(track.description ? { description: track.description } : {}) };
   if (!(await AudioDecoder.isConfigSupported(cfg).catch(() => ({ supported: false }))).supported) throw unsupported(`audio decoder ${track.codec}`);
   const S = track.samples;
   let i = 0;
   while (i < S.length - 1 && S[i + 1].pts <= t0 - AUDIO_PAD) i++;
+  const first = i;
   const outs = [];
   let error = null;
   const dec = new AudioDecoder({ output: (ad) => outs.push(ad), error: (e) => { error = e; } });
@@ -331,13 +359,25 @@ async function decodeAudioRange(src, track, t0, t1) {
   for (const ad of outs) {
     const tmp = new Float32Array(ad.numberOfFrames);
     for (let c = 0; c < ch; c++) {
-      ad.copyTo(tmp, { planeIndex: Math.min(c, ad.numberOfChannels - 1), format: 'f32-planar' });
+      readPlane(ad, c, tmp);
       buffer.copyToChannel(tmp, c, o);
     }
     o += ad.numberOfFrames;
     ad.close();
   }
-  return { start: outs[0].timestamp / 1e6, buffer };
+  // Where the decoded sound starts. The first output's timestamp, except from the file's very first frame: the AAC
+  // priming frame there has a negative time (edit list), and Chromium labels its output 0 — every sound of that range
+  // came 21 ms late (preview blocks did not line up; exports were late by as much at the start of a file). Then count
+  // back from the end of the last frame fed, as decoders output every frame of the range after flush().
+  let start = outs[0].timestamp / 1e6;
+  const last = Math.min(i, S.length) - 1;
+  if (S[first].pts < 0 && last >= first) {
+    const step = last > 0 ? S[last].pts - S[last - 1].pts : frames / rate;
+    const end = (S[last + 1]?.pts ?? S[last].pts + step);
+    const counted = end - frames / rate;
+    if (Math.abs(counted - start) > 0.002 && Math.abs(counted - S[first].pts) < 0.002) start = counted;
+  }
+  return { start, buffer };
 }
 
 /** The decoded audio a set of clips needs from one media file: a few merged ranges, or the whole file (fallback). */

@@ -346,6 +346,7 @@ async function diagnosticsSnapshot() {
   return metrics.snapshot({
     app: bridge.state.status?.version || null,
     preview: { canvas: `${engine.canvas.width}x${engine.canvas.height}`, quality: player.quality, activeMediaElements: engine.els.size, videoClock: engine.videoClock,
+      audio: { mode: engine.audioMode === 'element' ? 'element (A/B)' : engine.audioClock ? 'scheduled' : 'element', startDelayMs: Math.round(engine.startLat * 1000), ...engine.audio.info() },
       sources: (store.P?.media || []).filter((m) => m.type === 'video').slice(0, 12).map((m) => ({ name: String(m.name || '').slice(0, 40), size: `${m.width}x${m.height}`, duration: Math.round(m.duration || 0), plays: previewSource(m.id) })),
       project: store.P ? { clips: store.P.clips.length, media: store.P.media.length, tracks: store.P.tracks.length, duration: Math.round(store.duration()) } : null },
     server,
@@ -379,6 +380,14 @@ async function diagnosticsDialog() {
           row('Frame proyek terlewat', 'preview_frames_missed_pct', '%'), row('Frame video di-drop', 'video_dropped_frames_pct', '%'),
           row('Waktu gambar per frame', 'frame_draw_ms'), row('Menunggu buffer', 'buffer_wait_ms'), row('Seek → frame tepat', 'seek_to_frame_ms'),
         ])}${snap.preview.sources.length ? `<p class="hint">Diputar: ${snap.preview.sources.map((x) => `${escapeHtml(x.name)} (${x.size}) → ${escapeHtml(x.plays)}`).join(' · ')}</p>` : ''}<p class="hint">Seek koreksi: ${c.drift_seek || 0} · jeda frame &gt; 50 ms: ${c.raf_gap_over_50ms || 0} · Buffer: awal klip ${c.buffer_at_clip_start || 0} · tengah klip ${c.buffer_mid_clip || 0} · dari perangkat ${c.buffer_src_local || 0} · dari server ${c.buffer_src_server || 0} · jeda singkat dilewati ${c.stall_ridden_out || 0}${Object.keys(c).filter((k) => k.startsWith('play_rejected_')).map((k) => ` · play ditolak (${escapeHtml(k.slice(14))}) ${c[k]}`).join('')}</p></section>
+        <section>${table('Audio', [
+          row('Gambar tertinggal dari suara', 'picture_behind_sound_ms', ' ms', '(+ = gambar telat)'), row('Jeda mulai video di potongan', 'clip_start_latency_ms'),
+          row('Selisih audio elemen ke jam', 'audio_drift_ms'), row('Tunggu suara pertama', 'audio_start_wait_ms'), row('Suara masuk terlambat', 'audio_late_join_ms'), row('Decode audio per blok', 'audio_decode_ms'),
+        ])}${(() => {
+          const A = snap.preview.audio || {};
+          const src = A.sources || {};
+          return `<p class="hint">Mode: ${A.mode === 'scheduled' ? 'terjadwal di jam audio' : 'suara elemen media'} · AudioContext ${A.state || '—'} ${A.sampleRate ? `${A.sampleRate} Hz` : ''} · latensi ${fmt(A.latencyMs, ' ms')} · jam ${A.clock === 'output' ? 'dari speaker (output timestamp)' : A.clock === 'estimate' ? 'perkiraan latensi' : '—'} · AudioDecoder ${A.audioDecoder ? 'ya' : 'tidak'} · file: per blok ${src.blocks || 0}, utuh ${src.full || 0}, tanpa suara ${src.silent || 0}, pakai elemen ${src.failed || 0} · ter-decode ${A.decodedS ?? 0} dtk · suara kosong ${c.audio_underrun || 0} · terlambat ${c.audio_late_join || 0} · jadwal ulang ${c.audio_reschedule || 0} · decode gagal ${c.audio_decode_failed || 0}${c.audio_clock_fallback ? ` · jam audio berhenti → jam biasa ${c.audio_clock_fallback}×` : ''}</p>`;
+        })()}</section>
         <section>${table('Respons UI', [row('Lag event loop', 'event_loop_lag_ms'), row('Interaksi → tampil', 'interaction_ms'), row('Geser klip → tampil', 'timeline_drag_ms'), row('Trim klip → tampil', 'timeline_trim_ms'), row('Long task', 'long_task_ms')])}
           <p class="hint">Long task &gt; 50 ms: ${c.long_tasks_over_50ms || 0} · main thread terblokir ${c.main_thread_blocked_ms || 0} ms</p></section>
         <section>${table('Impor & simpan', [

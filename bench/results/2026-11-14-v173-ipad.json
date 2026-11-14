@@ -1,0 +1,288 @@
+{
+  "label": "v173",
+  "profile": "ipad",
+  "at": "2026-11-14T00:49:44.135Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B1": {
+      "ok": true,
+      "project": {
+        "clips": 9,
+        "duration": 60
+      },
+      "playback": {
+        "timeline_ms_per_s": 25.2,
+        "timeline_ms_per_frame": 0.42,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 4.8,
+          "updateTime": 0.7,
+          "onScroll": 12.1,
+          "paintRuler": 3.3,
+          "paintMedia": 3.3,
+          "placeOverlays": 1
+        },
+        "raf_p95_ms": 16.8,
+        "frame_hitches_over_25ms": 4,
+        "seconds": 15,
+        "fps_rendered": 29.2,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 4.8,
+        "frame_draw_p50_ms": 12.9,
+        "frame_draw_p95_ms": 17.2,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 97.9,
+        "video_presented_fps": 28.5,
+        "drift_seeks": 0,
+        "buffer_causes": {},
+        "long_tasks": 0,
+        "preview_canvas": "392x697"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 36.7,
+        "p95_ms": 99.9,
+        "max_ms": 99.9
+      },
+      "export": {
+        "state": "done",
+        "wall_ms": 70763,
+        "mode": "fast",
+        "spool": "opfs",
+        "audio_decoded_s": 100,
+        "fetch_media_ms": 1,
+        "prepare_ms": 1770,
+        "decode_ms": 5952,
+        "composite_ms": 56793,
+        "encode_ms": 5591,
+        "mux_ms": 41,
+        "total_ms": 70215,
+        "realtime_factor": 0.85,
+        "encoder_queue_max": 5,
+        "output_size": 32458489,
+        "renderer_rss_start_mb": 910,
+        "renderer_rss_peak_mb": 1390,
+        "js_heap_peak_mb": 90,
+        "probe": {
+          "video": "h264 1080x1920 30/1",
+          "audio": "opus",
+          "duration": 60,
+          "audio_mean_db": -18.9,
+          "audio_max_db": -10.8
+        }
+      },
+      "seconds": 100
+    },
+    "B6": {
+      "ok": true,
+      "project": {
+        "clips": 48,
+        "duration": 86.4
+      },
+      "playback": {
+        "timeline_ms_per_s": 24.7,
+        "timeline_ms_per_frame": 0.41,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 3.9,
+          "updateTime": 0.8,
+          "onScroll": 10.2,
+          "paintRuler": 3.1,
+          "paintMedia": 5.8,
+          "placeOverlays": 0.9
+        },
+        "raf_p95_ms": 16.7,
+        "frame_hitches_over_25ms": 0,
+        "seconds": 15,
+        "fps_rendered": 29.7,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 7.5,
+        "frame_draw_p95_ms": 10,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 98.5,
+        "video_presented_fps": 28.1,
+        "drift_seeks": 0,
+        "buffer_causes": {},
+        "long_tasks": 0,
+        "preview_canvas": "392x697"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 85.4,
+        "p95_ms": 555.1,
+        "max_ms": 555.1
+      },
+      "seconds": 25
+    },
+    "B8": {
+      "ok": true,
+      "project": {
+        "clips": 17,
+        "duration": 35.2
+      },
+      "cuts": {
+        "seconds": 15,
+        "beeps_expected": 17,
+        "beeps_heard": 17,
+        "beeps_missing": 0,
+        "beeps_extra": 0,
+        "offset_p50_ms": -33.6,
+        "offset_abs_p95_ms": 47.9,
+        "offset_abs_max_ms": 47.9,
+        "offset_spread_ms": 15.7,
+        "cut_offset_p50_ms": -34.2,
+        "cut_offset_max_ms": -32.3,
+        "output_latency_ms": 42,
+        "heard_offset_p50_ms": 8.4,
+        "audio_mode": "scheduled",
+        "playback_speed_pct": 98.5,
+        "fps_rendered": 29.8,
+        "buffer_waits": 0,
+        "drift_seeks": 0,
+        "audio_underruns": 0,
+        "audio_late_joins": 0,
+        "audio_start_wait_ms": 119.7,
+        "picture_behind_sound_p50_ms": 7,
+        "picture_behind_sound_p95_ms": 43.6,
+        "clip_start_latency_p50_ms": 34.8,
+        "audio_counters": {},
+        "late_join_ms": null,
+        "late_events": [],
+        "t_from": 0.5
+      },
+      "music": {
+        "seconds": 15,
+        "beeps_expected": 15,
+        "beeps_heard": 15,
+        "beeps_missing": 0,
+        "beeps_extra": 0,
+        "offset_p50_ms": -34,
+        "offset_abs_p95_ms": 43.6,
+        "offset_abs_max_ms": 43.6,
+        "offset_spread_ms": 10.6,
+        "cut_offset_p50_ms": null,
+        "cut_offset_max_ms": null,
+        "output_latency_ms": 42,
+        "heard_offset_p50_ms": 8,
+        "audio_mode": "scheduled",
+        "playback_speed_pct": 98.9,
+        "fps_rendered": 29.6,
+        "buffer_waits": 0,
+        "drift_seeks": 0,
+        "audio_underruns": 0,
+        "audio_late_joins": 0,
+        "audio_start_wait_ms": 72.7,
+        "picture_behind_sound_p50_ms": 7.3,
+        "picture_behind_sound_p95_ms": 56.7,
+        "clip_start_latency_p50_ms": 47.4,
+        "audio_counters": {},
+        "late_join_ms": null,
+        "late_events": [],
+        "t_from": 0.5
+      },
+      "seconds": 33
+    },
+    "B7": {
+      "ok": true,
+      "source": "original",
+      "playback": {
+        "timeline_ms_per_s": 22.4,
+        "timeline_ms_per_frame": 0.9,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 6.4,
+          "updateTime": 0.3,
+          "paintRuler": 4.5,
+          "paintMedia": 2.9,
+          "placeOverlays": 0.6,
+          "onScroll": 7.7
+        },
+        "raf_p95_ms": 116.7,
+        "frame_hitches_over_25ms": 121,
+        "seconds": 12,
+        "fps_rendered": 10.6,
+        "frames_missed_pct": 1,
+        "video_dropped_pct": 57.8,
+        "frame_draw_p50_ms": 50,
+        "frame_draw_p95_ms": 118.8,
+        "buffer_waits": 3,
+        "buffer_wait_total_ms": 1700,
+        "playback_speed_pct": 66.6,
+        "video_presented_fps": 8.9,
+        "drift_seeks": 3,
+        "buffer_causes": {
+          "buffer_mid_clip": 3,
+          "buffer_src_local": 3,
+          "buffer_readystate_1_seeking": 3,
+          "stall_ridden_out": 3
+        },
+        "long_tasks": 80,
+        "preview_canvas": "620x349"
+      },
+      "light": {
+        "source": "salinan ringan di perangkat",
+        "after_ms": 4036,
+        "playback": {
+          "timeline_ms_per_s": 17.1,
+          "timeline_ms_per_frame": 0.29,
+          "timeline_ms_per_s_by_part": {
+            "syncScroll": 3.9,
+            "updateTime": 0.3,
+            "onScroll": 6.7,
+            "paintRuler": 3.9,
+            "paintMedia": 1.9,
+            "placeOverlays": 0.4
+          },
+          "raf_p95_ms": 16.8,
+          "frame_hitches_over_25ms": 1,
+          "seconds": 12,
+          "fps_rendered": 29.4,
+          "frames_missed_pct": 0,
+          "video_dropped_pct": 1.7,
+          "frame_draw_p50_ms": 8.5,
+          "frame_draw_p95_ms": 12.5,
+          "buffer_waits": 0,
+          "buffer_wait_total_ms": 0,
+          "playback_speed_pct": 99.1,
+          "video_presented_fps": 29.2,
+          "drift_seeks": 0,
+          "buffer_causes": {},
+          "long_tasks": 0,
+          "preview_canvas": "620x349"
+        }
+      },
+      "seconds": 31
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1194x834@2x",
+    "touch": true,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 10,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}

@@ -187,6 +187,11 @@ function heavyOriginal(rt, state = 'ready') {
   if (state === 'ready' ? ed?.state !== 'ready' : !['pending', 'running'].includes(ed?.state)) return false;
   return (ed.reasons || []).some((r) => ['codec', 'fps', 'hdr', 'bitrate'].includes(r)) || Math.max(p?.width || 0, p?.height || 0) > 1920;
 }
+/** Does the preview play a heavy camera original of this media (its light copy is being made or not on screen yet)? */
+export function playsHeavyOriginal(id) {
+  const rt = mediaRT.get(id);
+  return !!rt?.url && rt.url === rt.local && (heavyOriginal(rt) || heavyOriginal(rt, 'busy'));
+}
 /** Progress (0..1) of the light copy of a heavy original the preview still plays, or null. */
 export function preparingLight(id) {
   const rt = mediaRT.get(id);

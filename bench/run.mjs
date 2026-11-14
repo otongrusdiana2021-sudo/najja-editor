@@ -3,7 +3,7 @@
 // usage:
 //   node bench/fixtures.mjs                      # once: makes bench/.fixtures
 //   node bench/run.mjs [--only=B0,B1] [--profile=desktop|ipad|phone] [--label=nama] [--fixtures=dir]
-//                      [--raf-hz=30] [--old-clock] [--hide-timeline]
+//                      [--raf-hz=30] [--old-clock] [--old-audio] [--hide-timeline]
 // Writes bench/results/<date>-<label>-<profile>.json and .md. Numbers from a headless lab machine are a baseline
 // for before/after comparison, not a device verdict: run on real PC/iPad/HP for device classes (blueprint 9.3).
 import { createRequire } from 'node:module';
@@ -17,7 +17,7 @@ import { toMarkdown } from './report.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=').slice(1).join('=') || d;
-const ONLY = arg('only', 'B0,B1,B2,B3,B4,B5,B6,B7').split(',').map((s) => s.trim().toUpperCase());
+const ONLY = arg('only', 'B0,B1,B2,B3,B4,B5,B6,B7,B8').split(',').map((s) => s.trim().toUpperCase());
 const PROFILE = arg('profile', 'desktop');
 const LABEL = arg('label', 'run');
 const FIX = path.resolve(arg('fixtures', path.join(ROOT, 'bench', '.fixtures')));
@@ -26,7 +26,8 @@ const HIDE_TIMELINE = process.argv.includes('--hide-timeline');
 // --raf-hz=30: the screen refreshes only 30×/s (iPad Low Power Mode, or Safari's 30 Hz cap): frames are painted at
 // most that often, like the iPad Diagnostik that showed FPS 27.7 with a 41 fps decoder
 const RAF_HZ = Number(arg('raf-hz', 0));
-const OLD_CLOCK = process.argv.includes('--old-clock'); // A/B: the wall clock that seeks lagging videos (before v1.7.1) // diagnosis: is a stutter caused by the timeline UI?
+const OLD_CLOCK = process.argv.includes('--old-clock');
+const OLD_AUDIO = process.argv.includes('--old-audio'); // A/B: the media elements' own sound (before v1.7.3) // A/B: the wall clock that seeks lagging videos (before v1.7.1) // diagnosis: is a stutter caused by the timeline UI?
 const TOKEN = `tok-bench-${Date.now().toString(36)}-0123456789`;
 const ADMIN = { email: 'bench@najja.id', password: 'bench-najja-123' };
 
@@ -165,6 +166,7 @@ async function measurePlayback(page, secs, from = 0) {
   await page.evaluate(async (t) => { const E = window.najja.engine; E.pause(); E.seek(t); await E.settle(8000); }, from);
   if (HIDE_TIMELINE) await page.evaluate(() => { document.querySelector('.tl-body').style.display = 'none'; });
   if (OLD_CLOCK) await page.evaluate(() => { window.najja.engine.videoClock = false; });
+  if (OLD_AUDIO) await page.evaluate(() => { window.najja.engine.audioMode = 'element'; });
   await resetMetrics(page);
   // Main-thread time the timeline spends following the playhead (ruler, filmstrips, waveforms, scroll), and the
   // spacing of animation frames (a gap > 25 ms is a visible hitch on a 60 Hz screen).
@@ -217,6 +219,116 @@ async function measurePlayback(page, secs, from = 0) {
     preview_canvas: await page.evaluate(() => `${window.najja.engine.canvas.width}x${window.najja.engine.canvas.height}`),
   };
 }
+/**
+ * A/V sync (B8): play `secs` from `from`, hear every beep the mixer renders (an AudioWorklet on the master bus) and
+ * compare its time with the preview clock at that moment. The fixtures beep at every whole second of the source, so
+ * each beep's place on the timeline is known. offset > 0: the sound comes after the picture.
+ */
+async function measureAV(page, secs, from = 0) {
+  const r = await page.evaluate(async ([secs, from, oldAudio]) => {
+    const E = window.najja.engine;
+    const { store } = await import('/js/store.js');
+    if (oldAudio) E.audioMode = 'element';
+    E.pause();
+    E.seek(from);
+    await E.settle(8000);
+    const ctx = E.ensureAudio();
+    if (ctx.state !== 'running') await ctx.resume().catch(() => {});
+    if (!window.__onsetLoaded) {
+      const code = `class D extends AudioWorkletProcessor{constructor(){super();this.q=1e9}process(i){const c=i[0]&&i[0][0];if(!c)return true;for(let k=0;k<c.length;k++){if(Math.abs(c[k])>0.12){if(this.q>sampleRate*0.3)this.port.postMessage(currentTime+k/sampleRate);this.q=0}else this.q++}return true}}registerProcessor('najja-onset',D)`;
+      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+      window.__onsetLoaded = true;
+    }
+    const det = new AudioWorkletNode(ctx, 'najja-onset');
+    const sink = ctx.createGain();
+    sink.gain.value = 0;
+    E.master.connect(det);
+    det.connect(sink).connect(ctx.destination);
+    const onsets = [];
+    det.port.onmessage = (e) => onsets.push(e.data);
+    const ticks = [];
+    const off = E.on((k) => { if (k === 'time' && E.playing) ticks.push([ctx.currentTime, E.time]); });
+    window.najjaMetrics.reset();
+    E.play();
+    await new Promise((res) => setTimeout(res, secs * 1000));
+    E.pause();
+    off();
+    await new Promise((res) => setTimeout(res, 300));
+    try { E.master.disconnect(det); } catch { /* ignore */ }
+    det.disconnect();
+    const exp = [];
+    for (const c of store.P.clips) {
+      if ((c.type !== 'video' && c.type !== 'audio') || c.muted || store.track(c.trackId)?.muted) continue;
+      const sp = c.speed || 1;
+      for (let k = Math.ceil(c.in - 1e-6); k < c.in + c.duration * sp - 0.02; k++) exp.push({ t: c.start + (k - c.in) / sp, cut: c.trackId === 'main' && k - c.in < 0.5 });
+    }
+    return { onsets, ticks, exp, lat: { base: ctx.baseLatency ?? null, output: ctx.outputLatency ?? null, rate: ctx.sampleRate }, snap: await window.najjaMetrics.snapshot() };
+  }, [secs, from, OLD_AUDIO]);
+  const T = r.ticks.filter((x, i, a) => !i || x[0] > a[i - 1][0]);
+  const clockAt = (ct) => {
+    if (!T.length || ct < T[0][0] || ct > T[T.length - 1][0]) return null;
+    let i = 1;
+    while (i < T.length && T[i][0] < ct) i++;
+    const [c0, t0] = T[i - 1];
+    const [c1, t1] = T[Math.min(i, T.length - 1)];
+    return c1 > c0 ? t0 + ((ct - c0) * (t1 - t0)) / (c1 - c0) : t0;
+  };
+  const t0 = T.length ? T[0][1] + 0.3 : 0;
+  const t1 = T.length ? T[T.length - 1][1] - 0.3 : 0;
+  const want = r.exp.filter((e) => e.t >= t0 && e.t <= t1);
+  const used = new Set();
+  const offs = [];
+  const cutOffs = [];
+  let extra = 0;
+  const extraAt = [];
+  for (const ct of r.onsets) {
+    const at = clockAt(ct);
+    if (at == null) continue;
+    let best = -1;
+    for (let i = 0; i < want.length; i++) if (!used.has(i) && Math.abs(want[i].t - at) < 0.45 && (best < 0 || Math.abs(want[i].t - at) < Math.abs(want[best].t - at))) best = i;
+    if (best < 0) { if (at >= t0 && at <= t1) { extra++; extraAt.push(r1(at)); } continue; }
+    used.add(best);
+    const ms = (at - want[best].t) * 1000;
+    offs.push(ms);
+    if (want[best].cut) cutOffs.push(ms);
+  }
+  const q = (a, f) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return r1(s[Math.min(s.length - 1, Math.floor(s.length * f))]); };
+  const abs = offs.map(Math.abs);
+  const latMs = ((r.lat.base || 0) + (r.lat.output || 0)) * 1000;
+  const S = r.snap.series;
+  return {
+    seconds: secs,
+    beeps_expected: want.length,
+    beeps_heard: offs.length,
+    beeps_missing: want.length - used.size,
+    beeps_extra: extra,
+    ...(extraAt.length ? { extra_at: extraAt, clips_at: r.exp.filter((e) => e.cut).map((e) => r1(e.t - 0.15)) } : {}),
+    offset_p50_ms: q(offs, 0.5),
+    offset_abs_p95_ms: q(abs, 0.95),
+    offset_abs_max_ms: abs.length ? r1(Math.max(...abs)) : null,
+    offset_spread_ms: offs.length ? r1(Math.max(...offs) - Math.min(...offs)) : null,
+    cut_offset_p50_ms: q(cutOffs, 0.5),
+    cut_offset_max_ms: cutOffs.length ? r1(Math.max(...cutOffs)) : null,
+    output_latency_ms: r1(latMs),
+    heard_offset_p50_ms: offs.length ? r1(q(offs, 0.5) + latMs) : null,
+    audio_mode: r.snap.gauges.audio_mode || 'element',
+    playback_speed_pct: S.playback_speed_pct?.avg ?? null,
+    fps_rendered: S.fps_rendered?.avg ?? null,
+    buffer_waits: S.buffer_wait_ms?.n || 0,
+    drift_seeks: r.snap.counters.drift_seek || 0,
+    audio_underruns: r.snap.counters.audio_underrun || 0,
+    audio_late_joins: r.snap.counters.audio_late_join || 0,
+    audio_start_wait_ms: S.audio_start_wait_ms?.p50 ?? null,
+    picture_behind_sound_p50_ms: S.picture_behind_sound_ms?.p50 ?? null,
+    picture_behind_sound_p95_ms: S.picture_behind_sound_ms?.p95 ?? null,
+    clip_start_latency_p50_ms: S.clip_start_latency_ms?.p50 ?? null,
+    audio_counters: Object.fromEntries(Object.entries(r.snap.counters).filter(([k]) => /^(audio_|clip_)/.test(k))),
+    late_join_ms: S.audio_late_join_ms?.max ?? null,
+    late_events: r.snap.events.filter((e) => e.kind === 'audio_late_join'),
+    t_from: T.length ? r1(T[0][1]) : null,
+  };
+}
+
 /** Random seeks while paused: time until the right frame is on screen (warm cache). */
 async function measureSeeks(page, n = 20, seed = 7) {
   const dur = await page.evaluate(() => window.najja.engine.duration);
@@ -448,6 +560,29 @@ await run('B6', async () => {
   await waitMediaReady(page);
   const P = await mcp('get_project');
   return { project: { clips: P.clips.length, duration: P.duration }, playback: await measurePlayback(page, 15), seek: await measureSeeks(page, 20) };
+});
+
+// B8: A/V sync. Beeps at every whole second of the source. (a) 16 jump cuts with their own sound, a beep 0.15 s after
+// every cut (a late start at a cut shows up there); (b) the same cuts muted under a music track (one long clip).
+await run('B8', async () => {
+  await mcp('new_project', { name: 'B8 A/V sync', aspect_ratio: '9:16' });
+  const m = await mcp('import_media', { path: rel(fixtures.b8) });
+  const D = [1.6, 2.6, 1.8, 2.8];
+  let t = 0;
+  for (let i = 0; i < 16; i++) {
+    const d = D[i % 4];
+    const k = 1 + ((i * 7) % 25); // source second of the clip's first beep
+    await mcp('add_media_clip', { media_id: m.media_id, track: 'main', start: Math.round(t * 1000) / 1000, source_in: Math.round((k - 0.15) * 100) / 100, duration: d });
+    t += d;
+  }
+  await waitMediaReady(page);
+  const cuts = await measureAV(page, 15, 0.5);
+  const P = await mcp('get_project');
+  for (const c of P.clips.filter((x) => x.type === 'video')) await mcp('update_clip', { clip_id: c.id, muted: true });
+  await mcp('import_media', { path: rel(fixtures.b8m), add_to_timeline: true, start: 0 });
+  await waitMediaReady(page);
+  const music = await measureAV(page, 15, 0.5);
+  return { project: { clips: P.clips.length + 1, duration: P.duration }, cuts, music };
 });
 
 // B7: a heavy original (4K 60 fps) right after import, played from the file on this device before the light copy

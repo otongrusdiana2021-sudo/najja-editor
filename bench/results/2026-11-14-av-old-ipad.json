@@ -1,0 +1,89 @@
+{
+  "label": "av-old",
+  "profile": "ipad",
+  "at": "2026-11-14T00:24:35.911Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B8": {
+      "ok": true,
+      "project": {
+        "clips": 17,
+        "duration": 35.2
+      },
+      "cuts": {
+        "seconds": 15,
+        "beeps_expected": 17,
+        "beeps_heard": 17,
+        "beeps_missing": 0,
+        "beeps_extra": 0,
+        "offset_p50_ms": 28.1,
+        "offset_abs_p95_ms": 31.2,
+        "offset_abs_max_ms": 31.2,
+        "offset_spread_ms": 36.1,
+        "cut_offset_p50_ms": 28.1,
+        "cut_offset_max_ms": 31.2,
+        "output_latency_ms": 42,
+        "heard_offset_p50_ms": 70.1,
+        "audio_mode": "element",
+        "playback_speed_pct": 99.9,
+        "fps_rendered": 30.2,
+        "buffer_waits": 0,
+        "drift_seeks": 0,
+        "audio_underruns": 0
+      },
+      "music": {
+        "seconds": 15,
+        "beeps_expected": 15,
+        "beeps_heard": 15,
+        "beeps_missing": 0,
+        "beeps_extra": 0,
+        "offset_p50_ms": 12.6,
+        "offset_abs_p95_ms": 13.7,
+        "offset_abs_max_ms": 13.7,
+        "offset_spread_ms": 9.5,
+        "cut_offset_p50_ms": null,
+        "cut_offset_max_ms": null,
+        "output_latency_ms": 42,
+        "heard_offset_p50_ms": 54.6,
+        "audio_mode": "element",
+        "playback_speed_pct": 100,
+        "fps_rendered": 30.5,
+        "buffer_waits": 0,
+        "drift_seeks": 0,
+        "audio_underruns": 0
+      },
+      "seconds": 33
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1194x834@2x",
+    "touch": true,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 10,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}

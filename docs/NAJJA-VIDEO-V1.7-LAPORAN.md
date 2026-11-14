@@ -705,3 +705,64 @@ Dengan engine lama, cek pertama dan ketiga **gagal**, jadi tes ini menangkap bug
 - B7 (4K60): file asli 52% (decoder lab 5 fps); salinan ringan **99,8%, 29,9 fps, 0 buffer, 0% terlewat**.
 
 `npm test` 55/55, e2e lolos.
+
+## Perbaikan setelah rilis (4): v1.7.3, "audionya sering delay"
+
+Analisa lengkap, termasuk perbandingan dengan Canva/CapCut, ada di [ANALISA-LAG-IPAD.md §9](ANALISA-LAG-IPAD.md#9-playback-sudah-lumayan-smooth-tapi-audionya-sering-delay-v173).
+
+**Masalah.** Suara pratinjau berasal dari elemen media yang disalurkan lewat `createMediaElementSource`. Di Safari, jalur itu punya bug terdokumentasi: suara terlambat dan tersendat, `currentTime` tidak sesuai suara, dan dua elemen saling menjauh. Selain itu:
+- setiap potongan menunggu elemen berikutnya mulai;
+- track lain baru dikoreksi kalau sudah meleset 0,3 dtk, dengan seek.
+
+Di lab (Chromium) pun suara terdengar 55–70 ms di belakang gambar.
+
+**Perubahan:**
+- **`public/js/audio.js` (baru):** penjadwal suara di jam Web Audio.
+  - Decode per blok 8 dtk dengan AudioDecoder (MP3/WAV pendek di-decode utuh).
+  - Dijadwalkan 1 dtk ke depan, di-decode 8 dtk ke depan.
+  - Memori decode dibatasi 150 dtk.
+  - Volume dan fade lewat otomasi gain. Edit saat diputar dijadwalkan ulang; perubahan volume/fade hanya mengubah gain.
+- **`public/js/engine.js`:**
+  - Jam pratinjau = suara yang terdengar (`getOutputTimestamp`).
+  - Video dibisukan dan mengikuti suara: kecepatan 0,8–1,2× berdasarkan frame yang tampil, seek hanya > 0,45 dtk.
+  - Elemen klip berikutnya mulai sebelum potongan sesuai jeda mulai yang terukur.
+  - Jalur Web Audio elemen hanya dibuat untuk klip yang memakai suara elemen.
+  - Fallback per klip (dipercepat, belum di perangkat, tidak bisa di-decode), dan ke jam lama bila AudioContext berhenti atau file asli berat masih diputar.
+  - `navigator.audioSession.type = 'playback'` saat Play ditekan (iOS).
+  - `engine.audioMode = 'element'` mengembalikan cara lama untuk A/B.
+- **`public/js/fastexport.js`:**
+  - Label waktu decode dari frame pertama file diperbaiki. Frame priming AAC dilabeli 0 oleh Chromium, sehingga suara 21 ms terlambat, juga di ekspor cepat sejak v1.6.
+  - Konversi format sampel sendiri untuk browser yang tidak mengonversi di `AudioData.copyTo`.
+- **`public/js/app.js`:** bagian **Audio** di Diagnostik: mode, AudioContext, latensi, sumber jam, gambar vs suara, jeda mulai di potongan, decode, suara kosong/terlambat/jadwal ulang, file yang memakai suara elemen.
+- **`bench/`:**
+  - fixture bip B8 dan skenario B8: potongan dengan suara sendiri, dan musik di bawah potongan bisu;
+  - pengukuran onset di master mixer;
+  - opsi `--old-audio`.
+
+**Tes.**
+- `test/e2e/audio.mjs` (baru, masuk `npm run test:e2e`):
+  - sambungan blok tanpa klik/celah;
+  - level nada benar;
+  - volume diubah saat diputar tanpa jadwal ulang;
+  - track bisu;
+  - klip 2× memakai suara elemen;
+  - browser tanpa konversi format;
+  - mode lama.
+- `npm test` 55/55, semua e2e lolos.
+
+**Benchmark (profil iPad):**
+
+| | v1.7.2 | v1.7.3 |
+|---|---|---|
+| B8 potongan: suara di belakang gambar (p50) | 70 ms | 8 ms |
+| B8 musik: suara di belakang gambar (p50) | 55 ms | 8 ms |
+| B8 sebaran selisih (potongan) | 36 ms | 16 ms |
+| B6 fps / buffer / seek koreksi | 30,5 / 0 / 0 (`2026-11-13-v172-ipad`) | 29,7 / 0 / 0 |
+| B1 fps / buffer | 29,7 / 0 (v1.7.1, `2026-11-13-vl-new-b1-ipad`) | 29,2 / 0 |
+
+Kecepatan putar 98–99% di lab adalah jeda mulai: playhead menunggu suara pertama ±0,1 dtk, lalu dihitung dalam 15 dtk.
+
+**Risiko dan rollback.**
+- Fallback per klip ke cara lama dipicu otomatis kalau decode gagal dua kali, file tidak di perangkat, atau AudioContext tidak berjalan.
+- Di Safari, perilaku `AudioDecoder` dan `getOutputTimestamp` belum bisa diuji di lab. Diagnostik menunjukkan mode, sumber jam, dan jumlah file yang jatuh ke suara elemen.
+- Kembali ke cara lama sepenuhnya cukup dengan `engine.audioMode = 'element'`, atau revert commit ini. Data proyek tidak berubah.

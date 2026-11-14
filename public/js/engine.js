@@ -1,7 +1,8 @@
 // Playback engine: master clock, media element sync, Web Audio mixing and preview rendering.
 import { store } from './store.js';
 import { compilePlan } from './plan.js';
-import { mediaRT } from './media.js';
+import { mediaRT, playsHeavyOriginal } from './media.js';
+import { PreviewAudio } from './audio.js';
 import { renderFrame, preloadFonts, onFontsLoaded } from './render.js';
 import { clamp } from './util.js';
 import { metrics } from './metrics.js';
@@ -13,6 +14,9 @@ const AC = window.AudioContext || window.webkitAudioContext;
 const STALL_GRACE_MS = 300;
 // Furthest the timeline clock may run ahead of the picture of the main video (see tick).
 const VIDEO_LEAD = 0.15;
+// A media element is started this much before its clip (its measured start delay, at most this), so that its
+// picture (and, without the audio clock, its sound) begins on the cut instead of after it.
+const PRESTART_MAX = 0.2;
 
 export class Engine {
   constructor(canvas) {
@@ -33,6 +37,12 @@ export class Engine {
     this.audioCtx = null;
     this.master = null;
     this.monitor = null;
+    // Sound scheduled on the audio clock (audio.js, v1.7.3). audioMode 'element': the media elements' own sound and
+    // the wall clock, as before (A/B measurements; real-time exports always use it).
+    this.audio = new PreviewAudio(this);
+    this.audioMode = 'auto';
+    this.audioClock = false;
+    this.startLat = 0.06; // start delay of a media element after play() (seconds, moving average)
     this.listeners = new Set();
     // Media elements live in the page (invisible): Safari plays and presents frames of attached videos more
     // reliably than of detached ones.
@@ -42,8 +52,8 @@ export class Engine {
     document.body.appendChild(this.host);
     this.lastEmit = 0;
     onFontsLoaded(() => this.requestRender());
-    store.on('project', () => { this.clampTime(); this.sync(); this.requestRender(); });
-    store.on('live', () => { this.sync(); this.requestRender(); });
+    store.on('project', () => { this.clampTime(); this.sync(); this.audio.invalidate(); this.requestRender(); });
+    store.on('live', () => { this.sync(); this.audio.invalidate(); this.requestRender(); });
     store.on('media', () => { if (store.P) this.sync(); this.requestRender(); });
     const resume = () => { if (this.audioCtx?.state === 'suspended') this.audioCtx.resume().catch(() => {}); };
     window.addEventListener('pointerdown', resume, true);
@@ -83,11 +93,18 @@ export class Engine {
     if (d <= 0) return;
     if (this.time >= d - 0.02) this.time = 0;
     this.ensureAudio();
+    // iOS/iPadOS (Safari 16.4+): preview sound plays like a video app's, also with the device switched to silent
+    // (Web Audio would otherwise follow the silent switch). Set on play, so opening the editor never stops other audio.
+    try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback'; } catch { /* not supported */ }
     this.playing = true;
     this.buffering = false;
     this.lastFi = -1;
     this.clockBase = this.time;
     this.clockStart = performance.now();
+    this.playAt = performance.now();
+    this.audioClock = this.useAudioClock();
+    metrics.gauge('audio_mode', this.audioClock ? 'scheduled' : 'element');
+    if (this.audioClock) this.audio.start(this.time);
     this.sync();
     this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, shown: 0, needed: 0, vq: this.videoQuality(), lastTick: 0, gaps: 0 };
     this.emit('play');
@@ -95,11 +112,31 @@ export class Engine {
   pause() {
     if (!this.playing) return;
     this.playing = false;
+    this.audio.stop();
     this.endSession();
     if (this.buffering) { this.buffering = false; this.emit('buffer'); }
     this.sync();
+    this.audio.prefetch(this.time);
     this.requestRender();
     this.emit('pause');
+  }
+  /**
+   * Play with the sound scheduled on the audio clock? Not for real-time exports (they record the elements' sound),
+   * nor while a heavy camera original is on the timeline: its decoder may be slower than real time, and the wall
+   * clock that waits for the picture (VIDEO_LEAD) plays it smoother than sound that cannot wait.
+   */
+  useAudioClock() {
+    if (this.audioMode === 'element' || this.exportTarget || !this.audio.supported()) return false;
+    return !(store.P?.clips || []).some((c) => c.type === 'video' && playsHeavyOriginal(c.mediaId));
+  }
+  /** The audio clock stopped (iOS suspends the AudioContext, e.g. a call): play on with the wall clock. */
+  leaveAudioClock(now) {
+    this.audioClock = false;
+    this.audio.stop();
+    this.clockBase = this.time;
+    this.clockStart = now;
+    metrics.count('audio_clock_fallback');
+    metrics.gauge('audio_mode', 'element');
   }
   toggle() { this.playing ? this.pause() : this.play(); }
   /** Decoded/dropped frame counters of the main video element (where the browser reports them). */
@@ -143,7 +180,11 @@ export class Engine {
   seek(t) {
     if (!this.exportTarget) this.seekAt = performance.now();
     this.time = clamp(t, 0, Math.max(0, this.duration));
-    if (this.playing) { this.clockBase = this.time; this.clockStart = performance.now(); }
+    if (this.playing) {
+      this.clockBase = this.time;
+      this.clockStart = performance.now();
+      if (this.audioClock && !this.buffering) this.audio.start(this.time);
+    } else this.audio.prefetch(this.time);
     this.sync();
     this.requestRender();
     this.emit('time');
@@ -184,9 +225,20 @@ export class Engine {
             if (Math.abs(tt - this.time) < 1) this.time = this.clockBase = tt;
           }
           this.buffering = false;
+          if (this.audioClock) this.audio.start(this.time);
           metrics.sample('buffer_wait_ms', now - this.bufferSince);
           this.emit('buffer');
         }
+      } else if (this.audioClock) {
+        // The clock is the sound the speakers play (audio.js): sound is never held back or seeked; the muted videos
+        // follow the clock (sync). Before the first sound, the playhead waits for it.
+        const a = this.audio.clock(now, this.startLat);
+        if (a != null) this.time = a;
+        this.clockBase = this.time;
+        this.clockStart = now;
+        if (this.audioCtx?.state !== 'running' && now - this.playAt > 1500) this.leaveAudioClock(now);
+        else this.audio.update();
+        this.watchStall(now, this.masterEl());
       } else {
         const wall = this.clockBase + (now - this.clockStart) / 1000;
         this.time = wall;
@@ -206,29 +258,7 @@ export class Engine {
             if (this.session) this.session.held = (this.session.held || 0) + 1;
           }
         }
-        const starving = M && !M.noHold && (M.el.played.length || M.el.readyState < 2) && Engine.starved(M.el);
-        if (starving) {
-          if (M.starvedSince == null) M.starvedSince = now;
-          if (now - M.starvedSince >= STALL_GRACE_MS) {
-            this.buffering = true;
-            this.bufferSince = now;
-            // why (Diagnostik): right after a clip started or mid-clip, local copy or streamed, decoder state
-            metrics.count(M.playAt && now - M.playAt < 1000 ? 'buffer_at_clip_start' : 'buffer_mid_clip');
-            metrics.count(String(M.el.currentSrc || M.el.src).startsWith('blob:') ? 'buffer_src_local' : 'buffer_src_server');
-            metrics.count(`buffer_readystate_${M.el.readyState}${M.el.seeking ? '_seeking' : ''}`);
-            this.emit('buffer');
-          }
-        } else if (M?.starvedSince != null) {
-          // Recovered within the grace time: follow the video instead of seeking it to the clock (a seek would
-          // starve it again).
-          M.starvedSince = null;
-          if (!M.el.seeking && !M.el.paused) {
-            const c = M.clip;
-            const tt = c.start + (M.el.currentTime - c.in) / (c.speed || 1);
-            if (Math.abs(tt - this.time) < 1) { this.time = this.clockBase = tt; this.clockStart = now; }
-          }
-          metrics.count('stall_ridden_out');
-        }
+        this.watchStall(now, M);
       }
       const d = this.duration;
       if (this.time >= d) {
@@ -236,9 +266,11 @@ export class Engine {
           this.time = 0;
           this.clockBase = 0;
           this.clockStart = now;
+          if (this.audioClock) this.audio.start(0);
         } else {
           this.time = d;
           this.playing = false;
+          this.audio.stop();
           this.endSession();
           this.emit('ended');
           this.emit('pause');
@@ -279,6 +311,34 @@ export class Engine {
     if (draw) {
       this.needsRender = false;
       this.render();
+    }
+  }
+
+  /** The main video ran out of data: hold the playhead after a grace time (short dips are ridden out). */
+  watchStall(now, M) {
+    const starving = M && !M.noHold && (M.el.played.length || M.el.readyState < 2) && Engine.starved(M.el);
+    if (starving) {
+      if (M.starvedSince == null) M.starvedSince = now;
+      if (now - M.starvedSince >= STALL_GRACE_MS) {
+        this.buffering = true;
+        this.bufferSince = now;
+        if (this.audioClock) this.audio.stop();
+        // why (Diagnostik): right after a clip started or mid-clip, local copy or streamed, decoder state
+        metrics.count(M.playAt && now - M.playAt < 1000 ? 'buffer_at_clip_start' : 'buffer_mid_clip');
+        metrics.count(String(M.el.currentSrc || M.el.src).startsWith('blob:') ? 'buffer_src_local' : 'buffer_src_server');
+        metrics.count(`buffer_readystate_${M.el.readyState}${M.el.seeking ? '_seeking' : ''}`);
+        this.emit('buffer');
+      }
+    } else if (M?.starvedSince != null) {
+      // Recovered within the grace time: follow the video instead of seeking it to the clock (a seek would starve it
+      // again). With the audio clock the sound went on; the video catches up (sync).
+      M.starvedSince = null;
+      if (!this.audioClock && !M.el.seeking && !M.el.paused) {
+        const c = M.clip;
+        const tt = c.start + (M.el.currentTime - c.in) / (c.speed || 1);
+        if (Math.abs(tt - this.time) < 1) { this.time = this.clockBase = tt; this.clockStart = now; }
+      }
+      metrics.count('stall_ridden_out');
     }
   }
 
@@ -354,19 +414,24 @@ export class Engine {
     // picture (≈30 times a second) instead of on every screen refresh (60–120 times a second).
     if (clip.type !== 'audio' && typeof el.requestVideoFrameCallback === 'function') {
       E.frames = 0;
-      const onFrame = () => { E.frames++; if (this.els.get(key) === E) el.requestVideoFrameCallback(onFrame); };
+      // (and which picture is on screen when: the audio clock keeps the picture on the sound with it)
+      const onFrame = (_, meta) => {
+        E.frames++;
+        if (meta) {
+          // frame duration (moving average of media-time steps): a picture covers [mediaTime, mediaTime + fd)
+          const step = E.vt ? meta.mediaTime - E.vt.mt : 0;
+          if (step > 0.004 && step < 0.1) E.fd = E.fd ? E.fd * 0.9 + step * 0.1 : step;
+          E.vt = { mt: meta.mediaTime, at: meta.expectedDisplayTime || performance.now() };
+        }
+        if (this.els.get(key) === E) el.requestVideoFrameCallback(onFrame);
+      };
       el.requestVideoFrameCallback(onFrame);
     }
-    const ctx = this.ensureAudio();
-    if (ctx) {
-      try {
-        E.src = ctx.createMediaElementSource(el);
-        E.gain = ctx.createGain();
-        E.gain.gain.value = 0;
-        E.src.connect(E.gain).connect(this.master);
-      } catch { E.src = null; }
-    }
-    if (!E.src) el.volume = 0;
+    // Muted unless it plays its own sound (elementSound): with the audio clock the scheduler plays the sound, and a
+    // muted video starts faster and may start without a tap. Without it, routed through Web Audio at once, as before.
+    el.muted = true;
+    this.ensureAudio();
+    if (!(this.playing ? this.audioClock : this.useAudioClock()) || !this.audio.covers(clip)) this.elementSound(E);
     const rr = () => this.requestRender();
     // While paused, sync() can only position an element that has metadata and is not mid-seek. A new element
     // (far seek) or one still seeking to an older position (fast scrub) is positioned again once it can be,
@@ -422,6 +487,19 @@ export class Engine {
     E.el.remove();
     this.els.delete(id);
   }
+  /** Let the element play its own sound (fallback clips, real-time export): route it through Web Audio once. */
+  elementSound(E) {
+    if (!E.src && !E.noSrc) {
+      const ctx = this.ensureAudio();
+      try {
+        E.src = ctx.createMediaElementSource(E.el);
+        E.gain = ctx.createGain();
+        E.gain.gain.value = 0;
+        E.src.connect(E.gain).connect(this.master);
+      } catch { E.src = null; E.noSrc = true; }
+    }
+    if (E.el.muted) E.el.muted = false;
+  }
   setGain(E, v) {
     if (Math.abs(E.vol - v) < 0.001) return;
     E.vol = v;
@@ -449,7 +527,11 @@ export class Engine {
     };
     const groups = plan.groups;
     const lookahead = this.playing ? 2.5 : 0.5;
-    const running = this.playing && !this.buffering;
+    // with the audio clock, the elements wait for the first sound (they start their own start delay before it)
+    const running = this.playing && !this.buffering && (!this.audioClock || this.audio.live);
+    const now = performance.now();
+    const sampleAv = running && now - (this.avAt || 0) > 250;
+    if (sampleAv) this.avAt = now;
     const alive = new Set();
     for (const [key, clips] of groups) {
       // The clip driving this element now: the one on screen, else the next to start, else the one just ended.
@@ -466,6 +548,8 @@ export class Engine {
         }
         continue;
       }
+      // a sound-only clip the scheduler plays needs no element
+      if (clip.type === 'audio' && this.audioClock && !this.exportTarget && this.audio.covers(clip)) continue;
       const tr = store.track(clip.trackId);
       const end = clip.start + clip.duration;
       let E = this.els.get(key);
@@ -485,34 +569,77 @@ export class Engine {
       alive.add(key);
       const el = E.el;
       const speed = clip.speed || 1;
-      const local = this.localTime(clip, t);
       const active = t >= clip.start && t < end;
-      if (Math.abs(el.playbackRate - speed) > 0.001) el.playbackRate = speed;
-      if (running && active && el.readyState >= 1) {
+      // Start the element its measured start delay before the clip (not into a transition: the frames before the
+      // in-point would show), positioned that much before the in-point, so it is up to speed on the cut.
+      const lead = margins(clip)[0] > 0 ? 0 : Math.min(this.startLat, clip.in, PRESTART_MAX);
+      const soon = !active && t < clip.start && t >= clip.start - lead;
+      const local = t < clip.start ? Math.max(clip.in - lead, clip.in - (clip.start - t) * speed) : this.localTime(clip, t);
+      if (running && (active || soon) && el.readyState >= 1) {
         if (el.paused) {
           if (Math.abs(el.currentTime - local) > 0.05) this.seekEl(E, local);
           E.playAt = performance.now();
+          E.startFrom = el.currentTime;
+          E.nudge = 1;
+          E.dpf = null;
           el.play().catch((err) => { metrics.count(`play_rejected_${err?.name || 'error'}`); });
-        } else if (Math.abs(el.currentTime - local) > 0.3 && !el.seeking && E.starvedSince == null) {
+        } else if (!el.seeking && E.starvedSince == null) {
           // (not while it waits for data: a seek would make it wait longer)
-          metrics.count('drift_seek');
-          this.seekEl(E, local);
+          // How long the element took to start moving after play() (the next clips start that much earlier): by the
+          // first moving picture shown where the browser reports frames (currentTime runs ahead of the picture).
+          const moved = E.frames != null ? (E.vt && E.vt.at > E.playAt && E.vt.mt > E.startFrom + 0.001 ? E.vt : null)
+            : (el.currentTime > E.startFrom + 0.004 ? { mt: el.currentTime, at: now } : null);
+          if (E.startFrom != null && moved) {
+            const lat = (moved.at - E.playAt) / 1000 - (moved.mt - E.startFrom) / speed;
+            E.startFrom = null;
+            if (lat >= 0 && lat < 1) {
+              metrics.sample('clip_start_latency_ms', lat * 1000);
+              this.startLat = clamp(this.startLat * 0.7 + lat * 0.3, 0, PRESTART_MAX);
+            }
+          }
+          const d = el.currentTime - local; // > 0: the element is ahead of the clock
+          if (Math.abs(d) > (this.audioClock ? 0.45 : 0.3)) {
+            metrics.count('drift_seek');
+            E.nudge = 1;
+            this.seekEl(E, local);
+          } else if (this.audioClock) {
+            // Small differences to the sound: run the (muted) video a little faster or slower instead of seeking,
+            // which on Safari means waiting for a keyframe. Measured on the picture actually shown (frame callback:
+            // its media time and display time) where the browser reports it, else on currentTime.
+            // (the middle of the picture's time span against the sound: a 30 fps frame is "on time" for 33 ms)
+            let dp = d;
+            if (active && E.vt && now - E.vt.at < 120 && E.vt.at - now < 60) dp = E.vt.mt + (E.fd || 1 / 30) / 2 - this.localTime(clip, t + (E.vt.at - now) / 1000);
+            // averaged: per picture the difference saws between ±half a frame even when perfectly in step
+            E.dpf = E.dpf == null || Math.abs(dp - E.dpf) > 0.1 ? dp : E.dpf * 0.85 + dp * 0.15;
+            const a = Math.abs(E.dpf);
+            if (a < 0.006) E.nudge = 1;
+            else if (a > 0.015) E.nudge = 1 + Math.sign(-E.dpf) * (a > 0.15 ? 0.2 : a > 0.06 ? 0.1 : 0.05);
+            if (sampleAv && active && clip.type === 'video' && clip.trackId === 'main') metrics.sample('picture_behind_sound_ms', -dp * 1000 / speed);
+          } else if (sampleAv && active && clip.type === 'audio') metrics.sample('audio_drift_ms', Math.abs(d) * 1000 / speed);
         }
       } else {
+        E.nudge = 1;
+        E.startFrom = null;
         if (!el.paused) el.pause();
         // While buffering, leave positions alone: seeking a starved element only makes it wait longer.
         // (a quick scrub seek lands on a keyframe near `local`: do not ask again for the same target)
         const quick = performance.now() < this.scrubUntil && E.fastTarget === local;
         if (!this.buffering && el.readyState >= 1 && !el.seeking && !quick && Math.abs(el.currentTime - local) > 0.02) this.seekEl(E, local);
       }
+      const rate = speed * (this.audioClock ? (E.nudge || 1) : 1);
+      if (Math.abs(el.playbackRate - rate) > 0.001) el.playbackRate = rate;
+      // The element's own sound only where the scheduler does not play it (audio.js covers()).
+      const viaEl = !this.audioClock || !this.audio.covers(clip);
       let vol = 0;
-      if (active && running && !clip.muted && !tr?.muted) {
+      if (viaEl && active && running && !clip.muted && !tr?.muted) {
         vol = clip.volume ?? 1;
         const lt = t - clip.start;
         if (clip.fadeIn > 0) vol *= clamp(lt / clip.fadeIn, 0, 1);
         if (clip.fadeOut > 0) vol *= clamp((clip.duration - lt) / clip.fadeOut, 0, 1);
       }
-      this.setGain(E, vol);
+      if (vol > 0) this.elementSound(E);
+      if (E.src || !el.muted) this.setGain(E, vol);
+      if (!viaEl && !el.muted) el.muted = true;
     }
     for (const id of [...this.els.keys()]) if (!alive.has(id)) this.disposeEl(id);
   }
