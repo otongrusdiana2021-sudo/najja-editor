@@ -1,4 +1,4 @@
-# Analisa: pratinjau patah-patah di iPad (v1.7.1–v1.7.4)
+# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.1)
 
 Sumber data: rekaman layar iPad mini (Safari, potret, proyek 1 klip 25 dtk), Diagnostik dari iPad pengguna, dan pengukuran ulang di lab (Chromium + Playwright, profil iPad).
 
@@ -302,3 +302,106 @@ Benchmark B8 (profil iPad, `bench/results/2026-11-14-v174-ipad.*`):
 1. Deploy, lalu tutup dan buka lagi tab editor.
 2. Putar proyek yang sama lebih dari 15 detik. Suara harus terdengar sampai akhir.
 3. Buka **Diagnostik performa → Audio** dan kirim screenshot-nya. Kalau "pindah ke decode utuh" > 0, berarti `AudioDecoder` Safari memang bermasalah di blok tengah file, dan baris "Masalah terakhir" menunjukkan jenisnya. Suara tetap jalan lewat decode utuh.
+
+## 11. Ekspor tidak bisa diputar, video hasil render beku, preview patah-patah lagi, ekspor lama (v1.8.1)
+
+### 11.1 "Video hasil ekspor tidak bisa diputar di Android/PC"
+
+File ekspor dari iPad diperiksa dengan ffprobe: track audionya terbaca sebagai *"Audio object type 0, 22050 Hz, 0 channels"*. Android, PC, dan WhatsApp menolak file seperti itu ("format tidak biasa").
+
+**Penyebab.** `AudioEncoder` Safari memberikan `decoderConfig.description` berupa **ES_Descriptor utuh** (38 byte, diawali `03 80 80 80 22`). Chrome memberikan **AudioSpecificConfig** (2 byte, `11 90` = AAC-LC 48 kHz stereo). Muxer Najja menulis isi itu apa adanya ke kotak `esds` sebagai AudioSpecificConfig, jadi di iPad konfigurasinya rusak.
+
+**Perbaikan (`public/js/aac.js`).**
+- AudioSpecificConfig diambil dari dalam ES_Descriptor (tag 3 → 4 → 5).
+- Konfigurasi mentah dari Chrome dipakai apa adanya.
+- Kalau deskripsinya kosong atau rusak, konfigurasi dibuat dari sample rate dan jumlah channel.
+
+**Bukti (`test/aac.test.js`, `test/export-read.test.js`).**
+- Byte asli dari file pengguna menghasilkan `11 90`.
+- MP4 yang ditulis dengan deskripsi gaya Safari:
+  - terbaca oleh ffprobe sebagai AAC-LC stereo 48 kHz;
+  - ffmpeg men-decode seluruh file tanpa error;
+  - suaranya sama persis dengan sumbernya (selain 1024 sampel priming encoder).
+
+### 11.2 "Hasil render tidak playable; yang smooth hanya efek dan teks"
+
+Di file ekspor pengguna, **91% frame video sama dengan frame sebelumnya**, sementara teks dan efek tetap bergerak. Artinya pembaca frame ekspor (`VideoSource`) terus mengembalikan gambar lama.
+
+**Penyebab.** `VideoSource` menganggap decoder mengeluarkan frame segera dan berurutan waktu tampil. `VideoDecoder` Safari tidak selalu begitu:
+- stream dengan B-frame keluar menurut urutan decode;
+- frame ditahan sampai ada input berikutnya atau sampai flush.
+
+Lihat laporan WebKit [263901](https://bugs.webkit.org/show_bug.cgi?id=263901), [268987](https://bugs.webkit.org/show_bug.cgi?id=268987), [287516](https://bugs.webkit.org/show_bug.cgi?id=287516). Frame "dari masa depan" di depan antrean membuat kode lama menganggap frame yang diminta belum ada, lalu memakai gambar sebelumnya. Kode lama juga tidur 40 ms setiap kali frame belum keluar.
+
+**Perbaikan (`public/js/fastexport.js`).**
+- Frame hasil decode disimpan **terurut menurut waktu tampil**.
+- Frame untuk waktu t baru dipakai setelah **semua sampel yang tampil sebelum/pada t sudah keluar** dari decoder. Yang dilacak: sampel yang sudah dimasukkan, dan minimum waktu tampil dari sampel yang belum dimasukkan.
+- Sampai 10 sampel dimasukkan di depan. Kalau decoder tetap diam, jendelanya diperbesar sampai 48.
+- Decoder yang menahan frame sampai flush akan di-flush, lalu diisi ulang dari keyframe sebelumnya. Frame yang keluar dua kali dibuang. Setelah itu decoder di-flush di setiap keyframe.
+- Tidak ada lagi tidur 40 ms: loop dibangunkan begitu ada frame keluar.
+- Frame yang terlambat atau hilang dihitung. Kalau lebih dari 2%, ekspor **tidak menyimpan video patah-patah**. Ekspor pindah ke mode real-time, dan keputusan ini sudah diambil setelah ±3 detik, tidak menunggu render selesai.
+- Diagnostik → Ekspor terakhir menampilkan:
+  - *Frame video dari decoder* (terlambat, hilang, flush, ulang, jendela);
+  - *Audio AAC* (sumber konfigurasinya).
+
+**Server (`lib/media-proxy.js`).** Salinan kualitas penuh dan salinan ringan yang baru dibuat **tanpa B-frame** (`-bf 0`). Setiap frame keluar dari decoder begitu masuk dan selalu berurutan. Salinan lama tidak dibuat ulang; `VideoSource` yang baru menangani keduanya.
+
+**Bukti (`test/e2e/export.mjs`).** Encoder dan decoder Chromium dibungkus supaya berperilaku seperti Safari, lalu hasil ekspornya diperiksa dengan ffprobe/ffmpeg. Setiap frame dibandingkan dengan gambar sumbernya pada waktu yang sama.
+
+| Skenario decoder | v1.8.0 | v1.8.1 |
+|---|---|---|
+| Chromium apa adanya | 179/180 frame tepat | 180/180 |
+| Gaya Safari (tidak urut + ditahan) | **30/180 tepat, 56% frame berulang** | 180/180, 0% berulang |
+| Menahan semua frame sampai flush | **16/180 tepat, 98% berulang** | 180/180, 0% berulang (6 flush, 1 isi ulang) |
+| Menghilangkan 1 dari 10 frame | file patah-patah tetap disimpan | pindah ke real-time ("18 lost of 91") |
+
+### 11.3 "Timeline preview patah-patah lagi"
+
+Rekaman/screenshot preview tidak ikut terkirim, jadi analisa ini memakai lab (profil iPad, CPU 4× lebih lambat), lalu dibandingkan dengan suara elemen seperti sebelum v1.7.3.
+
+**Mekanisme 1: koreksi kecepatan video terlalu sering.**
+- Sejak v1.7.3, video bisu mengikuti jam suara. Selisih kecil dikoreksi dengan `playbackRate`.
+- Ambangnya 6/15 ms dan diperiksa setiap tick, dengan langkah sampai ±20%.
+- Setiap perubahan kecepatan membuat decoder membuang frame. Di iOS, perubahan itu juga mengatur ulang waktu player.
+
+| Lab, 15 dtk | Suara elemen (v1.7.2) | Jam audio v1.8.0 | Jam audio v1.8.1 |
+|---|---|---|---|
+| Ganti kecepatan video | 0 | 12× | 2–3× |
+| Frame video dibuang | 0% | 2,3% | 0–2,3% |
+| Jeda frame > 25 ms | 55–95 | 127 | 54–77 |
+| Gambar di belakang suara p50 / p95 | — | -2 / 53 ms | 9–11 / 41–55 ms |
+
+Perbaikan v1.8.1 (`engine.js`):
+- Koreksi baru dimulai di atas **40 ms**, karena selisih bibir–suara baru terasa sekitar ±45 ms.
+- Koreksi berhenti di bawah 12 ms atau kalau sudah lewat sasaran.
+- Langkahnya ±3/6/12%, dan kecepatan berubah paling sering **sekali per detik**.
+
+**Mekanisme 2: decoder yang lebih lambat dari real-time.**
+- Sebelum v1.7.3, jam pratinjau menunggu gambar (`VIDEO_LEAD`, v1.7.1). Itu yang dulu membuat iPad smooth untuk file berat.
+- Dengan jam audio, suara tidak menunggu. Video yang tertinggal di-seek, dan seek di Safari menunggu keyframe. Polanya jadi tertinggal → seek → macet → tertinggal lagi.
+- Sekarang, kalau video utama tertinggal ≥ 0,45 dtk **dua kali dalam 10 dtk**, file itu diputar dengan jam yang menunggu gambar selama sesi itu. Diagnostik → Audio menampilkan "video lebih lambat dari real-time → jam video" serta jumlah koreksi kecepatan dan seek koreksi.
+
+**Batasan.** Lab memakai Chromium. Penyebab yang khusus iPad hanya terlihat dari Diagnostik iPad (Audio + Pemutaran) sesudah update.
+
+### 11.4 "Ekspor lama"
+
+Lab B1 (60 dtk, 9 klip, filter vivid, 1080p, desktop): 1,55× real-time, sama dengan v1.8.0 (1,62×). Komposit makan ±80% waktu karena canvas di lab dirender perangkat lunak; di iPad, canvas memakai GPU.
+
+Yang membuat ekspor di iPad lebih lama, dan sudah diperbaiki:
+- Kode lama tidur 40 ms setiap kali decoder Safari belum memberi frame. Ini menahan render di bawah ±25 frame/dtk, bahkan sebelum komposit dan encode.
+- Antrean encoder dicek dengan timer 1 ms, yang di Safari minimal 4 ms. Sekarang loop dibangunkan oleh event `dequeue` encoder.
+- Ekspor yang decoder-nya rusak dulu baru jatuh ke real-time setelah render penuh, jadi waktunya terpakai dua kali. Sekarang keputusan itu diambil setelah ±3 detik.
+
+Yang masih bisa lama, dan terlihat di Diagnostik → Ekspor terakhir:
+- *Siapkan media*: file yang tidak bisa dibaca browser (misalnya HEVC iPhone) menunggu salinan kualitas penuh dari server dan mengunduhnya ke iPad;
+- *Komposit/Encode* per detik video.
+
+### Cara cek
+
+1. Deploy, lalu tutup dan buka lagi tab editor.
+2. Ekspor ulang proyek yang sama. File lama tetap rusak, karena audio dan videonya sudah tertulis salah.
+3. Kirim file hasilnya ke Android/WhatsApp; harus bisa diputar.
+4. Buka **Diagnostik performa → Ekspor terakhir**:
+   - "Frame video dari decoder" harus menunjukkan terlambat/hilang 0;
+   - "Audio AAC" harus "… · ES_Descriptor (Safari) → ASC".
+5. Putar preview ±15 dtk, lalu kirim screenshot **Diagnostik → Pemutaran** dan **Audio**: koreksi kecepatan video, seek koreksi, frame dibuang.

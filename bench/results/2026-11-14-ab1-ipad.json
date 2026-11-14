@@ -1,0 +1,85 @@
+{
+  "label": "ab1",
+  "profile": "ipad",
+  "at": "2026-11-14T04:49:09.292Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B1": {
+      "ok": true,
+      "project": {
+        "clips": 9,
+        "duration": 60
+      },
+      "playback": {
+        "timeline_ms_per_s": 34.6,
+        "timeline_ms_per_frame": 0.61,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 6.7,
+          "updateTime": 0.8,
+          "onScroll": 17,
+          "paintRuler": 4.2,
+          "paintMedia": 4.7,
+          "placeOverlays": 1.2
+        },
+        "raf_p95_ms": 33.3,
+        "frame_hitches_over_25ms": 54,
+        "seconds": 15,
+        "fps_rendered": 29.8,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 2.3,
+        "frame_draw_p50_ms": 18.2,
+        "frame_draw_p95_ms": 23.8,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 99.4,
+        "video_presented_fps": 29,
+        "drift_seeks": 0,
+        "video_rate_changes": 3,
+        "picture_behind_sound_p50_ms": 10.7,
+        "picture_behind_sound_p95_ms": 54.9,
+        "buffer_causes": {},
+        "long_tasks": 0,
+        "preview_canvas": "196x348"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 46.6,
+        "p95_ms": 132.1,
+        "max_ms": 132.1
+      },
+      "export": null,
+      "seconds": 26
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1194x834@2x",
+    "touch": true,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 9.1,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}

@@ -17,6 +17,11 @@ const VIDEO_LEAD = 0.15;
 // A media element is started this much before its clip (its measured start delay, at most this), so that its
 // picture (and, without the audio clock, its sound) begins on the cut instead of after it.
 const PRESTART_MAX = 0.2;
+// With the audio clock, a video more than NUDGE_START from the sound runs 3–12% faster or slower until it is within
+// NUDGE_STOP; the rate changes at most every NUDGE_MIN_MS (v1.8.1: was 6/15 ms, every tick, up to 20%).
+const NUDGE_START = 0.04;
+const NUDGE_STOP = 0.012;
+const NUDGE_MIN_MS = 1000;
 
 export class Engine {
   constructor(canvas) {
@@ -42,6 +47,7 @@ export class Engine {
     this.audio = new PreviewAudio(this);
     this.audioMode = 'auto';
     this.audioClock = false;
+    this.slowMedia = new Set(); // videos whose decoder fell behind the audio clock here (they play on the wall clock)
     this.startLat = 0.06; // start delay of a media element after play() (seconds, moving average)
     this.listeners = new Set();
     // Media elements live in the page (invisible): Safari plays and presents frames of attached videos more
@@ -134,7 +140,7 @@ export class Engine {
    */
   useAudioClock() {
     if (this.audioMode === 'element' || this.exportTarget || !this.audio.supported()) return false;
-    return !(store.P?.clips || []).some((c) => c.type === 'video' && playsHeavyOriginal(c.mediaId));
+    return !(store.P?.clips || []).some((c) => c.type === 'video' && (playsHeavyOriginal(c.mediaId) || this.slowMedia.has(c.mediaId)));
   }
   /** The audio clock stopped (iOS suspends the AudioContext, e.g. a call): play on with the wall clock. */
   leaveAudioClock(now, why = 'audio context stopped') {
@@ -631,6 +637,18 @@ export class Engine {
           const d = el.currentTime - local; // > 0: the element is ahead of the clock
           if (Math.abs(d) > (this.audioClock ? 0.45 : 0.3)) {
             metrics.count('drift_seek');
+            if (this.audioClock && d < 0 && clip.type === 'video' && active) {
+              // Half a second behind the sound twice in 10 s although it may run faster: its decoder does not keep
+              // up on this device. Seeking it again and again is the stutter; the wall clock that waits for the
+              // picture (VIDEO_LEAD) plays it smoothly, so this media plays that way from now on.
+              E.lagSeeks = (E.lagSeeks || []).filter((x) => now - x < 10000);
+              E.lagSeeks.push(now);
+              if (E.lagSeeks.length >= 2) {
+                this.slowMedia.add(clip.mediaId);
+                metrics.count('video_slower_than_realtime');
+                this.leaveAudioClock(now, 'video lebih lambat dari real-time di perangkat ini');
+              }
+            }
             E.nudge = 1;
             this.seekEl(E, local);
           } else if (this.audioClock) {
@@ -642,9 +660,16 @@ export class Engine {
             if (active && E.vt && now - E.vt.at < 120 && E.vt.at - now < 60) dp = E.vt.mt + (E.fd || 1 / 30) / 2 - this.localTime(clip, t + (E.vt.at - now) / 1000);
             // averaged: per picture the difference saws between ±half a frame even when perfectly in step
             E.dpf = E.dpf == null || Math.abs(dp - E.dpf) > 0.1 ? dp : E.dpf * 0.85 + dp * 0.15;
+            // Gently, and seldom: every rate change makes the decoder drop frames (lab: 2.3% dropped with ±5–20% steps
+            // changed 12× in 15 s), and on iOS it re-times the player. Below 40 ms nobody sees the difference
+            // (lip sync is noticed from ±45 ms), so the rate stays put until then and changes at most once a second.
             const a = Math.abs(E.dpf);
-            if (a < 0.006) E.nudge = 1;
-            else if (a > 0.015) E.nudge = 1 + Math.sign(-E.dpf) * (a > 0.15 ? 0.2 : a > 0.06 ? 0.1 : 0.05);
+            const cur = E.nudge || 1;
+            let want = cur;
+            if (a < NUDGE_STOP) want = 1;
+            else if (a > NUDGE_START) want = 1 + Math.sign(-E.dpf) * (a > 0.25 ? 0.12 : a > 0.1 ? 0.06 : 0.03);
+            else if (cur !== 1 && Math.sign(cur - 1) === Math.sign(E.dpf)) want = 1; // overshot: stop correcting
+            if (want !== cur && (want === 1 || now - (E.nudgeAt || 0) > NUDGE_MIN_MS)) { E.nudge = want; E.nudgeAt = now; }
             if (sampleAv && active && clip.type === 'video' && clip.trackId === 'main') metrics.sample('picture_behind_sound_ms', -dp * 1000 / speed);
           } else if (sampleAv && active && clip.type === 'audio') metrics.sample('audio_drift_ms', Math.abs(d) * 1000 / speed);
         }
@@ -658,7 +683,7 @@ export class Engine {
         if (!this.buffering && el.readyState >= 1 && !el.seeking && !quick && Math.abs(el.currentTime - local) > 0.02) this.seekEl(E, local);
       }
       const rate = speed * (this.audioClock ? (E.nudge || 1) : 1);
-      if (Math.abs(el.playbackRate - rate) > 0.001) el.playbackRate = rate;
+      if (Math.abs(el.playbackRate - rate) > 0.001) { el.playbackRate = rate; if (this.playing && rate !== speed) metrics.count('video_rate_change'); }
       // The element's own sound only where the scheduler does not play it (audio.js covers()).
       const viaEl = !this.audioClock || !this.audio.covers(clip);
       let vol = 0;

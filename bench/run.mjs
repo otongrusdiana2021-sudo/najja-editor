@@ -26,6 +26,8 @@ const HIDE_TIMELINE = process.argv.includes('--hide-timeline');
 // --raf-hz=30: the screen refreshes only 30×/s (iPad Low Power Mode, or Safari's 30 Hz cap): frames are painted at
 // most that often, like the iPad Diagnostik that showed FPS 27.7 with a 41 fps decoder
 const RAF_HZ = Number(arg('raf-hz', 0));
+const NO_EXPORT = process.argv.includes('--no-export'); // playback only (faster A/B runs)
+const CPU = Number(arg('cpu', 0)); // --cpu=6: main thread that many times slower than the lab machine (overrides the profile)
 const OLD_CLOCK = process.argv.includes('--old-clock');
 const OLD_AUDIO = process.argv.includes('--old-audio'); // A/B: the media elements' own sound (before v1.7.3) // A/B: the wall clock that seeks lagging videos (before v1.7.1) // diagnosis: is a stutter caused by the timeline UI?
 const TOKEN = `tok-bench-${Date.now().toString(36)}-0123456789`;
@@ -70,7 +72,8 @@ const PROFILES = {
   ipad: { ctx: { ...devices['iPad Pro 11 landscape'], userAgent: undefined }, cpu: 2, dpr: true },
   phone: { ctx: { ...devices['Pixel 7'] }, cpu: 4, dpr: true },
 };
-const prof = PROFILES[PROFILE] || PROFILES.desktop;
+const prof = { ...(PROFILES[PROFILE] || PROFILES.desktop) };
+if (CPU > 0) prof.cpu = CPU;
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--enable-precise-memory-info'] });
 
 async function openEditor({ user = ADMIN, profile = prof } = {}) {
@@ -214,6 +217,9 @@ async function measurePlayback(page, secs, from = 0) {
     playback_speed_pct: S.playback_speed_pct?.avg ?? null,
     video_presented_fps: S.video_presented_fps?.avg ?? null,
     drift_seeks: snap.counters.drift_seek || 0,
+    video_rate_changes: snap.counters.video_rate_change || 0,
+    picture_behind_sound_p50_ms: S.picture_behind_sound_ms?.p50 ?? null,
+    picture_behind_sound_p95_ms: S.picture_behind_sound_ms?.p95 ?? null,
     buffer_causes: Object.fromEntries(Object.entries(snap.counters).filter(([k]) => /^(buffer_|stall_|play_rejected)/.test(k))),
     long_tasks: snap.counters.long_tasks_over_50ms || 0,
     preview_canvas: await page.evaluate(() => `${window.najja.engine.canvas.width}x${window.najja.engine.canvas.height}`),
@@ -405,7 +411,7 @@ await run('B0', async () => {
   const readyMs = await waitMediaReady(page);
   const s = (await snapshot(page)).series;
   const imp = { import_visible_p95_ms: s.import_visible_ms?.p95 ?? null, upload_ms: s.upload_ms?.max ?? null, upload_mbps: s.upload_mbps?.p50 ?? null, asset_ready_ms: s.asset_ready_ms?.max ?? null, until_steady_ms: Date.now() - t0, wait_after_upload_ms: readyMs };
-  return { import: imp, playback: await measurePlayback(page, 15), seek: await measureSeeks(page, 20), export: await measureExport(page) };
+  return { import: imp, playback: await measurePlayback(page, 15), seek: await measureSeeks(page, 20), export: NO_EXPORT ? null : await measureExport(page) };
 });
 
 let b1Project = null;
@@ -420,7 +426,7 @@ await run('B1', async () => {
   for (const c of P.clips.filter((c) => c.type === 'video')) await mcp('apply_filter', { clip_id: c.id, filter: 'vivid' });
   await waitMediaReady(page);
   b1Project = await page.evaluate(async () => (await import('/js/store.js')).store.P.id);
-  return { project: { clips: P.clips.length, duration: P.duration }, playback: await measurePlayback(page, 15), seek: await measureSeeks(page, 20), export: await measureExport(page) };
+  return { project: { clips: P.clips.length, duration: P.duration }, playback: await measurePlayback(page, 15), seek: await measureSeeks(page, 20), export: NO_EXPORT ? null : await measureExport(page) };
 });
 
 await run('B2', async () => {
@@ -439,7 +445,7 @@ await run('B2', async () => {
   await mcp('apply_transition', { clip_id: main[2].id, transition: 'slideLeft', duration: 0.8 });
   await mcp('update_clip', { clip_id: main[0].id, fade_in: 1, fade_out: 1 });
   await waitMediaReady(page);
-  return { project: { clips: P.clips.length + 2, duration: P.duration }, playback: await measurePlayback(page, 15), seek: await measureSeeks(page, 20), export: await measureExport(page) };
+  return { project: { clips: P.clips.length + 2, duration: P.duration }, playback: await measurePlayback(page, 15), seek: await measureSeeks(page, 20), export: NO_EXPORT ? null : await measureExport(page) };
 });
 
 await run('B3', async () => {

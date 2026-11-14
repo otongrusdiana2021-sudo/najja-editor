@@ -8,6 +8,7 @@ import { mediaRT } from './media.js';
 import { renderFrame } from './render.js';
 import { compilePlan } from './plan.js';
 import { blobOfUrl } from './util.js';
+import { aacConfig } from './aac.js';
 
 export class Unsupported extends Error {}
 const unsupported = (why) => new Unsupported(why);
@@ -224,70 +225,180 @@ export class ByteSource {
 }
 
 // ---------------------------------------------------------------------------------------------
-/** Sequential frame access for one clip (or a chain of split clips): the frame shown at a source time. */
+/**
+ * Sequential frame access for one clip (or a chain of split clips): the frame shown at a source time.
+ *
+ * Decoders do not all deliver frames the same way. Safari can emit a B-frame stream in decode order instead of
+ * presentation order, and holds frames back until more input arrives (or until a flush). Up to v1.8.0 this assumed in-order,
+ * prompt output: a "future" frame at the head of its queue made it return the previous picture again and again —
+ * exports from an iPad showed the video frozen for seconds (91% repeated pictures) while text and effects moved. Now:
+ *  - decoded frames are kept sorted by time;
+ *  - the frame for time t is final only once every sample presented at or before t has come out of the decoder
+ *    (the samples fed are tracked; a suffix minimum of presentation times says when no earlier one is still unfed);
+ *  - up to MAX_IN_FLIGHT samples are fed ahead, so a decoder that waits for more input gets it (no 40 ms naps);
+ *  - a decoder that still gives nothing out gets a bigger window (up to MAX_WINDOW). One that holds frames until a
+ *    flush is flushed, re-fed from the keyframe before (frames it already gave are dropped), and from then on flushed
+ *    at every keyframe the export needs a frame before ("careful" mode). A flush can only be followed by a keyframe;
+ *  - frames the decoder never returns are counted (lost), and so is every picture that is older than it should be
+ *    (stale): above STALE_LIMIT fastExport refuses to finish an export that would look frozen and falls back.
+ */
+const MAX_IN_FLIGHT = 10; // samples fed ahead at first
+const MAX_WINDOW = 48; // ... grown up to this for a decoder that holds many frames back
+const STUCK_MS = 250; // no frame out for this long while one is needed: feed further ahead
+const RESYNC_MS = 1000; // ... and with the biggest window, for this long: flush and re-feed (careful mode)
+const MAX_RESYNCS = 30; // a decoder that needs more than this cannot export here: fall back
+const STALE_LIMIT = 0.02; // more than 2% of the video frames late or lost: the export would look frozen, fall back
 class VideoSource {
-  constructor(src, track) {
+  constructor(src, track, stats = {}) {
     this.src = src;
     this.track = track;
-    this.queue = [];
-    this.cur = null;
+    this.buf = []; // decoded frames, sorted by timestamp
+    this.cur = null; // the frame shown now
+    this.pending = new Map(); // timestamp (µs) fed but not out yet -> sample index
     this.wake = null;
     this.error = null;
+    this.stats = stats; // shared by all sources of an export
+    for (const k of ['frames', 'stale', 'lost', 'waits', 'flushes', 'resyncs', 'window']) this.stats[k] ||= 0;
+    this.window = MAX_IN_FLIGHT;
+    this.careful = false; // flush at keyframes (the decoder holds frames until a flush)
+    this.resyncs = 0;
+    this.seen = new Set(); // timestamps that came out since the last restart (a re-feed gives some again)
+    this.lastOut = performance.now();
+    const S = track.samples;
+    this.ptsSorted = Float64Array.from(S.map((x) => x.pts)).sort();
+    // suffix minimum of presentation times in decode order: once next is fed, no unfed sample is earlier than this
+    this.suffixMin = new Float64Array(S.length + 1);
+    this.suffixMin[S.length] = Infinity;
+    for (let i = S.length - 1; i >= 0; i--) this.suffixMin[i] = Math.min(S[i].pts, this.suffixMin[i + 1]);
+    const span = S.length > 1 ? (this.ptsSorted[S.length - 1] - this.ptsSorted[0]) / (S.length - 1) : 1 / 30;
+    this.frameDur = span > 0 && span < 1 ? span : 1 / 30;
     this.dec = new VideoDecoder({
-      output: (f) => { this.queue.push(f); this.wake?.(); },
+      output: (f) => this.onFrame(f),
       error: (e) => { this.error = e; this.wake?.(); },
     });
     this.dec.addEventListener?.('dequeue', () => this.wake?.());
   }
-  static async open(src, track) {
+  static async open(src, track, stats) {
     const cfg = { codec: track.codec, description: track.description, codedWidth: track.width, codedHeight: track.height };
     const ok = await VideoDecoder.isConfigSupported(cfg).catch(() => ({ supported: false }));
     if (!ok.supported) throw unsupported(`decoder ${track.codec}`);
-    const s = new VideoSource(src, track);
+    const s = new VideoSource(src, track, stats);
     s.cfg = cfg;
     return s;
   }
+  onFrame(f) {
+    this.pending.delete(f.timestamp);
+    this.lastOut = performance.now();
+    // given before (a re-feed after a flush decodes part of a GOP again), or older than the picture shown: not needed
+    if (this.seen.has(f.timestamp) || (this.cur && f.timestamp <= this.cur.timestamp)) { f.close(); return; }
+    this.seen.add(f.timestamp);
+    let i = this.buf.length;
+    while (i > 0 && this.buf[i - 1].timestamp > f.timestamp) i--;
+    if (i > 0 && this.buf[i - 1].timestamp === f.timestamp) { f.close(); return; }
+    this.buf.splice(i, 0, f);
+    this.wake?.();
+  }
+  /** Index of the keyframe at or before sample index i (decode order). */
+  keyBefore(i) {
+    const S = this.track.samples;
+    while (i > 0 && !S[i].key) i--;
+    return i;
+  }
   restart(t) {
-    for (const f of this.queue) f.close();
-    this.queue = [];
+    for (const f of this.buf) f.close();
+    this.buf = [];
     this.cur?.close();
     this.cur = null;
+    this.pending.clear();
     if (this.dec.state === 'configured') this.dec.reset();
     this.dec.configure(this.cfg);
     const S = this.track.samples;
     let k = 0;
     for (let i = 0; i < S.length; i++) if (S[i].key && S[i].pts <= t + 1e-6) k = i;
     this.next = k;
+    this.from = k; // the keyframe decoding started at (fed without waiting)
     this.ended = false;
+    this.seen.clear();
+    this.lastOut = performance.now();
+  }
+  /** Ask for every frame the decoder holds. Whatever was fed and still did not come out is lost. */
+  async drain() {
+    await this.dec.flush().catch((e) => { this.error = this.error || e; });
+    this.stats.flushes++;
+    this.stats.lost += this.pending.size;
+    this.pending.clear();
+    this.lastOut = performance.now();
   }
   async feed(s) {
     const data = await this.src.read(s.offset, s.size); // the chunk copies the bytes
-    this.dec.decode(new EncodedVideoChunk({ type: s.key ? 'key' : 'delta', timestamp: Math.round(s.pts * 1e6), data }));
+    const ts = Math.round(s.pts * 1e6);
+    this.pending.set(ts, this.next);
+    this.dec.decode(new EncodedVideoChunk({ type: s.key ? 'key' : 'delta', timestamp: ts, data }));
   }
-  tick() { return new Promise((r) => { this.wake = r; setTimeout(r, 40); }); }
+  nap(ms) { return new Promise((r) => { this.wake = r; setTimeout(r, ms); }); }
+  /** Is there a sample presented after `a` and at or before `b` (seconds)? */
+  sampleBetween(a, b) {
+    const P = this.ptsSorted;
+    let lo = 0;
+    let hi = P.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (P[mid] <= a) lo = mid + 1; else hi = mid; }
+    return lo < P.length && P[lo] <= b;
+  }
   /** The decoded frame shown at source time t (seconds). Times must mostly move forward. */
   async frameAt(t) {
     const us = Math.round(t * 1e6);
-    if (this.lastUs == null || us < this.lastUs - 1000) this.restart(t);
+    // back in time, or far ahead (decoding up to there would take long): start again at the keyframe before t
+    if (this.lastUs == null || us < this.lastUs - 1000 || us > this.lastUs + 4e6) this.restart(t);
     this.lastUs = us;
     const S = this.track.samples;
+    const limit = us + (this.frameDur * 1e6) / 2;
     for (;;) {
       if (this.error) throw this.error;
-      while (this.queue.length && this.queue[0].timestamp <= us + 1000) { this.cur?.close(); this.cur = this.queue.shift(); }
-      // like a <video> element: before the first frame's time, the first frame is shown
-      if (this.queue.length || this.ended) return this.cur || this.queue[0] || null;
-      if (this.next < S.length) {
-        while (this.next < S.length && this.dec.decodeQueueSize < 6) await this.feed(S[this.next++]);
-        await this.tick();
-      } else {
-        await this.dec.flush();
-        this.ended = true;
+      while (this.buf.length && this.buf[0].timestamp <= limit) { this.cur?.close(); this.cur = this.buf.shift(); }
+      const unfed = this.suffixMin[this.next] * 1e6 <= limit; // a sample at or before t is not fed yet
+      let waiting = false; // ... or fed, and not out of the decoder yet
+      for (const ts of this.pending.keys()) if (ts <= limit) { waiting = true; break; }
+      if (!unfed && !waiting && (this.cur || this.buf.length || this.ended)) {
+        const f = this.cur || this.buf[0] || null;
+        this.stats.frames++;
+        // older than it should be while the file has a picture in between: a lost or late frame shows as frozen video
+        if (f && f.timestamp < limit - 2.5 * this.frameDur * 1e6 && this.sampleBetween(f.timestamp / 1e6 + 0.0005, limit / 1e6)) this.stats.stale++;
+        return f;
       }
+      const quiet = performance.now() - this.lastOut;
+      if (this.next < S.length) {
+        // careful mode: what we wait for must come out before the next GOP goes in, so the decoder can be flushed here
+        if (this.careful && waiting && !unfed && S[this.next].key && this.next > this.from) { await this.drain(); continue; }
+        if (this.pending.size < this.window && this.dec.decodeQueueSize < this.window) { await this.feed(S[this.next++]); continue; }
+      } else if (!this.ended) {
+        await this.drain();
+        this.ended = true;
+        continue;
+      }
+      if (quiet > STUCK_MS && this.window < MAX_WINDOW) {
+        // the decoder holds frames until it gets more input: feed further ahead (the quiet time keeps counting)
+        this.window = Math.min(MAX_WINDOW, this.window * 2);
+        this.stats.window = Math.max(this.stats.window, this.window);
+        continue;
+      }
+      if (quiet > RESYNC_MS && this.next < S.length) {
+        // it holds them until a flush: flush, then go on from the keyframe before the next sample (a flush must be
+        // followed by a keyframe); the frames it gives again are dropped. From now on flush at keyframes.
+        if (++this.resyncs > MAX_RESYNCS) throw unsupported('video decoder holds frames');
+        this.stats.resyncs++;
+        this.careful = true;
+        await this.drain();
+        this.next = this.keyBefore(this.next);
+        this.from = this.next;
+        continue;
+      }
+      this.stats.waits++;
+      await this.nap(20);
     }
   }
   close() {
-    for (const f of this.queue) f.close();
-    this.queue = [];
+    for (const f of this.buf) f.close();
+    this.buf = [];
     this.cur?.close();
     this.cur = null;
     try { this.dec.close(); } catch { /* already closed */ }
@@ -647,7 +758,7 @@ function audioStsd(a) {
     const dOps = box('dOps', u8(0, a.channels), be16(preSkip), be32(a.sampleRate), be16(0), u8(0));
     return full('stsd', 0, 0, be32(1), box('Opus', ...head, dOps));
   }
-  const asc = a.description?.length ? a.description : u8(0x11, 0x90); // AAC-LC, 48 kHz, stereo
+  const asc = aacConfig(a.description, a.sampleRate, a.channels);
   const desc = (tag, body) => cat([u8(tag, body.length), body]);
   const dsi = desc(0x05, asc);
   const dcd = desc(0x04, cat([u8(0x40, 0x15), u8(0, 0, 0), be32(192000), be32(192000), dsi]));
@@ -756,11 +867,19 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   // Audio first (fast): a failure here falls back before any video work.
   const mixed = await mixAudio(P, r0, r1, source, stats);
   const audio = mixed ? await encodeAudio(mixed) : null;
+  if (audio) {
+    const d = audio.description;
+    const from = audio.codec === 'opus' ? '' : !d?.length ? ' · tanpa deskripsi, dibuat' : d[0] === 0x03 || d[0] === 0x04 ? ' · ES_Descriptor (Safari) → ASC' : ' · ASC';
+    stats.audio_config = `${audio.codec} ${audio.sampleRate} Hz ${audio.channels} ch${from}`;
+  }
 
   const keys = engine.chainKeys(P);
   const groups = new Map();
   for (const c of vClips) { const k = keys.get(c.id) || c.id; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
   const sources = new Map(); // key -> VideoSource
+  const decStats = {}; // shared by every VideoSource: frames shown, stale, lost...
+  const decReport = () => Object.assign(stats, { video_frames: decStats.frames || 0, video_stale: decStats.stale || 0, video_lost: decStats.lost || 0,
+    decoder_flushes: decStats.flushes || 0, decoder_resyncs: decStats.resyncs || 0, decoder_window: decStats.window || MAX_IN_FLIGHT });
   const shown = new Map(); // key -> current VideoFrame
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -798,6 +917,8 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
     },
     error: (e) => { encError = e; },
   });
+  let encWake = null;
+  enc.addEventListener?.('dequeue', () => { encWake?.(); encWake = null; });
   enc.configure(cfg);
   const total = Math.max(1, Math.round((r1 - r0) * fps));
   const prof = { decode: 0, render: 0, frame: 0, encodeWait: 0 }; // ms per stage (shown in the console)
@@ -821,7 +942,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
           if (sources.has(k) && list.every((c) => t >= c.start + c.duration + 1)) { sources.get(k).close(); sources.delete(k); shown.delete(k); }
           continue;
         }
-        if (!sources.has(k)) sources.set(k, await VideoSource.open(new ByteSource((await source(clip.mediaId)).blob), tracks.get(clip.mediaId)));
+        if (!sources.has(k)) sources.set(k, await VideoSource.open(new ByteSource((await source(clip.mediaId)).blob), tracks.get(clip.mediaId), decStats));
         shown.set(k, await sources.get(k).frameAt(engine.localTime(clip, t)));
       }
       prof.decode += performance.now() - m; m = performance.now();
@@ -832,10 +953,24 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
       vf.close();
       prof.frame += performance.now() - m; m = performance.now();
       if (enc.encodeQueueSize > stats.encoder_queue_max) stats.encoder_queue_max = enc.encodeQueueSize;
-      while (enc.encodeQueueSize > 4) await new Promise((r) => setTimeout(r, 1));
-      if (i % 30 === 0) await spool.drain();
+      // (woken by the encoder as soon as it takes the next frame: a 1 ms timer is 4 ms or more in Safari)
+      while (enc.encodeQueueSize > 4 && !encError) await new Promise((r) => { encWake = r; setTimeout(r, 50); });
+      if (i % 30 === 0) {
+        await spool.drain();
+        // clearly broken already (twice the limit after 3 s of video): fall back now rather than at the end
+        const bad = Math.max(decStats.stale || 0, decStats.lost || 0);
+        if (decStats.frames >= 90 && bad > decStats.frames * STALE_LIMIT * 2) {
+          throw unsupported(`video decoder dropped frames (${decStats.stale} late, ${decStats.lost} lost of ${decStats.frames})`);
+        }
+      }
       prof.encodeWait += performance.now() - m;
       if (i % 5 === 0) onProgress?.(i / total);
+    }
+    // A decoder that lost frames, or gave them too late, makes video that stutters or freezes while effects and text
+    // move on. Do not save that: the caller falls back to the realtime export.
+    const bad = Math.max(decStats.stale || 0, decStats.lost || 0);
+    if (decStats.frames && bad > Math.max(2, decStats.frames * STALE_LIMIT)) {
+      throw unsupported(`video decoder dropped frames (${decStats.stale} late, ${decStats.lost} lost of ${decStats.frames})`);
     }
     stats.stage = 'encode';
     const tFlush = performance.now();
@@ -854,6 +989,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
     await spool.discard();
     throw err;
   } finally {
+    decReport();
     try { enc.close(); } catch { /* closed */ }
     for (const s of sources.values()) s.close();
     sourceCache.clear();
