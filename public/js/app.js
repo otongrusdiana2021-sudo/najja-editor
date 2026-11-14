@@ -20,9 +20,11 @@ import { exportVideo, exportState, cancelExport, supportedFormats, exportSize } 
 import { fastExportAvailable } from './fastexport.js';
 import { RESOLUTIONS, FPS_OPTIONS } from './presets.js';
 import { icon, LOGO } from './icons.js';
-import { toast, modal, contextMenu, confirmDialog } from './ui.js';
+import { toast, modal, contextMenu, confirmDialog, closeMenu } from './ui.js';
 import { escapeHtml, fmtDur, fmtBytes, downloadBlob, fmtTC, uid, clone } from './util.js';
 import { metrics } from './metrics.js';
+import { Home } from './home.js';
+import { AiTools } from './aitools.js';
 
 const $ = (s) => document.querySelector(s);
 document.documentElement.dataset.theme = 'dark';
@@ -32,7 +34,7 @@ document.documentElement.dataset.theme = 'dark';
 const topbar = $('#topbar');
 topbar.innerHTML = `
   <div class="tb-left">
-    <button class="icon-btn" data-tb="close" title="Proyek saya" aria-label="Tutup proyek">${icon('x', 22)}</button>
+    <button class="icon-btn" data-tb="close" title="Ke beranda" aria-label="Tutup proyek, ke beranda">${icon('x', 22)}</button>
     <div class="brand" title="Najja Editor">${LOGO}<span class="wordmark">NAJJA</span></div>
     <div class="proj"><input class="proj-name" aria-label="Nama proyek" spellcheck="false" maxlength="80"><span class="save-state" title="Status penyimpanan"></span></div>
   </div>
@@ -92,23 +94,24 @@ store.thumbProvider = () => {
   if (store.P.cover?.thumb) return store.P.cover.thumb;
   const src = player.canvas;
   if (!src.width) return undefined;
+  // (360 px: sharp enough for the home screen's project cards on a 2× tablet screen)
   const c = document.createElement('canvas');
-  c.width = 240;
-  c.height = Math.round((240 * src.height) / src.width);
+  c.width = 360;
+  c.height = Math.round((360 * src.height) / src.width);
   c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
-  return c.toDataURL('image/jpeg', 0.7);
+  return c.toDataURL('image/jpeg', 0.72);
 };
 
 topbar.addEventListener('click', (e) => {
   const b = e.target.closest('[data-tb]');
   if (!b) return;
   switch (b.dataset.tb) {
-    case 'close': projectsDialog(); break;
+    case 'close': goHome(); break;
     case 'menu': {
       const r = b.getBoundingClientRect();
       contextMenu(r.right - 240, r.bottom + 6, [
         { label: 'Proyek baru', icon: 'plus', run: () => newProjectDialog() },
-        { label: 'Proyek saya…', icon: 'folder', kbd: 'Ctrl+O', run: () => projectsDialog() },
+        { label: 'Beranda (proyek saya)', icon: 'folder', kbd: 'Ctrl+O', run: () => goHome() },
         { label: 'Tambah media…', icon: 'upload', kbd: 'Ctrl+I', run: () => openSheet('media', { mode: 'append' }) },
         { label: 'Pengaturan proyek', icon: 'settings', run: () => openSheet('project') },
         'sep',
@@ -295,7 +298,7 @@ window.addEventListener('keydown', (e) => {
   if (mod && k === 'v') { stop(); actions.paste(); return; }
   if (mod && k === 'e') { stop(); exportDialog(); return; }
   if (mod && k === 'i') { stop(); openSheet('media', { mode: 'append' }); return; }
-  if (mod && k === 'o') { stop(); projectsDialog(); return; }
+  if (mod && k === 'o') { stop(); goHome(); return; }
   if (mod && k === 'k') { stop(); searchDialog(); return; }
   if (mod && k === 's') { stop(); store.save().then(() => toast('Proyek tersimpan', { type: 'ok' })); return; }
   if (mod && (k === '=' || k === '+')) { stop(); timeline.setZoom(timeline.pps * 1.4); return; }
@@ -412,7 +415,7 @@ async function diagnosticsDialog() {
           ['Jaringan', d.connection ? `${d.connection.type || '?'} · ${d.connection.downlinkMbps ?? '?'} Mbps · RTT ${d.connection.rttMs ?? '?'} ms` : null],
         ])}</section>
         ${snap.jobs ? `<section><h4>Antrean server (akun ini)</h4>${snap.jobs.length ? `<div class="diag-jobs">${snap.jobs.slice(0, 8).map((j) => `<div class="diag-job">
-          <span><b>${{ edit: 'Salinan ringan', assets: 'Thumbnail & waveform', proxy: 'Salinan kualitas penuh' }[j.kind] || escapeHtml(j.kind)}</b> · ${escapeHtml(store.media(j.mediaId)?.name || j.mediaId || '')}<br>
+          <span><b>${{ edit: 'Salinan ringan', assets: 'Thumbnail & waveform', proxy: 'Salinan kualitas penuh', ai: 'Alat AI (hapus latar / upscale)' }[j.kind] || escapeHtml(j.kind)}</b> · ${escapeHtml(store.media(j.mediaId)?.name || j.mediaId || '')}<br>
           <span class="hint">${{ queued: j.retryAt ? 'menunggu coba lagi' : 'antre', running: `berjalan ${Math.round(j.progress * 100)}%`, succeeded: 'selesai', failed: 'gagal', cancelled: 'dibatalkan' }[j.state] || j.state}${j.attempts > 1 ? ` · percobaan ${j.attempts}/${j.maxAttempts}` : ''}${j.error && j.state !== 'succeeded' ? ` · ${escapeHtml(j.error)}` : ''}</span></span>
           ${['queued', 'running'].includes(j.state) ? `<button class="btn sm" data-job-cancel="${j.id}">Batalkan</button>` : ['failed', 'cancelled'].includes(j.state) ? `<button class="btn sm" data-job-retry="${j.id}">Ulangi</button>` : ''}
         </div>`).join('')}</div>` : '<p class="hint">Tidak ada pekerjaan server.</p>'}</section>` : ''}
@@ -459,6 +462,7 @@ async function createProject({ name = 'Proyek tanpa judul', aspect = '16:9' } = 
   store.setProject(newProject({ name, aspect }), { dirty: true });
   engine.seek(0);
   await store.save();
+  if (home.visible) leaveHome();
   timeline.fit();
 }
 
@@ -607,35 +611,87 @@ function newProjectDialog() {
   };
 }
 
-async function projectsDialog() {
+// ---- home screen (v1.8): the first screen; the editor shows one project at a time
+let placeholderId = null; // the empty project behind the home screen (never saved unless edited)
+const isPlaceholder = () => store.P?.id === placeholderId;
+/** An empty, unsaved project for the editor while no project is open (home screen at start, after deleting). */
+function setPlaceholder() {
+  const last = prefs.get('lastProject');
+  const P = newProject();
+  placeholderId = P.id;
+  store.setProject(P, { dirty: false });
+  if (last) prefs.set('lastProject', last); // (the project last opened on this device, for the AI fallback)
+}
+/** ?p=<id> in the address: a reload keeps you in the editor; without it the app starts on the home screen. */
+function setUrlProject(id) {
+  const u = new URL(location.href);
+  if (id) u.searchParams.set('p', id); else u.searchParams.delete('p');
+  if (u.href !== location.href) history.replaceState(null, '', u);
+}
+function leaveHome() {
+  home.hide();
+  setUrlProject(store.P.id);
+  player.layout();
+  requestAnimationFrame(() => timeline.fit());
+}
+async function goHome() {
+  engine.pause();
+  closeMenu();
   await store.save();
-  let list = [];
-  try { list = (await storage.listProjects()).sort((a, b) => b.updatedAt - a.updatedAt); } catch (err) { toast(`Gagal memuat daftar proyek: ${err.message}`, { type: 'error' }); }
-  const m = modal({
-    title: 'Proyek saya',
-    wide: true,
-    body: `<div class="proj-grid">
-      <button class="proj-card new" data-new>${icon('plus', 26)}<b>Proyek baru</b></button>
-      ${list.map((p) => `<div class="proj-card ${p.id === store.P.id ? 'current' : ''}" data-open="${p.id}">
-        <div class="pc-thumb" style="aspect-ratio:${p.width}/${p.height}">${p.thumb ? `<img src="${p.thumb}" alt="">` : icon('video', 22)}</div>
-        <div class="pc-meta"><b>${escapeHtml(p.name)}</b><span>${fmtDur(p.duration || 0)} · ${p.aspect} · ${new Date(p.updatedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span></div>
-        ${p.id === store.P.id ? '<em>Sedang dibuka</em>' : `<button class="pc-del" data-delp="${p.id}" title="Hapus proyek">${icon('trash', 14)}</button>`}
-      </div>`).join('')}</div>`,
+  setUrlProject(null);
+  await home.show();
+}
+async function enterProject(id) {
+  if (store.P?.id !== id || isPlaceholder()) await openProject(id);
+  if (store.P?.id === id) leaveHome();
+}
+const aiTools = new AiTools({ enabled: () => storage.server, addToProject: (file) => addFileToProject(file) });
+const home = new Home($('#home'), {
+  open: (id) => enterProject(id),
+  create: () => newProjectDialog(),
+  currentId: () => (isPlaceholder() ? null : store.P?.id),
+  tools: aiTools,
+  onDeleted: async (id) => { if (store.P?.id === id) setPlaceholder(); },
+  onRenamed: async (id, name) => {
+    if (store.P?.id !== id) return;
+    store.mutate('Ganti nama', (P) => { P.name = name; });
+    await store.save();
+  },
+});
+
+/** Pick a project (or a new one). Resolves its id, 'new', or null. */
+function chooseProject(title) {
+  return new Promise((resolve) => {
+    let answered = false;
+    const m = modal({ title, wide: true, body: '<div class="proj-grid"><p class="hint">Memuat proyek…</p></div>', onClose: () => { if (!answered) resolve(null); } });
+    m.el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-pick]');
+      if (!b) return;
+      answered = true;
+      m.close();
+      resolve(b.dataset.pick);
+    });
+    storage.listProjects().catch(() => []).then((all) => {
+      const list = all.sort((a, b) => b.updatedAt - a.updatedAt);
+      m.el.querySelector('.proj-grid').innerHTML = `<button class="proj-card new" data-pick="new">${icon('plus', 26)}<b>Proyek baru</b></button>
+        ${list.map((p) => `<button class="proj-card" data-pick="${escapeHtml(p.id)}">
+          <div class="pc-thumb" style="aspect-ratio:${p.width}/${p.height}">${p.thumb ? `<img src="${p.thumb}" alt="">` : icon('video', 22)}</div>
+          <div class="pc-meta"><b>${escapeHtml(p.name)}</b><span>${fmtDur(p.duration || 0)} · ${p.aspect} · ${new Date(p.updatedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span></div>
+        </button>`).join('')}`;
+    });
   });
-  m.el.addEventListener('click', async (e) => {
-    const del = e.target.closest('[data-delp]');
-    if (del) {
-      e.stopPropagation();
-      if (await confirmDialog('Hapus proyek?', `Proyek ini akan dihapus permanen dari ${storage.server ? 'server' : 'browser'}.`, 'Hapus', true)) {
-        await storage.deleteProject(del.dataset.delp);
-        del.closest('.proj-card').remove();
-      }
-      return;
-    }
-    if (e.target.closest('[data-new]')) { m.close(); newProjectDialog(); return; }
-    const card = e.target.closest('[data-open]');
-    if (card && card.dataset.open !== store.P.id) { m.close(); openProject(card.dataset.open); }
-  });
+}
+/** An AI result (cutout, upscaled photo) into a project's media library; the editor opens that project. */
+async function addFileToProject(file) {
+  const id = await chooseProject('Tambahkan ke proyek');
+  if (!id) return false;
+  if (id === 'new') await createProject({ name: file.name.replace(/\.[^.]+$/, '').slice(0, 60) || 'Proyek tanpa judul', aspect: '9:16' });
+  else await enterProject(id);
+  if (isPlaceholder()) return false;
+  await importFile(file);
+  openSheet('media');
+  toast('Gambar ditambahkan ke media proyek', { type: 'ok' });
+  return true;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -767,8 +823,24 @@ const AI_LABEL = {
   delete_clip: 'menghapus klip', move_clip: 'memindah klip', duplicate_clip: 'menduplikat klip', import_media: 'mengimpor media', new_project: 'membuat proyek baru',
   set_project: 'mengubah pengaturan proyek', history: 'urungkan/ulangi', export_video: 'mulai ekspor',
 };
+/**
+ * Before an AI (MCP) tool runs: show the editor, with a real project — the one last opened on this device, else the
+ * newest, else a new one (not the empty placeholder behind the home screen).
+ */
+async function editorForAI(tool) {
+  if (tool === 'new_project') return; // creates its own project and leaves the home screen
+  if (isPlaceholder()) {
+    let id = prefs.get('lastProject');
+    const list = await storage.listProjects().catch(() => []);
+    if (!list.some((p) => p.id === id)) id = list.sort((a, b) => b.updatedAt - a.updatedAt)[0]?.id || null;
+    if (id) await openProject(id);
+    if (isPlaceholder()) await createProject();
+  }
+  if (home.visible) leaveHome();
+}
+const toolsForMcp = Object.fromEntries(Object.entries(tools).map(([name, fn]) => [name, async (args) => { await editorForAI(name); return fn(args); }]));
 bridge.start({
-  tools,
+  tools: toolsForMcp,
   onDone: (tool) => {
     const label = AI_LABEL[tool];
     if (label) toast(`AI ${label}`, { type: 'ai', timeout: 1800 });
@@ -785,27 +857,23 @@ bridge.start({
 (async function boot() {
   await storage.init();
   if (storage.status?.auth) account.init(topbar.querySelector('.avatar-btn'));
-  let lastId = prefs.get('lastProject');
+  // The app starts on the home screen; ?p=<id> (a reload while editing) goes straight to that project.
+  const want = new URLSearchParams(location.search).get('p');
   let loaded = false;
-  if (storage.server) {
-    const list = await storage.listProjects().catch(() => []);
-    if (!list.some((p) => p.id === lastId)) lastId = list[0]?.id || null;
-  }
-  if (lastId) {
-    const rec = await storage.getProject(lastId);
+  if (want) {
+    const rec = await storage.getProject(want);
     if (rec) {
       await loadProject(rec);
       loaded = true;
     }
   }
-  if (!loaded) {
-    store.setProject(newProject(), { dirty: true });
-    store.save();
-  }
+  if (!loaded) setPlaceholder();
   if (storage.server) setInterval(pollRevision, storage.status?.features?.syncPollMs || 1000);
   syncName();
   player.layout();
   requestAnimationFrame(() => timeline.fit());
+  if (loaded) setUrlProject(store.P.id);
+  else await home.show();
   document.body.classList.add('ready');
 }());
 

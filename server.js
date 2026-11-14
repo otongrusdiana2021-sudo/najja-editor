@@ -20,6 +20,7 @@ import { createAuth } from './lib/auth.js';
 import { createTenancy, LOCAL_OWNER } from './lib/tenancy.js';
 import { createProxyManager, capabilities as mediaTools } from './lib/media-proxy.js';
 import { createJobs } from './lib/jobs.js';
+import { createAi } from './lib/ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -72,6 +73,11 @@ const proxies = createProxyManager({
   mediaDir: storage.mediaDir, mediaFile: (id) => storage.mediaFile(id), log: (...a) => log(...a), jobs,
   ownerOf: async (id) => (await storage.getMeta(id).catch(() => null))?.ownerId || null, // job owner = media owner
 });
+
+// AI tools of the home screen (background removal, upscaling): a separate Python service, jobs in the shared queue.
+const ai = createAi({ dataDir: DATA_DIR, jobs, log: (...a) => log(...a) });
+process.on('exit', () => ai.stop());
+for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { ai.stop(); process.exit(0); });
 
 // Data ownership: every project/media/upload/export belongs to a user id (see lib/tenancy.js).
 // The primary owner (first admin, or "local" without accounts) owns data from before v1.7 and the server token.
@@ -789,6 +795,23 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       if (!job || !ownJob(job)) return sendJson(res, 404, { error: 'Job not found' });
       const out = m[2] === 'cancel' ? await jobs.cancel(job.id) : await jobs.retry(job.id);
       return sendJson(res, 200, jobs.publicJob(out));
+    }
+    // ---- AI tools (home screen): background removal, upscaling. Each request belongs to its account.
+    const ownAi = (meta) => tenancy.owns(meta, who);
+    if (p === '/api/ai' && req.method === 'GET') return sendJson(res, 200, await ai.status());
+    if ((m = /^\/api\/ai\/(cutout|upscale)$/.exec(p)) && req.method === 'POST') {
+      const image = await readBody(req, 40 * 1024 * 1024);
+      const rec = await ai.create({ owner: who.id, tool: m[1], image, mime: req.headers['content-type'], scale: url.searchParams.get('scale'), name: url.searchParams.get('name') || '' });
+      return sendJson(res, 200, rec);
+    }
+    if ((m = /^\/api\/ai\/(ai_[0-9a-f]{16})$/.exec(p))) {
+      if (req.method === 'GET') { const r = await ai.get(m[1], ownAi); return r ? sendJson(res, 200, r) : sendJson(res, 404, { error: 'Not found' }); }
+      if (req.method === 'DELETE') return (await ai.remove(m[1], ownAi)) ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'Not found' });
+    }
+    if ((m = /^\/api\/ai\/(ai_[0-9a-f]{16})\/(input|result)$/.exec(p)) && req.method === 'GET') {
+      const f = await ai.file(m[1], m[2], ownAi);
+      if (!f) return sendJson(res, 404, { error: 'Not found' });
+      return sendFile(req, res, f, { 'Cache-Control': 'private, max-age=86400' });
     }
     if (p === '/api/projects' && req.method === 'GET') {
       const list = (await storage.listProjects()).filter((x) => tenancy.owns(x, who)).map(({ ownerId, ...x }) => x);

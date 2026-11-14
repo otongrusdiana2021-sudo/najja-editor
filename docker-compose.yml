@@ -15,10 +15,36 @@ services:
     environment:
       NAJJA_TOKEN: ${NAJJA_TOKEN:?Isi NAJJA_TOKEN di file .env}
       NAJJA_PUBLIC_URL: https://${DOMAIN:?Isi DOMAIN di file .env}
+      NAJJA_AI_URL: http://ai:8099
+      NAJJA_AI_TOKEN: ${NAJJA_TOKEN}
     volumes:
       - najja-data:/data
     expose:
       - "3333"
+
+  # Alat AI di layar awal (hapus latar belakang, upscale gambar). Container terpisah: kalau model kehabisan memori,
+  # editor tidak ikut berhenti. Batas memori dipilih installer dari RAM VPS (NAJJA_AI_MEM di .env):
+  # ≥ 2560m → BiRefNet (kualitas tinggi), lebih kecil → IS-Net (ringan).
+  ai:
+    build:
+      context: .
+      dockerfile: Dockerfile.ai
+    restart: unless-stopped
+    mem_limit: ${NAJJA_AI_MEM:-1280m}
+    cpus: ${NAJJA_AI_CPUS:-1.0}
+    depends_on:
+      - najja
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      NAJJA_AI_TOKEN: ${NAJJA_TOKEN}
+    volumes:
+      - najja-data:/data
+    expose:
+      - "8099"
 
   caddy:
     image: caddy:2

@@ -5,3 +5,5 @@ test
 .git
 *.zip
 .env
+bench
+**/__pycache__

@@ -45,7 +45,18 @@ async function device(name) {
   await page.fill('#email', USER.email);
   await page.fill('#password', USER.password);
   await Promise.all([page.waitForNavigation(), page.click('button[type=submit]')]);
-  return { ctx, page, errors, open: async (p = page) => { await p.goto(`${BASE}/?debug`); await p.waitForSelector('body.ready'); } };
+  // The app starts on the home screen (v1.8): open a project by its link (?p=), or make a new one there.
+  const open = async (p = page, id = null) => {
+    await p.goto(`${BASE}/?debug${id ? `&p=${id}` : ''}`);
+    await p.waitForSelector('body.ready');
+    if (await p.evaluate(() => !document.getElementById('home').hidden)) {
+      await p.click('[data-new]');
+      await p.click('.modal [data-go]');
+      await p.waitForFunction(() => document.getElementById('home').hidden);
+      await p.keyboard.press('Escape'); // the media sheet a new project opens with
+    }
+  };
+  return { ctx, page, errors, open };
 }
 const S = (page, fn, arg) => page.evaluate(async ([src, a]) => { const { store } = await import('/js/store.js'); return (0, eval)(src)(store, a); }, [fn.toString(), arg]);
 const until = async (fn, ms = 8000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return Date.now() - t; await wait(50); } return null; };
@@ -58,7 +69,7 @@ try {
   const id = await S(A.page, (store) => store.P.id);
   await until(() => S(A.page, (store) => store.saveState === 'saved' && !store.dirty));
   const B = await device('B');
-  await B.open();
+  await B.open(B.page, id);
   check((await S(B.page, (store) => store.P.id)) === id, 'B membuka proyek yang sama');
 
   step('perubahan di A muncul di B');
@@ -112,7 +123,7 @@ try {
   await wait(900); // the draft is written to IndexedDB (debounced 0.4 s); the save fails
   await A.page.close({ runBeforeUnload: false });
   const A2 = await A.ctx.newPage();
-  await A.open(A2);
+  await A.open(A2, id);
   check((await S(A2, (store) => store.P.name)) === 'Belum tersimpan', 'perubahan dipulihkan dari draf perangkat');
   await until(() => S(A2, (store) => !store.dirty && store.saveState === 'saved'), 8000);
   const after = await serverProject(A2, id);

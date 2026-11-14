@@ -6,6 +6,14 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Beranda & alat AI** (v1.8, lihat [docs/AI-TOOLS.md](docs/AI-TOOLS.md))
+- Najja dibuka di beranda bergaya tablet:
+  - kartu besar **Proyek baru**;
+  - grid proyek (thumbnail, ukuran | durasi, menu ⋮: buka, ganti nama, duplikat, hapus);
+  - cari, urutkan, dan hapus beberapa proyek sekaligus.
+- **Hapus latar belakang** dan **Upscale gambar** (2×/4×) untuk thumbnail. Diproses di server sendiri: BiRefNet/IS-Net dan Real-ESRGAN, model terbuka berlisensi MIT/BSD.
+- Hasilnya bisa disimpan ke Foto (menu Bagikan iPad) atau dimasukkan ke media proyek.
+
 **Tata letak ramah iPad** (juga jalan di laptop dan HP)
 - Atas: tutup proyek, logo NAJJA, nama proyek, cari fitur, AI · MCP, pilihan resolusi (`1080p ▾`), dan tombol **Ekspor** yang langsung merender.
 - Tengah: pratinjau besar, lalu baris kontrol: layar penuh · putar · keyframe · urungkan · ulangi.
@@ -200,6 +208,9 @@ mcp/               Protokol MCP dan definisi tool
 public/
   index.html, css/app.css
   js/app.js        Kerangka aplikasi (topbar, pintasan, cari fitur, ekspor, proyek)
+  js/home.js       Beranda: proyek baru, alat AI, grid proyek (cari, urutkan, ganti nama, duplikat, hapus)
+  js/aitools.js    Panel alat AI: pilih foto, progres, sebelum/sesudah, simpan / tambah ke proyek
+  css/home.css     Gaya beranda dan panel alat AI
   js/engine.js     Jam pemutaran, sinkronisasi media, mixer Web Audio
   js/audio.js      Suara pratinjau terjadwal di jam audio (decode per blok, sampel-akurat)
   js/render.js     Compositor kanvas: animasi, filter, lapisan penyesuaian, transisi, efek, teks, chroma key
@@ -215,7 +226,10 @@ public/
   js/devicecache.js  Salinan video permanen di perangkat (OPFS, 5 GB, LRU, bisa dilanjutkan)
   js/fastexport.js   Ekspor MP4 cepat (WebCodecs: demux, decode, encode, mux)
 lib/               Penyimpanan server, akun login, salinan pratinjau 720p / H.264 1080p / thumbnail / waveform (ffmpeg)
-Dockerfile, docker-compose.yml, deploy/   Deploy VPS (Docker + Caddy, atau systemd)
+lib/ai.js          Permintaan alat AI (job "ai", kepemilikan, pembersihan) → layanan AI
+ai/                Layanan AI (Python + onnxruntime): hapus latar, upscale; models.json = model terkunci + sha256
+Dockerfile, Dockerfile.ai, docker-compose.yml, deploy/   Deploy VPS (Docker + Caddy, atau systemd); container "ai" terpisah
+docs/AI-TOOLS.md          Beranda dan alat AI: cara kerja, memori, deploy, lisensi model
 docs/DEPLOY.md            Panduan deploy
 docs/capcut-analysis.md   Hasil analisis CapCut Web (REA) yang memandu desain
 test/              npm test

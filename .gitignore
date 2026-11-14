@@ -5,3 +5,4 @@ data/
 .env
 bench/.fixtures/
 bench/results/*.tmp
+__pycache__/

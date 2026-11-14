@@ -85,6 +85,7 @@ const P = {
   toOverlay: '<rect x="3" y="3" width="18" height="6" rx="2"/><rect x="3" y="15" width="18" height="6" rx="2"/><path d="M12 9.5v4"/><path d="m10 12 2 2 2-2"/>',
   toMain: '<rect x="3" y="3" width="18" height="6" rx="2"/><rect x="3" y="15" width="18" height="6" rx="2"/><path d="M12 14.5v-4"/><path d="m10 12 2-2 2 2"/>',
   retouch: '<circle cx="12" cy="12" r="8.5"/><path d="M9 10h.01M15 10h.01"/><path d="M9 14.5c1.6 1.3 4.4 1.3 6 0"/><path d="M18.5 2.5l.5 1.2 1.2.5-1.2.5-.5 1.2-.5-1.2-1.2-.5 1.2-.5z"/>',
+  upscale: '<rect x="3" y="11" width="10" height="10" rx="2"/><path d="M14 3h7v7"/><path d="M21 3l-7.5 7.5"/><path d="M17.5 14.5l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7z"/>',
   bgRemove: '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="9.5" r="3"/><path d="M6.5 19c.8-3 2.9-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/>',
   lips: '<path d="M3 12c3-4 5.5-4.6 9-2.6 3.5-2 6-1.4 9 2.6-3 4.5-6 6-9 6s-6-1.5-9-6z"/><path d="M3 12h18"/>',
   motion: '<circle cx="14" cy="4.5" r="2"/><path d="M8 21l3-6 3 2v5"/><path d="M6 11l4.5-3.5 4 2 3.5 3"/>',

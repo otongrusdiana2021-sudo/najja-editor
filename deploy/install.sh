@@ -7,6 +7,7 @@
 # Cek dulu tanpa mengubah apa pun:  ... | sudo bash -s editor.domainkamu.com --cek
 # Ganti token server (MCP):         ... | sudo bash -s editor.domainkamu.com --token-baru
 # Lupa password (hapus akun saja):  ... | sudo bash -s editor.domainkamu.com --reset-login
+# Tanpa alat AI (hapus latar/upscale): ... | sudo bash -s editor.domainkamu.com --tanpa-ai
 #
 # Yang dilakukan: pasang Docker (jika belum), buat token login, jalankan Najja.
 # Port 80/443 kosong → Najja + Caddy (HTTPS otomatis).
@@ -22,12 +23,14 @@ main() {
 CHECK=0
 NEW_TOKEN=0
 RESET_LOGIN=0
+NO_AI=0
 DOMAIN="${DOMAIN:-}"
 for arg in "$@"; do
   case "$arg" in
     --cek|--check|--dry-run) CHECK=1 ;;
     --token-baru|--new-token) NEW_TOKEN=1 ;;
     --reset-login) RESET_LOGIN=1 ;;
+    --tanpa-ai|--no-ai) NO_AI=1 ;;
     -*) ;;
     *) DOMAIN="$arg" ;;
   esac
@@ -65,6 +68,18 @@ detect() {
   [ -d /usr/local/CyberCP ] && PANEL=cyberpanel
   return 0
 }
+# Alat AI (container "ai"): batas memori & CPU dari ukuran VPS. BiRefNet (hapus latar kualitas tinggi) butuh
+# ±2,4 GB sesaat; VPS kecil memakai IS-Net (±0,9 GB). Nilai yang sudah ada di .env tidak diubah.
+ai_limits() {
+  local mem_mb cores
+  mem_mb="$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)"
+  cores="$(nproc 2>/dev/null || echo 1)"
+  AI_MEM="${OLD_AI_MEM:-}"; AI_CPUS="${OLD_AI_CPUS:-}"
+  [ -n "$AI_MEM" ] || { if [ "${mem_mb:-0}" -ge 6000 ]; then AI_MEM=2560m; else AI_MEM=1280m; fi; }
+  [ -n "$AI_CPUS" ] || { if [ "${cores:-1}" -ge 4 ]; then AI_CPUS=2.0; else AI_CPUS=1.0; fi; }
+  AI_MEM_MB="$(printf '%s' "$AI_MEM" | awk '/[gG]$/ {print int($0 * 1024); next} /[mM]$/ {print int($0); next} {print 0}')"
+  if [ "${AI_MEM_MB:-0}" -ge 2400 ]; then AI_QUALITY="BiRefNet (kualitas tinggi)"; else AI_QUALITY="IS-Net (ringan; RAM VPS < 6 GB)"; fi
+}
 free_port() {
   local p="${1:-3333}"
   while ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${p}\$"; do p=$((p + 1)); done
@@ -90,7 +105,15 @@ if [ "$CHECK" = 1 ]; then
   if [ -z "$DNS_IP" ]; then warn "DNS          : $DOMAIN belum punya A record"
   elif [[ "$LOCAL_IPS" != *" $DNS_IP "* ]]; then warn "DNS          : $DOMAIN → $DNS_IP, IP VPS ini:$LOCAL_IPS"
   else info "DNS          : OK ($DOMAIN → $DNS_IP)"; fi
-  info "Akan dibuat  : folder $INSTALL_DIR + container Docker 'najja' (maks. RAM 512 MB)"
+  info "Akan dibuat  : folder $INSTALL_DIR + container Docker 'najja' (maks. RAM 768 MB)"
+  if [ "$NO_AI" = 1 ]; then info "Alat AI      : tidak dipasang (--tanpa-ai)"
+  else
+    OLD_AI_MEM=""; OLD_AI_CPUS=""
+    [ -f "$INSTALL_DIR/.env" ] && OLD_AI_MEM="$(sed -n 's/^NAJJA_AI_MEM=//p' "$INSTALL_DIR/.env" | head -1)"
+    [ -f "$INSTALL_DIR/.env" ] && OLD_AI_CPUS="$(sed -n 's/^NAJJA_AI_CPUS=//p' "$INSTALL_DIR/.env" | head -1)"
+    ai_limits
+    info "Alat AI      : container 'ai' (maks. RAM $AI_MEM, CPU $AI_CPUS) — hapus latar: $AI_QUALITY; model ±200 MB diunduh sekali"
+  fi
   bold "Kalau sudah oke, jalankan perintah yang sama tanpa --cek."
   exit 0
 fi
@@ -168,8 +191,12 @@ fi
 # 6. Konfigurasi (.env) — token lama dipertahankan saat install ulang
 TOKEN=""
 OLD_LPORT=""
+OLD_AI_MEM=""
+OLD_AI_CPUS=""
 [ -f .env ] && TOKEN="$(sed -n 's/^NAJJA_TOKEN=//p' .env | head -1)"
 [ -f .env ] && OLD_LPORT="$(sed -n 's/^NAJJA_LOCAL_PORT=//p' .env | head -1)"
+[ -f .env ] && OLD_AI_MEM="$(sed -n 's/^NAJJA_AI_MEM=//p' .env | head -1)"
+[ -f .env ] && OLD_AI_CPUS="$(sed -n 's/^NAJJA_AI_CPUS=//p' .env | head -1)"
 if [ -z "$TOKEN" ] || [ "$NEW_TOKEN" = 1 ]; then
   TOKEN="$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   if [ "$NEW_TOKEN" = 1 ]; then info "Token server BARU dibuat — token lama tidak berlaku lagi untuk MCP/Claude Code"
@@ -178,6 +205,8 @@ fi
 umask 077
 printf 'DOMAIN=%s\nNAJJA_TOKEN=%s\n' "$DOMAIN" "$TOKEN" > .env
 [ -n "$OLD_LPORT" ] && printf 'NAJJA_LOCAL_PORT=%s\n' "$OLD_LPORT" >> .env
+ai_limits
+printf 'NAJJA_AI_MEM=%s\nNAJJA_AI_CPUS=%s\n' "$AI_MEM" "$AI_CPUS" >> .env
 umask 022
 
 # 7. Jalankan
@@ -188,9 +217,10 @@ pull_mirror() {
 }
 info "Membangun dan menjalankan container (1–3 menit)…"
 if [ "$MODE" = caddy ]; then
-  if ! docker compose up -d --build --force-recreate; then
+  COMPOSE=(docker compose)
+  if ! "${COMPOSE[@]}" up -d --build --force-recreate najja caddy; then
     pull_mirror node:22-alpine caddy:2
-    docker compose up -d --build --force-recreate || die "Gagal menjalankan container. Cek pesan di atas."
+    "${COMPOSE[@]}" up -d --build --force-recreate najja caddy || die "Gagal menjalankan container. Cek pesan di atas."
   fi
 else
   docker compose down --remove-orphans >/dev/null 2>&1 || true
@@ -212,6 +242,19 @@ else
     "${COMPOSE[@]}" up -d --build --force-recreate najja || die "Gagal menjalankan container. Cek pesan di atas."
   fi
   info "Najja berjalan di http://127.0.0.1:$LPORT (hanya lokal)"
+fi
+
+# 7a'. Alat AI (container terpisah). Gagal di sini tidak menghentikan editor: alatnya tampil "belum tersedia".
+AI_OK=0
+if [ "$NO_AI" = 1 ]; then
+  "${COMPOSE[@]}" rm -sf ai >/dev/null 2>&1 || true
+else
+  info "Menyiapkan alat AI (hapus latar, upscale): container 'ai', maks. RAM $AI_MEM, CPU $AI_CPUS…"
+  if "${COMPOSE[@]}" up -d --build ai || { pull_mirror python:3.12-slim; "${COMPOSE[@]}" up -d --build ai; }; then
+    AI_OK=1
+  else
+    warn "Alat AI belum aktif (gagal membangun container 'ai'). Editor tetap berjalan; jalankan installer lagi nanti."
+  fi
 fi
 
 # 7a. Pastikan versi yang BERJALAN sama dengan kode yang baru diunduh
@@ -239,6 +282,21 @@ if [ "$MODE" = proxy ]; then
     info "Port lokal 127.0.0.1:$LPORT merespons versi $EXPECTED_VERSION ✓"
   else
     warn "Port lokal 127.0.0.1:$LPORT belum merespons versi $EXPECTED_VERSION"
+  fi
+fi
+
+if [ "$AI_OK" = 1 ]; then
+  AI_HEALTH=""
+  for _ in $(seq 1 20); do
+    AI_HEALTH="$("${COMPOSE[@]}" exec -T ai python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8099/health',timeout=3).read().decode())" 2>/dev/null || true)"
+    [ -n "$AI_HEALTH" ] && break
+    sleep 1
+  done
+  if printf '%s' "$AI_HEALTH" | grep -q '"ok": true'; then
+    info "Alat AI aktif ✓ — hapus latar: $AI_QUALITY"
+    printf '%s' "$AI_HEALTH" | grep -q '"downloading"\|"missing"' && info "Model AI sedang diunduh di latar belakang (±200 MB, sekali saja)."
+  else
+    warn "Container AI berjalan tapi belum menjawab. Cek: cd $APP_DIR && docker compose logs ai"
   fi
 fi
 
@@ -315,6 +373,9 @@ echo "  Editor     : https://$DOMAIN"
 echo "  Login      : email + password (buat akun admin saat pertama kali membuka editor)"
 echo "  Token server (untuk akun pertama & MCP): $TOKEN"
 echo "  MCP        : https://$DOMAIN/mcp"
+if [ "$NO_AI" = 1 ]; then echo "  Alat AI    : tidak dipasang (--tanpa-ai)"
+elif [ "$AI_OK" = 1 ]; then echo "  Alat AI    : aktif — hapus latar $AI_QUALITY, upscale Real-ESRGAN (RAM maks. $AI_MEM, CPU $AI_CPUS)"
+else echo "  Alat AI    : belum aktif (jalankan installer lagi)"; fi
 echo
 echo "  Claude Code:"
 echo "    claude mcp add --transport http najja-editor https://$DOMAIN/mcp --header \"Authorization: Bearer $TOKEN\""

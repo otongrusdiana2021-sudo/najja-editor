@@ -1,0 +1,18 @@
+# Najja AI service (v1.8): background removal and upscaling for the home screen tools, with onnxruntime on the CPU.
+# Its own container so that a model running out of memory never takes the editor down. The models (~200 MB) are
+# fetched at the first start into the data volume (/data/models), pinned by sha256 in ai/models.json.
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN pip install --no-cache-dir onnxruntime==1.29.0 numpy==2.5.3 pillow==12.3.0
+WORKDIR /app
+COPY ai/server.py ai/models.json ./ai/
+# same user id as the editor container (node = 1000): both read and write /data
+RUN mkdir -p /data/ai /data/models && chown -R 1000:1000 /data
+ENV NAJJA_DATA_DIR=/data \
+    NAJJA_AI_HOST=0.0.0.0 \
+    NAJJA_AI_PORT=8099
+VOLUME /data
+EXPOSE 8099
+USER 1000:1000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8099/health', timeout=4)" || exit 1
+CMD ["python", "ai/server.py"]

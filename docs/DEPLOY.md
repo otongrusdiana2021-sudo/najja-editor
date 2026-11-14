@@ -174,6 +174,8 @@ Semua data ada **di VPS kamu**, tidak di layanan luar (tidak memakai Supabase at
 | Akun & token AI (hanya hash) | `/data/users.json` |
 | Cadangan otomatis sebelum migrasi | `/data/backups/` |
 | Antrean pekerjaan media (konversi, thumbnail) | `/data/jobs/*.json` (satu file kecil per job; yang selesai dihapus setelah 7 hari) |
+| Alat AI: foto & hasil (per akun) | `/data/ai/<id>/` (dihapus otomatis setelah 3 hari) |
+| Model AI (±200 MB, sekali unduh) | `/data/models/` |
 
 ### Proyek dibuka di beberapa perangkat
 
@@ -182,6 +184,18 @@ Setiap simpan menaikkan **revisi** proyek di server. Editor yang terbuka mengece
 - **Tidak ada perubahan lokal:** versi dari perangkat lain langsung dimuat (posisi playhead dipertahankan).
 - **Dua perangkat mengubah proyek yang sama:** server menolak simpan yang berbasis versi lama (HTTP 409), lalu editor menanyakan *muat versi terbaru* / *simpan versiku sebagai salinan* / *timpa dengan versiku*.
 - **Perubahan yang belum terkirim** (tab tertutup, koneksi putus) disimpan sebagai draf di browser (IndexedDB) dan dipulihkan saat proyek dibuka lagi.
+
+### Alat AI (container `ai`)
+
+Hapus latar belakang dan upscale di beranda dijalankan oleh container terpisah `ai` (Python + onnxruntime, `Dockerfile.ai`). Rinciannya ada di [AI-TOOLS.md](AI-TOOLS.md).
+
+- **Batas RAM/CPU** dipilih installer dari ukuran VPS dan disimpan di `.env`: `NAJJA_AI_MEM`, `NAJJA_AI_CPUS`.
+  - VPS ≥ 6 GB RAM: 2560m (BiRefNet, kualitas tinggi).
+  - VPS lebih kecil: 1280m (IS-Net, ringan).
+  - Batas ini hanya terpakai sesaat saat alat dijalankan. Situs lain di VPS tidak terganggu, dan kalau AI kehabisan memori hanya container `ai` yang dimulai ulang.
+- **Model** diunduh sekali saat container pertama kali jalan (±200 MB, dari Hugging Face dan Qualcomm AI Hub, dicek sha256).
+- **Tanpa AI:** `... | sudo bash -s editor.domainkamu.com --tanpa-ai`.
+- **Log:** `cd /opt/najja-editor && docker compose logs ai`.
 
 ### Antrean pekerjaan media
 

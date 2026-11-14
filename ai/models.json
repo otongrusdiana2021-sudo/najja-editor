@@ -1,0 +1,36 @@
+{
+  "cutout": {
+    "title": "Hapus latar · kualitas tinggi",
+    "file": "birefnet-lite-512.onnx",
+    "url": "https://huggingface.co/studioludens/birefnet-lite-512/resolve/962e67969ec6acec9c19fab76acee4f5e22e990c/onnx/model.onnx",
+    "sha256": "1cb0fb360dadd15af77c639085d77a9df67db0c64315560c3de005f676345ac2",
+    "size": 191877254,
+    "memMB": 2400,
+    "license": "MIT",
+    "source": "https://huggingface.co/studioludens/birefnet-lite-512 (BiRefNet, Zheng Peng et al.)"
+  },
+  "cutout-lite": {
+    "title": "Hapus latar · ringan",
+    "file": "isnet-general.onnx",
+    "url": "https://huggingface.co/imgly/isnet-general-onnx/resolve/440dea96dd4a3b06bbbf5abec3e26569dd7ec49f/onnx/model.onnx",
+    "sha256": "cc2c9f5c1751b9737cb81e708ff0c5e9542c2205daed22418a4fd2ab5d4c481a",
+    "size": 176149806,
+    "memMB": 900,
+    "license": "MIT",
+    "source": "https://huggingface.co/imgly/isnet-general-onnx (IS-Net / DIS, Xuebin Qin et al.)"
+  },
+  "upscale": {
+    "title": "Upscale AI",
+    "file": "real_esrgan_general_x4v3.onnx",
+    "zip": "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/real_esrgan_general_x4v3/releases/v0.66.0/real_esrgan_general_x4v3-onnx-float.zip",
+    "sha256": "fc094329b24a00c936ebc1cc4c51bc59633e7dc36f4a553344342171cbd3c7cf",
+    "size": 4540895,
+    "extract": [
+      "real_esrgan_general_x4v3.onnx",
+      "real_esrgan_general_x4v3.data"
+    ],
+    "memMB": 500,
+    "license": "BSD-3-Clause",
+    "source": "https://huggingface.co/qualcomm/Real-ESRGAN-General-x4v3 (Real-ESRGAN, Xintao Wang et al.)"
+  }
+}
