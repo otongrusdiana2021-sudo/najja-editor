@@ -138,8 +138,13 @@ try {
       if (m < 0.05) gaps++;
     }
     const len = Math.max(1, s1 - s0);
+    const diff = (k) => (after[k] || 0) - (before[k] || 0);
     return {
       seconds: Math.round((len / sr) * 10) / 10,
+      restarts: diff('audio_element_restart'),
+      toFull: diff('audio_source_to_full'),
+      toFailed: diff('audio_source_to_failed'),
+      problems: (await window.najjaMetrics.snapshot()).events.filter((e) => e.kind === 'audio_problem').slice(-3).map((e) => `${e.what}: ${e.msg}`),
       rms: Math.sqrt(sq / len),
       rmsFirst: Math.sqrt(sqA / Math.max(1, early - s0)),
       rmsLast: Math.sqrt(sqB / Math.max(1, s1 - half)),
@@ -177,6 +182,102 @@ try {
   check(s.state?.routed === 1 && s.state?.unmuted === 1, 'klip dipercepat memakai suara elemennya');
   check(!s.silent && s.rms > 0.2, `suara terdengar: RMS ${f3(s.rms)}`);
   await p.evaluate(async () => { const { store } = await import('/js/store.js'); store.mutate('Kecepatan', (P) => { const c = P.clips.find((x) => x.type === 'video'); c.speed = 1; c.duration = 8; }); });
+
+  // ---- Safari behaviour, simulated: what made the sound stop after the first 8 s block on an iPad (v1.7.3) ----
+  // A wrapped AudioDecoder misbehaves on decodes that start mid-file (block 2 onwards); the sound must go on.
+  await p.waitForFunction(async (id) => { const { mediaRT } = await import('/js/media.js'); return !!mediaRT.get(id)?.peaks?.length; }, media.media_id, { timeout: 60000 }).catch(() => {});
+  const safari = (mode) => p.evaluate((mode) => {
+    const N = window.__NativeAD || (window.__NativeAD = window.AudioDecoder);
+    window.__NativeDAD = window.__NativeDAD || OfflineAudioContext.prototype.decodeAudioData;
+    window.AudioDecoder = N;
+    OfflineAudioContext.prototype.decodeAudioData = window.__NativeDAD;
+    if (mode !== 'native') {
+      window.AudioDecoder = class extends N {
+        constructor(init) {
+          let mid = null; // this decode starts in the middle of the file
+          let n0 = null;
+          super({
+            error: init.error,
+            output: (ad) => {
+              if (!mid) { init.output(ad); return; }
+              const n = ad.numberOfFrames;
+              const ch = ad.numberOfChannels;
+              const data = new Float32Array(n * ch);
+              if (mode === 'stamps' || mode === 'all') for (let c = 0; c < ch; c++) ad.copyTo(data.subarray(c * n, (c + 1) * n), { planeIndex: c, format: 'f32-planar' });
+              // 'stamps': timestamps from 0 at configure(); 'silence': digital silence with the right timestamps
+              const ts = mode === 'stamps' ? (n0 == null ? (n0 = 0) : (n0 += 1)) * (n / ad.sampleRate) * 1e6 : ad.timestamp;
+              init.output(new AudioData({ format: 'f32-planar', sampleRate: ad.sampleRate, numberOfFrames: n, numberOfChannels: ch, timestamp: ts, data }));
+              ad.close();
+            },
+          });
+          this.__init = init;
+          this.__mode = mode;
+          this.__isMid = () => mid;
+          this.__setMid = (v) => { mid = v; };
+        }
+        decode(chunk) {
+          if (this.__isMid() == null) this.__setMid(chunk.timestamp > 1e6);
+          if (this.__isMid() && this.__mode === 'hang') return; // never answers
+          if (this.__isMid() && this.__mode === 'error') { if (!this.__failed) { this.__failed = true; setTimeout(() => this.__init.error(new DOMException('Decoding error', 'EncodingError')), 0); } return; }
+          super.decode(chunk);
+        }
+        flush() {
+          if (this.__isMid() && this.__mode === 'hang') return new Promise(() => {});
+          if (this.__isMid() && this.__mode === 'error') return Promise.reject(new DOMException('Decoding error', 'EncodingError'));
+          return super.flush();
+        }
+      };
+      if (mode === 'all') {
+        // nothing decodes at all
+        window.AudioDecoder = class extends N { decode() { if (!this.__f) { this.__f = true; } } flush() { return Promise.reject(new DOMException('Decoding error', 'EncodingError')); } };
+        OfflineAudioContext.prototype.decodeAudioData = function () { return Promise.reject(new DOMException('Unable to decode audio data', 'EncodingError')); };
+      }
+    }
+    window.najja.engine.audio.reset(); // decode again
+  }, mode);
+  const SAF = [
+    ['stamps', 'decoder memberi label waktu dari 0 (bukan waktu file)'],
+    ['silence', 'decoder mengembalikan hening untuk blok di tengah file'],
+    ['hang', 'decoder menggantung (tidak pernah selesai)'],
+    ['error', 'decoder error untuk blok di tengah file'],
+  ];
+  for (const [mode, what] of SAF) {
+    step(`Safari (simulasi): ${what}`);
+    await safari(mode);
+    const r = await record(6, 0.5);
+    check(!r.silent && r.seconds >= 5.0, `suara tetap ada sampai akhir: ${r.seconds} dtk dari 6 (melewati batas blok di dtk 3,5)`);
+    check(r.gaps <= 2 && r.jump < 0.3, `tanpa celah berarti (${r.gaps} celah 5 ms, lompatan ${f3(r.jump)})`);
+    check(Math.abs(r.rms - 0.354) < 0.06, `level benar, tanpa suara dobel: RMS ${f3(r.rms)}`);
+    if (mode !== 'stamps') check(r.toFull >= 1 && (r.problems || []).length > 0, `file beralih ke decode utuh; alasan tercatat: ${(r.problems || []).slice(-1)[0] || '—'}`);
+  }
+  step('Safari (simulasi): semua decoder gagal → suara elemen');
+  await safari('all');
+  const all = await record(6, 0.5);
+  check(!all.silent && all.seconds >= 4.5 && all.rms > 0.25 && all.rms < 0.45, `suara elemen mengambil alih: ${all.seconds} dtk, RMS ${f3(all.rms)} (tanpa suara dobel)`);
+  check(all.toFailed >= 1, `file ditandai tidak bisa di-decode (${(all.problems || []).slice(-1)[0] || '—'})`);
+  await safari('native');
+
+  step('AudioContext berhenti saat diputar (iOS: telepon/interupsi)');
+  const susp = await p.evaluate(async () => {
+    const E = window.najja.engine;
+    E.pause(); E.seek(1); await E.settle(8000);
+    await new Promise((r) => setTimeout(r, 500));
+    E.play();
+    await new Promise((r) => setTimeout(r, 800));
+    await E.audioCtx.suspend();
+    await new Promise((r) => setTimeout(r, 1200));
+    const els = [...E.els.values()].filter((x) => x.clip.type === 'video');
+    const out = { audioClock: E.audioClock, playing: E.playing, moving: E.time, unrouted: els.filter((x) => !x.src && !x.el.muted && !x.el.paused).length,
+      dbg: { buffering: E.buffering, ctx: E.audioCtx.state, ctxDown: E.ctxDown, els: els.map((x) => ({ src: !!x.src, muted: x.el.muted, paused: x.el.paused, rs: x.el.readyState, sched: !!x.sched, noSrc: !!x.noSrc })), counters: Object.fromEntries(Object.entries((await window.najjaMetrics.snapshot()).counters).filter(([k]) => /audio|play_rej|buffer/.test(k))) } };
+    await new Promise((r) => setTimeout(r, 400));
+    out.moved = E.time - out.moving;
+    E.pause();
+    await E.audioCtx.resume();
+    return out;
+  });
+  if (process.env.AUDIO_DEBUG) console.log(JSON.stringify(susp));
+  check(susp.audioClock === false && susp.playing && susp.moved > 0.2, `pemutaran jalan terus dengan jam biasa (maju ${susp.moved.toFixed(2)} dtk dalam 0,4 dtk)`);
+  check(susp.unrouted === 1, 'video bersuara langsung lewat elemennya (tanpa Web Audio yang berhenti)');
 
   step('browser yang tidak mengonversi format sampel (seperti sebagian Safari): dikonversi sendiri');
   await p.evaluate(() => {

@@ -1,4 +1,4 @@
-# Analisa: pratinjau patah-patah di iPad (v1.7.1–v1.7.3)
+# Analisa: pratinjau patah-patah di iPad (v1.7.1–v1.7.4)
 
 Sumber data: rekaman layar iPad mini (Safari, potret, proyek 1 klip 25 dtk), Diagnostik dari iPad pengguna, dan pengukuran ulang di lab (Chromium + Playwright, profil iPad).
 
@@ -229,3 +229,76 @@ Lab: B8 (fixture bip tepat di setiap detik sumber, detektor AudioWorklet di mast
    - "Gambar tertinggal dari suara" p50 di bawah ±20 ms;
    - "Suara kosong" dan "terlambat" 0;
    - "pakai elemen" 0. Kalau bukan 0, ada file yang tidak bisa di-decode di perangkat itu, dan barisnya menunjukkan berapa.
+
+## 10. "Audio sudah tidak delay, tapi hilang setelah beberapa detik" (v1.7.4)
+
+### Rekaman iPad
+
+Rekaman layar iPad, 17,9 detik dengan suara, diukur per 0,25 detik:
+
+| Waktu rekaman | Playhead | Suara |
+|---|---|---|
+| 1,0 dtk | 00:00 (Play ditekan) | mulai, tanpa delay |
+| 1,0–9,3 dtk | 00:00 → 00:08 | terdengar penuh (−1 s.d. −5 dB) |
+| ±9,4 dtk | ±00:08 | berhenti; sesudahnya hening total (nol digital) |
+| 9,5–14 dtk | 00:08 → 00:14 | video tetap berjalan normal, ikon speaker di tab Safari hilang |
+
+Suara berhenti tepat setelah **8 detik pertama sumber**, yaitu persis satu blok decode (`BLOCK = 8`). Gambar tetap jalan. Artinya penjadwal hanya berhasil memutar blok pertama: decode dari awal file berhasil di Safari, decode yang dimulai di tengah file tidak.
+
+### Kemungkinan penyebab
+
+Di lab (Chromium) semua blok berjalan, jadi ini perilaku `AudioDecoder` Safari 26. API ini baru ada di Safari sejak versi itu. Ada empat kemungkinan, dan v1.7.3 tidak tahan terhadap satu pun:
+
+1. **Label waktu output berbeda**, misalnya dihitung dari `configure()` dan bukan waktu file. Posisi blok ke-2 jadi salah, sehingga potongannya terlewati.
+2. **Decode berhasil, tapi hasilnya hening** untuk blok di tengah file.
+3. **Decoder error.** v1.7.3 lalu memindahkan klip ke suara elemen video dengan menyalakan suara elemen yang sudah diputar. Di iOS, cara ini tidak bersuara.
+4. **Decoder menggantung**, `flush()` tidak pernah selesai. Antrean decode v1.7.3 menunggu selamanya, sehingga tidak ada blok lain yang pernah di-decode.
+
+### Perbaikan v1.7.4: setiap kemungkinan ditangani
+
+- **Posisi blok dihitung dari jumlah sampel**, mundur dari frame terakhir yang dimasukkan, bukan dari label waktu decoder. Di Chromium hasilnya sama persis dengan label waktu untuk blok di tengah file, dan lebih benar untuk blok pertama.
+- **Batas waktu decode** 2,5 dtk per blok. `flush()` dipacu dengan batas waktu, dan decoder yang menggantung ditutup. Antrean decode tidak bisa macet lagi: `reset()` membuka antrean yang tersangkut.
+- **Cek hening:** waveform dari server (100 titik/dtk) dibandingkan dengan hasil decode. Hening total di bagian yang ada suaranya dianggap gagal.
+- **Rantai fallback per file:**
+  - blok gagal → **decode file utuh** dengan `decodeAudioData` (decoder bawaan Safari, file ≤ 150 dtk);
+  - masih gagal → **suara elemen**.
+  - Peralihannya tanpa suara dobel: potongan lama diserahkan di titik yang sama, dengan fade beberapa ms.
+- **Suara elemen di tengah putar:** elemen video **dibuat ulang** dengan suaranya, seperti v1.7.2. Tidak lagi dengan menyalakan suara elemen yang sudah diputar, karena di iOS itu tetap bisu.
+- **AudioContext berhenti** (iOS: telepon atau interupsi):
+  - pemutaran lanjut dengan jam biasa;
+  - elemen dibuat ulang langsung ke speaker. Elemen yang tersalur ke context yang berhenti ikut macet, dan gambarnya ikut berhenti;
+  - setelah context jalan lagi, elemen kembali lewat mixer, supaya ekspor real-time tetap merekam suaranya.
+- **Error di penjadwal tidak boleh menghentikan gambar:** jam pindah ke jam biasa.
+- **Diagnostik → Audio** kini menampilkan:
+  - **Masalah terakhir**, misalnya `decode_block: audio decoder did not finish within 2500 ms`;
+  - jumlah peralihan ke decode utuh, ke suara elemen, dan elemen yang dibuat ulang.
+  - Screenshot dari iPad akan menunjukkan kemungkinan mana yang terjadi.
+- Suara di posisi playhead mulai di-decode saat proyek dibuka, jadi Play pertama tidak menunggu.
+
+### Bukti (lab, simulasi perilaku Safari)
+
+`test/e2e/audio.mjs` membungkus `AudioDecoder` supaya berperilaku buruk untuk blok di tengah file, lalu merekam keluaran mixer 6 detik yang melewati batas blok:
+
+| Simulasi | Suara sampai akhir | Celah | Level (harapan 0,354) | Jalur akhir / alasan tercatat |
+|---|---|---|---|---|
+| label waktu dari 0 | 5,6 dari 6 dtk | 0 | 0,353 | blok (posisi dari hitungan sampel) |
+| decode hening | 5,6 dtk | 0 | 0,353 | decode utuh — "decoded silence where the waveform has sound" |
+| decoder menggantung | 5,6 dtk | 0 | 0,353 | decode utuh — "did not finish within 2500 ms" |
+| decoder error | 5,6 dtk | 0 | 0,353 | decode utuh — "Decoding error" |
+| semua decoder gagal | 5,6 dtk | — | 0,354 | suara elemen — "Unable to decode audio data" |
+| AudioContext berhenti | jam biasa, video jalan | — | — | elemen langsung ke speaker |
+
+(5,6 dari 6 dtk: 0,4 dtk sisanya adalah jeda mulai, yang dipotong oleh analisis.)
+
+v1.7.3 gagal di simulasi "menggantung": suara berhenti di batas blok, dan semua decode sesudahnya ikut mati. Pola ini sama dengan yang terlihat di rekaman iPad.
+
+Benchmark B8 (profil iPad, `bench/results/2026-11-14-v174-ipad.*`):
+- suara di belakang gambar 6 ms (potongan) dan 3 ms (musik);
+- sebaran 9 dan 4 ms (v1.7.3: 16 dan 11 ms), karena posisi blok kini seragam;
+- B6: 30 fps, 0 buffer.
+
+### Cara cek
+
+1. Deploy, lalu tutup dan buka lagi tab editor.
+2. Putar proyek yang sama lebih dari 15 detik. Suara harus terdengar sampai akhir.
+3. Buka **Diagnostik performa → Audio** dan kirim screenshot-nya. Kalau "pindah ke decode utuh" > 0, berarti `AudioDecoder` Safari memang bermasalah di blok tengah file, dan baris "Masalah terakhir" menunjukkan jenisnya. Suara tetap jalan lewat decode utuh.

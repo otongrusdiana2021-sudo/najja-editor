@@ -25,6 +25,14 @@ const START_WAIT_MS = 700; // play waits at most this long for the first sound t
 const KEEP_S = 150; // decoded seconds kept in memory, all files together (≈ 55 MB at 48 kHz stereo)
 const FULL_MAX_S = 150; // MP3/WAV/… are decoded whole up to this length; longer ones keep the element's sound
 const UPDATE_MS = 90;
+// A decoder that does not answer within these is given up on (the file is then decoded another way): an 8 s block
+// takes ~0.1–0.3 s even on a tablet.
+const BLOCK_TIMEOUT_MS = 2500;
+const FULL_TIMEOUT_MS = 20000;
+const withTimeout = (p, ms, what) => {
+  let t = null;
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${what} did not finish within ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
+};
 
 const speedOf = (c) => c.speed || 1;
 const audibleType = (c) => c.type === 'video' || c.type === 'audio';
@@ -84,6 +92,7 @@ export class PreviewAudio {
     this.gsig = '';
     this.pid = null;
     this.live = false;
+    this.lastProblem = null;
   }
   get ctx() { return this.E.audioCtx; }
   supported() {
@@ -215,8 +224,14 @@ export class PreviewAudio {
         if (b?.state === 'ready') b.used = now;
         else this.request(s, seg.k, seg.ts);
         if (seg.ts >= to || this.done.has(seg.key)) continue;
-        if (b?.state === 'ready') this.schedule(c, seg, b);
-        else if (s.state !== 'opening' && seg.ts <= from + 0.02 && !this.done.has(`${seg.key}:u`)) { metrics.count('audio_underrun'); this.done.add(`${seg.key}:u`); }
+        if (b?.state === 'ready') {
+          try { this.schedule(c, seg, b); } catch (err) { this.done.add(seg.key); this.problem('schedule', err, s); }
+        } else if (s.state !== 'opening' && seg.ts <= from + 0.02 && !this.done.has(`${seg.key}:u`)
+          && ![...this.nodes.values()].some((r) => r.clipId === c.id && r.end > ctx.currentTime + 0.02)) {
+          metrics.count('audio_underrun');
+          this.done.add(`${seg.key}:u`);
+          this.problem('underrun', `${s.state === 'full' ? 'file' : `block ${seg.k}`} not decoded yet (${b?.state || 'not requested'})`, s);
+        }
       }
     }
   }
@@ -234,7 +249,8 @@ export class PreviewAudio {
       const k = s.blockOf(src);
       const segS = Math.max(c.in, s.state === 'full' ? c.in : k * BLOCK);
       const segE = Math.min(endSrc, s.blockEnd(k));
-      out.push({ k, key: `${c.id}:${k}`, segS, segE, ts: c.start + (segS - c.in) / sp });
+      // (a whole-file decode has its own key: a file that switches from blocks to whole is scheduled again)
+      out.push({ k, key: s.state === 'full' ? `${c.id}:all` : `${c.id}:${k}`, segS, segE, ts: c.start + (segS - c.in) / sp });
       src = segE;
     }
     return out;
@@ -264,11 +280,23 @@ export class PreviewAudio {
     if (offset < 0) { at -= offset; dur += offset; offset = 0; } // the block starts a hair after: start that much later
     dur = Math.min(dur, b.buffer.duration - offset);
     if (dur <= 0.01) return;
+    // Another piece of this clip still sounding past `at` (the file switched to a whole-file decode): it hands over
+    // here instead of playing twice.
+    for (const r2 of this.nodes.values()) {
+      if (r2.clipId !== c.id || r2.end <= at + 0.005) continue;
+      try {
+        r2.g.gain.cancelScheduledValues(at);
+        r2.g.gain.setTargetAtTime(0, at, 0.004);
+        r2.node.stop(at + 0.03);
+        r2.end = at;
+      } catch { /* already stopped */ }
+    }
     const node = ctx.createBufferSource();
     node.buffer = b.buffer;
     const g = ctx.createGain();
     const rec = { node, g, clipId: c.id, at, end: at + dur, ta: seg.ts + (at - when) };
-    this.gains(rec, c, at);
+    // joining a sound in the middle (start of play, after a seek or a late block): a few ms fade, no click
+    this.gains(rec, c, at, at > when + 0.002);
     node.connect(g).connect(this.E.master);
     node.start(at, offset, dur);
     node.onended = () => {
@@ -279,7 +307,7 @@ export class PreviewAudio {
     b.used = performance.now();
   }
   /** Volume and fades of the clip as gain automation, from context time `from` to the end of the node. */
-  gains(rec, c, from) {
+  gains(rec, c, from, fadeIn = false) {
     const g = rec.g.gain;
     const ta = rec.ta + (from - rec.at); // timeline time at `from`
     const tb = rec.ta + (rec.end - rec.at);
@@ -295,9 +323,10 @@ export class PreviewAudio {
     const pts = [ta, tb];
     if (c.fadeIn > 0) pts.push(c.start + c.fadeIn);
     if (c.fadeOut > 0) pts.push(c.start + c.duration - c.fadeOut);
+    if (fadeIn) pts.push(Math.min(tb, ta + 0.008));
     const corners = [...new Set(pts)].filter((t) => t >= ta && t <= tb).sort((x, y) => x - y);
     g.cancelScheduledValues(0);
-    g.setValueAtTime(gainAt(corners[0]), Math.max(0, ctxOf(corners[0])));
+    g.setValueAtTime(fadeIn ? 0 : gainAt(corners[0]), Math.max(0, ctxOf(corners[0])));
     for (const t of corners.slice(1)) g.linearRampToValueAtTime(gainAt(t), ctxOf(t));
   }
   stopNodes() {
@@ -353,6 +382,9 @@ export class PreviewAudio {
     this.stop();
     this.sources.clear();
     this.queue = [];
+    // a decode still running (or stuck) belongs to the old state: a new pump starts fresh
+    this.gen = (this.gen || 0) + 1;
+    this.busy = false;
     this.pid = store.P?.id || null;
   }
 
@@ -383,8 +415,9 @@ export class PreviewAudio {
   async pump() {
     if (this.busy) return;
     this.busy = true;
+    const gen = this.gen;
     try {
-      while (this.queue.length) {
+      while (this.queue.length && gen === this.gen) {
         const t = this.E.time;
         // a seek moved away from these: forget them (they are asked for again when needed)
         this.queue = this.queue.filter((q) => {
@@ -398,7 +431,7 @@ export class PreviewAudio {
         await this.decode(q.s, q.k);
       }
     } finally {
-      this.busy = false;
+      if (gen === this.gen) this.busy = false;
     }
   }
   async decode(s, k) {
@@ -406,34 +439,88 @@ export class PreviewAudio {
     if (!b || b.state !== 'queued') return;
     b.state = 'decoding';
     const t0 = performance.now();
+    let mode = s.state;
     try {
       await s.ready;
-      if (s.state === 'blocks') {
-        const r = await decodeAudioRange(s.src, s.track, k * BLOCK, (k + 1) * BLOCK);
+      mode = s.state;
+      if (mode === 'blocks') {
+        const r = await withTimeout(decodeAudioRange(s.src, s.track, k * BLOCK, (k + 1) * BLOCK, { timeoutMs: BLOCK_TIMEOUT_MS }), BLOCK_TIMEOUT_MS + 1500, 'audio block');
         if (!r) throw new Error('no audio decoded');
+        this.checkSound(s, r.buffer, Math.max(0, r.start), (k + 1) * BLOCK);
         b.buffer = r.buffer;
         b.start = r.start;
-      } else if (s.state === 'full') {
+      } else if (mode === 'full') {
         const rate = this.ctx?.sampleRate || 48000;
         const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
         if (!decodeCtx || decodeCtx.sampleRate !== rate) decodeCtx = new OAC(2, 1, rate);
-        b.buffer = await decodeCtx.decodeAudioData(await s.blob.arrayBuffer());
+        const ctx = decodeCtx;
+        // (old Safari: callback form only)
+        const buf = await withTimeout(s.blob.arrayBuffer().then((ab) => new Promise((res, rej) => {
+          const p = ctx.decodeAudioData(ab, res, rej);
+          if (p?.then) p.then(res, rej);
+        })), FULL_TIMEOUT_MS, 'decodeAudioData');
+        this.checkSound(s, buf, 0, buf.duration);
+        b.buffer = buf;
         b.start = 0;
       } else {
         s.blocks.delete(k);
         return;
       }
+      if (s.blocks.get(k) !== b || s.state !== mode) return; // the file switched to another way of decoding
       b.state = 'ready';
       b.used = performance.now();
       metrics.sample('audio_decode_ms', performance.now() - t0);
       this.evict();
       if (this.E.playing) this.update(true);
     } catch (err) {
+      if (s.blocks.get(k) === b) s.blocks.delete(k);
+      if (s.state !== mode) return;
       metrics.count('audio_decode_failed');
-      s.blocks.delete(k);
-      // the file cannot be decoded here (or is gone from this device): its clips fall back to the element's sound
-      if (++s.fails >= 2) { s.state = 'failed'; this.E.sync?.(); }
+      this.problem(mode === 'full' ? 'decode_file' : 'decode_block', err, s);
+      this.degrade(s);
     }
+  }
+  /**
+   * Decoding this file failed: blocks (AudioDecoder) → the whole file (decodeAudioData, for files up to FULL_MAX_S)
+   * → its clips take their media element's sound (the engine makes those elements again with their sound).
+   */
+  degrade(s) {
+    const dur = store.media(s.id)?.duration || 0;
+    s.blocks.clear();
+    s.state = s.state === 'blocks' && dur > 0 && dur <= FULL_MAX_S ? 'full' : 'failed';
+    metrics.count(`audio_source_to_${s.state}`);
+    this.queue = this.queue.filter((q) => q.s !== s);
+    if (s.state === 'failed') {
+      // its clips now sound from their elements: stop what was scheduled from this file (no sound twice)
+      const now = this.ctx?.currentTime || 0;
+      for (const [key, rec] of this.nodes) {
+        if (store.P?.clips.find((c) => c.id === rec.clipId)?.mediaId !== s.id) continue;
+        try { rec.g.gain.cancelScheduledValues(0); rec.g.gain.setTargetAtTime(0, now, 0.004); rec.node.stop(now + 0.03); } catch { /* stopped */ }
+        this.nodes.delete(key);
+      }
+    }
+    if (this.E.playing && this.anchor) this.update(true); // ask for the whole file now
+    this.E.sync?.();
+  }
+  /** A decoder that returns digital silence where the file's waveform (made by the server) has sound is broken. */
+  checkSound(s, buf, a, b) {
+    const peaks = mediaRT.get(s.id)?.peaks;
+    if (!peaks?.length) return;
+    let want = 0;
+    for (let i = Math.max(0, Math.floor(a * 100)), e = Math.min(peaks.length, Math.ceil(b * 100)); i < e; i++) if (peaks[i] > want) want = peaks[i];
+    if (want < 0.08) return; // quiet there anyway
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const d = buf.getChannelData(c);
+      for (let i = 0; i < d.length; i += 5) if (Math.abs(d[i]) > 1e-5) return;
+    }
+    throw new Error('decoded silence where the waveform has sound');
+  }
+  /** Remember what went wrong (Diagnostik shows the last one; the JSON keeps the latest events). */
+  problem(what, err, s = null) {
+    const msg = String(err?.message || err || '').slice(0, 160);
+    metrics.count(`audio_problem_${what}`);
+    metrics.event('audio_problem', { what, msg, ...(s ? { file: String(store.media(s.id)?.name || s.id).slice(0, 40), mode: s.state } : {}) });
+    this.lastProblem = `${what}: ${msg}`;
   }
   /** Keep at most KEEP_S decoded seconds: drop the blocks used longest ago (never ones playing now). */
   evict() {
@@ -466,6 +553,7 @@ export class PreviewAudio {
       latencyMs: ctx ? Math.round(((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000) : null,
       state: ctx?.state || null,
       clock: this.clockSource || null,
+      lastProblem: this.lastProblem,
       decodedS: Math.round(decodedS),
       sources: states,
       audioDecoder: typeof AudioDecoder === 'function',

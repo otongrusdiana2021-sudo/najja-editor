@@ -329,8 +329,11 @@ function readPlane(ad, c, out) {
   throw unsupported(`audio sample format ${f}`);
 }
 
-/** Decode [t0, t1] (source seconds) of an MP4 audio track. Returns { start, buffer } or null. */
-export async function decodeAudioRange(src, track, t0, t1) {
+/**
+ * Decode [t0, t1] (source seconds) of an MP4 audio track. Returns { start, buffer } or null.
+ * timeoutMs: give up (and close the decoder) when the browser's decoder stops answering, instead of waiting forever.
+ */
+export async function decodeAudioRange(src, track, t0, t1, { timeoutMs = 0 } = {}) {
   const cfg = { codec: track.codec, sampleRate: track.sampleRate, numberOfChannels: track.channels, ...(track.description ? { description: track.description } : {}) };
   if (!(await AudioDecoder.isConfigSupported(cfg).catch(() => ({ supported: false }))).supported) throw unsupported(`audio decoder ${track.codec}`);
   const S = track.samples;
@@ -339,17 +342,35 @@ export async function decodeAudioRange(src, track, t0, t1) {
   const first = i;
   const outs = [];
   let error = null;
-  const dec = new AudioDecoder({ output: (ad) => outs.push(ad), error: (e) => { error = e; } });
-  dec.configure(cfg);
-  for (; i < S.length && S[i].pts <= t1 + AUDIO_PAD; i++) {
-    if (error) break;
-    const s = S[i];
-    dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: Math.round(s.pts * 1e6), data: await src.read(s.offset, s.size) }));
-    if (dec.decodeQueueSize > 32) await new Promise((r) => setTimeout(r, 0));
+  const dec = new AudioDecoder({ output: (ad) => outs.push(ad), error: (e) => { error = error || e; } });
+  // (a decoder that stops answering: give up, close it, and do not wait for its flush either)
+  let timer = null;
+  const timedOut = timeoutMs ? new Promise((resolve) => {
+    timer = setTimeout(() => {
+      error = error || new Error(`audio decoder did not finish within ${timeoutMs} ms`);
+      try { dec.close(); } catch { /* closed */ }
+      resolve();
+    }, timeoutMs);
+  }) : null;
+  try {
+    dec.configure(cfg);
+    for (; i < S.length && S[i].pts <= t1 + AUDIO_PAD; i++) {
+      if (error) break;
+      const s = S[i];
+      dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: Math.round(s.pts * 1e6), data: await src.read(s.offset, s.size) }));
+      if (dec.decodeQueueSize > 32) await new Promise((r) => setTimeout(r, 0));
+    }
+    if (!error) {
+      const flushed = dec.flush().catch((e) => { error = error || e; });
+      await (timedOut ? Promise.race([flushed, timedOut]) : flushed);
+    }
+  } catch (e) {
+    error = error || e;
+  } finally {
+    clearTimeout(timer);
+    try { dec.close(); } catch { /* closed */ }
   }
-  if (!error) await dec.flush().catch((e) => { error = e; });
-  try { dec.close(); } catch { /* closed */ }
-  if (error) { for (const ad of outs) ad.close(); throw error; }
+  if (error) { for (const ad of outs) { try { ad.close(); } catch { /* closed */ } } throw error; }
   if (!outs.length) return null;
   const rate = outs[0].sampleRate;
   const ch = Math.min(2, outs[0].numberOfChannels);
@@ -365,18 +386,19 @@ export async function decodeAudioRange(src, track, t0, t1) {
     o += ad.numberOfFrames;
     ad.close();
   }
-  // Where the decoded sound starts. The first output's timestamp, except from the file's very first frame: the AAC
-  // priming frame there has a negative time (edit list), and Chromium labels its output 0 — every sound of that range
-  // came 21 ms late (preview blocks did not line up; exports were late by as much at the start of a file). Then count
-  // back from the end of the last frame fed, as decoders output every frame of the range after flush().
-  let start = outs[0].timestamp / 1e6;
+  // Where the decoded sound starts: counted back from the end of the last frame fed (a decoder outputs every frame
+  // of the range by flush(), possibly minus some at the start). The outputs' own timestamps are not relied on:
+  // Chromium labels the AAC priming frame at a file's start 0 (sound 21 ms late), and browsers differ in how they
+  // stamp decoded audio (relative to configure(), shifted by the decoder delay). The count must land within a few
+  // frames of the first frame fed; otherwise the first output's timestamp, if that does.
   const last = Math.min(i, S.length) - 1;
-  if (S[first].pts < 0 && last >= first) {
-    const step = last > 0 ? S[last].pts - S[last - 1].pts : frames / rate;
-    const end = (S[last + 1]?.pts ?? S[last].pts + step);
-    const counted = end - frames / rate;
-    if (Math.abs(counted - start) > 0.002 && Math.abs(counted - S[first].pts) < 0.002) start = counted;
-  }
+  const step = last > first ? (S[last].pts - S[first].pts) / (last - first) : frames / rate;
+  const end = S[last + 1]?.pts ?? S[last].pts + step;
+  const counted = end - frames / rate;
+  const ts = outs[0].timestamp / 1e6;
+  const near = (v) => v >= S[first].pts - 0.002 && v <= S[first].pts + 0.1;
+  const start = near(counted) ? counted : near(ts) ? ts : null;
+  if (start == null) throw unsupported(`audio decoder timing (${counted.toFixed(3)} / ${ts.toFixed(3)} for ${S[first].pts.toFixed(3)})`);
   return { start, buffer };
 }
 

@@ -52,7 +52,13 @@ export class Engine {
     document.body.appendChild(this.host);
     this.lastEmit = 0;
     onFontsLoaded(() => this.requestRender());
-    store.on('project', () => { this.clampTime(); this.sync(); this.audio.invalidate(); this.requestRender(); });
+    store.on('project', () => {
+      this.clampTime();
+      this.sync();
+      this.audio.invalidate();
+      if (!this.playing) this.audio.prefetch(this.time); // decode the sound at the playhead before play is pressed
+      this.requestRender();
+    });
     store.on('live', () => { this.sync(); this.audio.invalidate(); this.requestRender(); });
     store.on('media', () => { if (store.P) this.sync(); this.requestRender(); });
     const resume = () => { if (this.audioCtx?.state === 'suspended') this.audioCtx.resume().catch(() => {}); };
@@ -102,6 +108,7 @@ export class Engine {
     this.clockBase = this.time;
     this.clockStart = performance.now();
     this.playAt = performance.now();
+    this.ctxDown = false;
     this.audioClock = this.useAudioClock();
     metrics.gauge('audio_mode', this.audioClock ? 'scheduled' : 'element');
     if (this.audioClock) this.audio.start(this.time);
@@ -130,8 +137,10 @@ export class Engine {
     return !(store.P?.clips || []).some((c) => c.type === 'video' && playsHeavyOriginal(c.mediaId));
   }
   /** The audio clock stopped (iOS suspends the AudioContext, e.g. a call): play on with the wall clock. */
-  leaveAudioClock(now) {
+  leaveAudioClock(now, why = 'audio context stopped') {
     this.audioClock = false;
+    this.ctxDown = this.audioCtx?.state !== 'running';
+    this.audio.problem('clock', `${why} (AudioContext ${this.audioCtx?.state || 'none'})`);
     this.audio.stop();
     this.clockBase = this.time;
     this.clockStart = now;
@@ -232,12 +241,17 @@ export class Engine {
       } else if (this.audioClock) {
         // The clock is the sound the speakers play (audio.js): sound is never held back or seeked; the muted videos
         // follow the clock (sync). Before the first sound, the playhead waits for it.
-        const a = this.audio.clock(now, this.startLat);
-        if (a != null) this.time = a;
-        this.clockBase = this.time;
-        this.clockStart = now;
-        if (this.audioCtx?.state !== 'running' && now - this.playAt > 1500) this.leaveAudioClock(now);
-        else this.audio.update();
+        try {
+          const a = this.audio.clock(now, this.startLat);
+          if (a != null) this.time = a;
+          this.clockBase = this.time;
+          this.clockStart = now;
+          if (this.audioCtx?.state !== 'running' && now - this.playAt > 1500) this.leaveAudioClock(now);
+          else this.audio.update();
+        } catch (err) {
+          // never let the sound stop the picture: play on with the elements' sound
+          this.leaveAudioClock(now, `scheduler error: ${err?.message || err}`);
+        }
         this.watchStall(now, this.masterEl());
       } else {
         const wall = this.clockBase + (now - this.clockStart) / 1000;
@@ -432,6 +446,7 @@ export class Engine {
     el.muted = true;
     this.ensureAudio();
     if (!(this.playing ? this.audioClock : this.useAudioClock()) || !this.audio.covers(clip)) this.elementSound(E);
+    else E.sched = true; // muted: the scheduler plays its sound
     const rr = () => this.requestRender();
     // While paused, sync() can only position an element that has metadata and is not mid-seek. A new element
     // (far seek) or one still seeking to an older position (fast scrub) is positioned again once it can be,
@@ -489,6 +504,8 @@ export class Engine {
   }
   /** Let the element play its own sound (fallback clips, real-time export): route it through Web Audio once. */
   elementSound(E) {
+    // (the AudioContext stopped: no Web Audio route, the element plays straight to the speakers)
+    if (this.ctxDown && !E.src) { E.noSrc = true; E.direct = true; }
     if (!E.src && !E.noSrc) {
       const ctx = this.ensureAudio();
       try {
@@ -499,6 +516,7 @@ export class Engine {
       } catch { E.src = null; E.noSrc = true; }
     }
     if (E.el.muted) E.el.muted = false;
+    E.sched = false;
   }
   setGain(E, v) {
     if (Math.abs(E.vol - v) < 0.001) return;
@@ -560,6 +578,19 @@ export class Engine {
       // (also during playback for an element not on screen, e.g. the next clip, where nobody sees the swap)
       const offScreen = this.playing && !this.exportTarget && !(t >= clip.start - 0.6 && t < end);
       if (E && want && E.url !== want && (!(this.playing || this.exportTarget) || offScreen || (clip.type === 'video' && !E.el.videoWidth))) {
+        this.disposeEl(key);
+        E = null;
+      }
+      // Its sound moved back to the element while playing (the file could not be decoded here, or the audio clock
+      // stopped): make the element again with its sound. Unmuting or routing an element that already plays is not
+      // reliable on iOS (it stays silent) — a new element is set up like before v1.7.3.
+      // Likewise an element routed into an AudioContext that stopped: routed media waits for its context (the picture
+      // froze with it), so it is made again playing straight to the speakers.
+      // (and the other way round: once the context runs again, a "straight" element goes back through the mixer —
+      // otherwise its sound would be missing from a real-time export)
+      if (E && ((E.direct && !this.ctxDown) || (this.playing && !this.exportTarget && this.audio.audible(clip)
+        && ((E.sched && (!this.audioClock || !this.audio.covers(clip))) || (this.ctxDown && E.src))))) {
+        metrics.count('audio_element_restart');
         this.disposeEl(key);
         E = null;
       }

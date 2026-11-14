@@ -766,3 +766,54 @@ Kecepatan putar 98–99% di lab adalah jeda mulai: playhead menunggu suara perta
 - Fallback per klip ke cara lama dipicu otomatis kalau decode gagal dua kali, file tidak di perangkat, atau AudioContext tidak berjalan.
 - Di Safari, perilaku `AudioDecoder` dan `getOutputTimestamp` belum bisa diuji di lab. Diagnostik menunjukkan mode, sumber jam, dan jumlah file yang jatuh ke suara elemen.
 - Kembali ke cara lama sepenuhnya cukup dengan `engine.audioMode = 'element'`, atau revert commit ini. Data proyek tidak berubah.
+
+## Perbaikan setelah rilis (5): v1.7.4, suara hilang setelah 8 detik di iPad
+
+Analisa rekaman dan rinciannya ada di [ANALISA-LAG-IPAD.md §10](ANALISA-LAG-IPAD.md#10-audio-sudah-tidak-delay-tapi-hilang-setelah-beberapa-detik-v174).
+
+**Gejala.**
+- Rekaman iPad: suara tanpa delay selama 8 detik pertama sumber, lalu hening total, sementara video tetap jalan.
+- 8 detik = satu blok decode. Decode dari awal file berhasil di Safari; blok yang dimulai di tengah file tidak.
+
+**Penyebab yang mungkin di `AudioDecoder` Safari 26** (belum bisa dipastikan tanpa iPad, jadi semuanya ditangani):
+1. label waktu output berbeda;
+2. hasil decode hening;
+3. error, yang diikuti peralihan ke suara elemen yang di iOS tetap bisu;
+4. decoder menggantung, sehingga seluruh antrean decode macet.
+
+**Perubahan:**
+- **`public/js/fastexport.js` `decodeAudioRange`:**
+  - posisi dari hitungan sampel;
+  - `timeoutMs` dengan `flush()` dipacu batas waktu, dan decoder ditutup bila menggantung.
+  - Ini juga dipakai ekspor cepat.
+- **`public/js/audio.js`:**
+  - batas waktu per blok (dua lapis);
+  - cek hening terhadap waveform server;
+  - rantai fallback blok → decode utuh (`decodeAudioData`) → suara elemen;
+  - serah-terima tanpa suara dobel, dengan fade masuk saat bergabung di tengah suara;
+  - kunci segmen terpisah untuk decode utuh;
+  - antrean decode dengan generasi (`reset()` membuka antrean yang tersangkut);
+  - underrun hanya dicatat bila klip benar-benar tanpa suara;
+  - `problem()` mencatat alasan ke metrik, event, dan Diagnostik.
+- **`public/js/engine.js`:**
+  - elemen dibuat ulang (bukan dinyalakan suaranya) bila klip pindah ke suara elemen saat diputar;
+  - AudioContext berhenti → elemen langsung ke speaker, dan kembali lewat mixer setelah context jalan lagi;
+  - error penjadwal → jam biasa, gambar tidak berhenti;
+  - prefetch suara saat proyek dibuka.
+- **`public/js/app.js`:** Diagnostik Audio menampilkan masalah terakhir dan jumlah peralihan.
+
+**Tes.** `test/e2e/audio.mjs` menyimulasikan perilaku Safari dengan `AudioDecoder` yang dibungkus:
+- label waktu dari 0;
+- hening;
+- menggantung;
+- error;
+- semua decoder gagal;
+- AudioContext berhenti.
+
+Di semua simulasi suara tetap ada sampai akhir: 0 celah, level benar, tanpa suara dobel. `npm test` 55/55, semua e2e lolos.
+
+**Benchmark (profil iPad):**
+- B8: suara di belakang gambar 6/3 ms, sebaran 9/4 ms (v1.7.3: 16/11 ms);
+- B6: 30 fps, 0 buffer.
+
+**Rollback.** `engine.audioMode = 'element'` mengembalikan suara elemen, atau revert commit ini. Data proyek tidak berubah.
