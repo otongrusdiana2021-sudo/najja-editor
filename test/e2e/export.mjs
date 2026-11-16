@@ -67,7 +67,9 @@ const mcp = async (name, args = {}) => {
 };
 
 // Wrappers installed in the page. mode: '' (Chromium as is), 'safari' (out-of-order + held frames, ES_Descriptor
-// audio description), 'hold' (frames only on flush), 'drop' (every 10th frame never comes out).
+// audio description), 'hold' (frames only on flush), 'drop' (every 10th frame never comes out), 'pool' (a hardware
+// decoder with 4 output pictures: no frame comes out while 4 are held, and a flush waits for them), 'silent' (no
+// frame ever, a flush that never ends), 'audio-stall' (the AudioEncoder's flush never ends).
 const installShims = (mode) => {
   window.__RealVD ||= window.VideoDecoder;
   window.__RealAE ||= window.AudioEncoder;
@@ -101,9 +103,28 @@ const installShims = (mode) => {
     close() { for (const f of this.held) f.close(); this.held = []; this.real.close(); }
     static isConfigSupported(c) { return RealVD.isConfigSupported(c); }
   }
+  class PoolDecoder extends ShimDecoder {
+    got(f) { this.held.push(f); this.pump(); }
+    pump() {
+      while (this.held.length && (this.out || 0) < 4) {
+        const f = this.held.shift();
+        this.out = (this.out || 0) + 1;
+        const close = f.close.bind(f);
+        let done = false;
+        f.close = () => { if (!done) { done = true; this.out--; setTimeout(() => this.pump(), 0); } close(); };
+        this.output(f);
+      }
+    }
+    async flush() { await this.real.flush(); while (this.held.length) await new Promise((r) => setTimeout(r, 5)); }
+  }
+  class SilentDecoder extends ShimDecoder {
+    decode() { /* swallowed */ }
+    get decodeQueueSize() { return 0; }
+    flush() { return new Promise(() => {}); }
+  }
   window.VideoDecoder = mode === 'drop' ? class extends ShimDecoder {
     got(f) { if (++this.n % 10 === 5) { f.close(); return; } this.output(f); }
-  } : ShimDecoder;
+  } : mode === 'pool' ? PoolDecoder : mode === 'silent' ? SilentDecoder : mode === 'audio-stall' ? RealVD : ShimDecoder;
   const RealAE = window.__RealAE;
   // Safari: decoderConfig.description is the whole ES_Descriptor ("magic cookie"), not the AudioSpecificConfig
   const esDescriptor = (asc) => {
@@ -129,7 +150,7 @@ const installShims = (mode) => {
     get encodeQueueSize() { return this.real.encodeQueueSize; }
     configure(c) { this.codec = c.codec; this.real.configure(c); }
     encode(d) { this.real.encode(d); }
-    flush() { return this.real.flush(); }
+    flush() { return mode === 'audio-stall' ? new Promise(() => {}) : this.real.flush(); }
     close() { this.real.close(); }
     static isConfigSupported(c) { return RealAE.isConfigSupported(c); }
   };
@@ -232,6 +253,36 @@ try {
   const D = await runExport('drop');
   check(D.mode === 'realtime' && /dropped frames|holds frames/.test(D.ev.fallback || ''), `fallback ke real-time: ${D.ev.fallback}`);
   check(D.ev.video_lost > 0 || /holds frames/.test(D.ev.fallback || ''), `D: frame hilang terhitung (${D.ev.video_lost})`);
+
+  step('E. Decoder hardware dengan 4 gambar output (PC/Android): flush menunggu frame yang masih dipegang');
+  const E = await runExport('pool');
+  check(E.mode === 'fast' && !E.ev.fallback, `ekspor cepat, tidak macet (${E.mode}${E.ev.fallback ? `: ${E.ev.fallback}` : ''}) · ${(E.ms / 1000).toFixed(1)} dtk`);
+  verify('E', E);
+
+  step('F. Decoder yang diam (tidak memberi frame, flush tidak pernah selesai) → tidak macet di 0%');
+  const F = await runExport('silent');
+  check(F.mode === 'realtime' && /did not answer/.test(F.ev.fallback || ''), `pindah ke real-time: ${F.ev.fallback}`);
+  check(F.ms < 45000, `selesai dalam ${(F.ms / 1000).toFixed(1)} dtk (bukan macet)`);
+
+  step('G. Encoder audio yang diam (flush tidak pernah selesai) → tidak macet di 0%');
+  const G = await runExport('audio-stall');
+  check(G.mode === 'realtime' && /AudioEncoder.*did not answer/.test(G.ev.fallback || ''), `pindah ke real-time: ${G.ev.fallback}`);
+  check(G.ms < 50000, `selesai dalam ${(G.ms / 1000).toFixed(1)} dtk (bukan macet)`);
+
+  step('H. Dialog ekspor dari tombol Ekspor: tahap yang sedang berjalan terlihat (bukan diam di 0%)');
+  await p.evaluate(installShims, 'pool');
+  const seen = new Set();
+  await p.click('[data-tb="export"]');
+  for (let t = Date.now(); Date.now() - t < 60000; await wait(100)) {
+    const sub = await p.evaluate(() => document.querySelector('.export-overlay .ex-sub')?.textContent || '');
+    if (sub) seen.add(sub.replace(/\d+/g, '#'));
+    if (await p.evaluate(() => /Ekspor selesai/.test(document.querySelector('.export-overlay')?.textContent || ''))) break;
+  }
+  await p.evaluate(installShims, '');
+  const labels = [...seen];
+  check(labels.some((l) => /Merender cepat · frame #\/#/.test(l)), `label progres per frame: ${labels.filter((l) => /Merender|Menyiapkan/.test(l)).slice(0, 4).join(' | ')}`);
+  check(await p.evaluate(() => /Ekspor selesai/.test(document.querySelector('.export-overlay')?.textContent || '')), 'ekspor dari tombol selesai');
+  await p.evaluate(() => document.querySelector('.export-overlay')?.remove());
 
   check(!errors.length, `tidak ada error halaman${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } finally {

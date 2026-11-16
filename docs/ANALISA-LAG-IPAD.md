@@ -1,4 +1,4 @@
-# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.1)
+# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.2)
 
 Sumber data: rekaman layar iPad mini (Safari, potret, proyek 1 klip 25 dtk), Diagnostik dari iPad pengguna, dan pengukuran ulang di lab (Chromium + Playwright, profil iPad).
 
@@ -405,3 +405,40 @@ Yang masih bisa lama, dan terlihat di Diagnostik → Ekspor terakhir:
    - "Frame video dari decoder" harus menunjukkan terlambat/hilang 0;
    - "Audio AAC" harus "… · ES_Descriptor (Safari) → ASC".
 5. Putar preview ±15 dtk, lalu kirim screenshot **Diagnostik → Pemutaran** dan **Audio**: koreksi kecepatan video, seek koreksi, frame dibuang.
+
+## 12. "Ekspor tidak berjalan" di PC: diam di 0% (v1.8.2)
+
+Screenshot dari Chrome di Windows: dialog ekspor berhenti di **0%** dengan teks "Menyiapkan media di perangkat ini… 100%". Media sudah siap, tetapi render tidak pernah mulai.
+
+### Penyebab
+
+v1.8.1 menunggu `flush()` decoder video sampai selesai, termasuk di akhir file dan saat mengatur ulang decoder. Decoder hardware di PC dan Android hanya punya **beberapa gambar output**. Selama frame yang sudah keluar masih dipegang ekspor (frame berikutnya yang sudah di-decode), decoder tidak bisa mengeluarkan frame lain, jadi `flush()` tidak pernah selesai.
+
+Ekspor menunggu decoder, decoder menunggu ekspor: macet selamanya. Tombol Batal juga tidak bisa menghentikannya, karena pembatalan baru dicek di antara frame.
+
+Di lab, decoder Chromium Linux berjalan di perangkat lunak dan tidak punya batas ini, jadi tes v1.8.1 tidak menangkapnya. Tes baru meniru decoder hardware dengan 4 gambar output. **Kode v1.8.1 macet di tes itu**, kode v1.8.2 selesai dalam 1,2 dtk dengan 180/180 frame tepat.
+
+### Perbaikan (`public/js/fastexport.js`, `exporter.js`, `app.js`)
+
+- **Flush tidak ditunggu buta lagi.** Di akhir file dan sebelum keyframe berikutnya, flush dimulai, lalu ekspor tetap memakai frame yang keluar. Gambar yang dipakai dilepas, sehingga decoder bisa menyelesaikan flush.
+- **Setiap langkah codec punya batas waktu** (`guard`):
+  - cek dukungan codec 10 dtk;
+  - satu frame video 15 dtk (frame pertama +2,5 dtk untuk decoder hardware yang baru menyala);
+  - flush decoder 8 dtk;
+  - decode audio per rentang ≥ 20 dtk; kalau gagal, file di-decode utuh dengan cara lain;
+  - mix audio, encode audio, dan flush encoder video juga dibatasi;
+  - font 10 dtk (kalau habis, teks memakai font cadangan).
+  Langkah yang tidak menjawab membuat ekspor **pindah ke mode real-time** dengan alasannya tercatat di Diagnostik, bukan diam di 0%.
+- **Batal selalu bekerja**, juga saat sedang menunggu decoder atau encoder.
+- **Dialog ekspor menampilkan tahap yang sedang berjalan**: "Menyiapkan audio… n dtk", "Merender cepat · frame 120/1800 · sisa ±n detik", "Menyelesaikan video…". Dulu teks persiapan media tetap tampil sampai 3%.
+
+### Bukti (`test/e2e/export.mjs`)
+
+| Skenario | Hasil v1.8.2 |
+|---|---|
+| E. Decoder hardware, 4 gambar output, flush menunggu frame dilepas | ekspor cepat 1,2 dtk, 180/180 frame tepat (v1.8.1: macet) |
+| F. Decoder diam (tanpa frame, flush tidak pernah selesai) | pindah ke real-time setelah ±8 dtk ("video decoder flush did not answer"), selesai 17,9 dtk |
+| G. Encoder audio diam | pindah ke real-time ("AudioEncoder … did not answer"), selesai 28,2 dtk |
+| H. Tombol Ekspor di editor | label "Merender cepat · frame #/# · sisa ±# detik" tampil, ekspor selesai |
+
+Skenario A–D (Chromium, perilaku Safari, decoder yang menahan, decoder yang menghilangkan frame) tetap lolos.

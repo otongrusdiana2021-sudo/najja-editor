@@ -13,6 +13,29 @@ import { aacConfig } from './aac.js';
 export class Unsupported extends Error {}
 const unsupported = (why) => new Unsupported(why);
 
+/**
+ * Wait for a step that depends on the browser's codecs or storage, but never forever (v1.8.1): a step that does not
+ * answer within ms fails as unsupported (→ the real-time export takes over), and a cancel stops the wait at once.
+ * (An export on a Windows PC stayed at 0% because one such step never answered.)
+ */
+export function guard(p, ms, what, flag = null) {
+  let poll = null;
+  const t0 = performance.now();
+  return Promise.race([
+    p,
+    new Promise((_, reject) => {
+      poll = setInterval(() => {
+        if (flag?.cancelled) reject(new Error('Ekspor dibatalkan'));
+        else if (performance.now() - t0 > ms) reject(unsupported(`${what} did not answer within ${Math.round(ms / 1000)} s`));
+      }, 200);
+    }),
+  ]).finally(() => clearInterval(poll));
+}
+const CODEC_CHECK_MS = 10000; // isConfigSupported
+const FRAME_TIMEOUT_MS = 15000; // one video frame from a decoder
+const FLUSH_TIMEOUT_MS = 8000; // a decoder flush mid-file
+const WARMUP_MS = 2500; // a (hardware) decoder's first frame may take this long before it counts as stuck
+
 export function fastExportAvailable() {
   return typeof VideoEncoder === 'function' && typeof VideoDecoder === 'function' && typeof VideoFrame === 'function'
     && typeof EncodedVideoChunk === 'function' && typeof OfflineAudioContext === 'function';
@@ -280,7 +303,7 @@ class VideoSource {
   }
   static async open(src, track, stats) {
     const cfg = { codec: track.codec, description: track.description, codedWidth: track.width, codedHeight: track.height };
-    const ok = await VideoDecoder.isConfigSupported(cfg).catch(() => ({ supported: false }));
+    const ok = await guard(VideoDecoder.isConfigSupported(cfg), CODEC_CHECK_MS, 'VideoDecoder.isConfigSupported').catch((e) => { if (e instanceof Unsupported) throw e; return { supported: false }; });
     if (!ok.supported) throw unsupported(`decoder ${track.codec}`);
     const s = new VideoSource(src, track, stats);
     s.cfg = cfg;
@@ -289,6 +312,7 @@ class VideoSource {
   onFrame(f) {
     this.pending.delete(f.timestamp);
     this.lastOut = performance.now();
+    this.gotOut = true;
     // given before (a re-feed after a flush decodes part of a GOP again), or older than the picture shown: not needed
     if (this.seen.has(f.timestamp) || (this.cur && f.timestamp <= this.cur.timestamp)) { f.close(); return; }
     this.seen.add(f.timestamp);
@@ -310,6 +334,9 @@ class VideoSource {
     this.cur?.close();
     this.cur = null;
     this.pending.clear();
+    this.gen = (this.gen || 0) + 1; // a flush still running belongs to the old decoding: its result is ignored
+    this.draining = null;
+    this.endDrain = null;
     if (this.dec.state === 'configured') this.dec.reset();
     this.dec.configure(this.cfg);
     const S = this.track.samples;
@@ -319,15 +346,31 @@ class VideoSource {
     this.from = k; // the keyframe decoding started at (fed without waiting)
     this.ended = false;
     this.seen.clear();
+    this.gotOut = false; // (until the first frame, the decoder may still be starting: see WARMUP_MS)
     this.lastOut = performance.now();
   }
-  /** Ask for every frame the decoder holds. Whatever was fed and still did not come out is lost. */
-  async drain() {
-    await this.dec.flush().catch((e) => { this.error = this.error || e; });
+  /**
+   * Ask for every frame the decoder holds; what was fed before and still did not come out is then lost. Not waited
+   * for where it is not needed: a hardware decoder (Windows, Android) has a few output pictures, and while the
+   * frames buffered here hold them, its flush cannot finish until the export goes on and uses them. (v1.8.1 waited
+   * there, and an export on a PC stayed at 0%.) More input may follow at once (a keyframe, as after any flush).
+   */
+  startDrain() {
+    if (this.draining) return this.draining;
+    const gen = this.gen;
+    const before = new Set(this.pending.keys());
     this.stats.flushes++;
-    this.stats.lost += this.pending.size;
-    this.pending.clear();
-    this.lastOut = performance.now();
+    this.draining = guard(this.dec.flush(), FLUSH_TIMEOUT_MS, 'video decoder flush').then(() => {
+      if (gen !== this.gen) return;
+      for (const ts of before) if (this.pending.delete(ts)) this.stats.lost++;
+      this.lastOut = performance.now();
+    }, (e) => {
+      if (gen === this.gen) this.error = this.error || e; // (a reset or close ends the flush: not an error)
+    }).finally(() => {
+      if (gen === this.gen) this.draining = null;
+      this.wake?.();
+    });
+    return this.draining;
   }
   async feed(s) {
     const data = await this.src.read(s.offset, s.size); // the chunk copies the bytes
@@ -365,17 +408,18 @@ class VideoSource {
         if (f && f.timestamp < limit - 2.5 * this.frameDur * 1e6 && this.sampleBetween(f.timestamp / 1e6 + 0.0005, limit / 1e6)) this.stats.stale++;
         return f;
       }
-      const quiet = performance.now() - this.lastOut;
+      const quiet = performance.now() - this.lastOut - (this.gotOut ? 0 : WARMUP_MS);
       if (this.next < S.length) {
-        // careful mode: what we wait for must come out before the next GOP goes in, so the decoder can be flushed here
-        if (this.careful && waiting && !unfed && S[this.next].key && this.next > this.from) { await this.drain(); continue; }
+        // careful mode: flush before the next GOP goes in (the frames we wait for come out), then go on feeding it
+        if (this.careful && waiting && !unfed && S[this.next].key && this.next > this.from && !this.draining) this.startDrain();
         if (this.pending.size < this.window && this.dec.decodeQueueSize < this.window) { await this.feed(S[this.next++]); continue; }
-      } else if (!this.ended) {
-        await this.drain();
-        this.ended = true;
-        continue;
+      } else if (!this.ended && !this.endDrain) {
+        // the whole file is in: flush once, and go on using the frames as they come out meanwhile
+        const gen = this.gen;
+        this.endDrain = this.startDrain().then(() => { if (gen === this.gen) this.ended = true; });
       }
-      if (quiet > STUCK_MS && this.window < MAX_WINDOW) {
+      if (this.draining) { this.stats.waits++; await this.nap(20); continue; }
+      if (quiet > STUCK_MS && this.window < MAX_WINDOW && this.buf.length < 4) {
         // the decoder holds frames until it gets more input: feed further ahead (the quiet time keeps counting)
         this.window = Math.min(MAX_WINDOW, this.window * 2);
         this.stats.window = Math.max(this.stats.window, this.window);
@@ -387,7 +431,8 @@ class VideoSource {
         if (++this.resyncs > MAX_RESYNCS) throw unsupported('video decoder holds frames');
         this.stats.resyncs++;
         this.careful = true;
-        await this.drain();
+        await this.startDrain();
+        if (this.error) throw this.error;
         this.next = this.keyBefore(this.next);
         this.from = this.next;
         continue;
@@ -397,6 +442,7 @@ class VideoSource {
     }
   }
   close() {
+    this.gen = (this.gen || 0) + 1;
     for (const f of this.buf) f.close();
     this.buf = [];
     this.cur?.close();
@@ -525,7 +571,7 @@ async function audioFor(id, ranges, source, stats) {
     stats.audio_full_decode = (stats.audio_full_decode || 0) + 1;
     try {
       const ctx = new OfflineAudioContext(2, 1, 48000);
-      const buffer = await ctx.decodeAudioData(await src.blob.arrayBuffer());
+      const buffer = await guard(src.blob.arrayBuffer().then((ab) => ctx.decodeAudioData(ab)), 60000, 'decodeAudioData', stats.flag);
       return [{ start: 0, end: Infinity, buffer }];
     } catch { return []; }
   }
@@ -538,10 +584,21 @@ async function audioFor(id, ranges, source, stats) {
     else merged.push([a, b]);
   }
   const out = [];
-  for (const [a, b] of merged) {
-    const r = await decodeAudioRange(src, track, a, b);
-    if (r) out.push({ start: r.start, end: r.start + r.buffer.duration, buffer: r.buffer });
-    stats.audio_decoded_s = (stats.audio_decoded_s || 0) + (b - a);
+  try {
+    for (const [a, b] of merged) {
+      const ms = 20000 + (b - a) * 400;
+      const r = await guard(decodeAudioRange(src, track, a, b, { timeoutMs: ms }), ms + 2000, 'AudioDecoder', stats.flag);
+      if (r) out.push({ start: r.start, end: r.start + r.buffer.duration, buffer: r.buffer });
+      stats.audio_decoded_s = (stats.audio_decoded_s || 0) + (b - a);
+    }
+  } catch (err) {
+    if (stats.flag?.cancelled) throw err;
+    // the browser's AudioDecoder failed or stopped answering on this file: decode the whole file the other way
+    stats.audio_full_decode = (stats.audio_full_decode || 0) + 1;
+    stats.audio_decoder_error = String(err?.message || err).slice(0, 160);
+    const ctx = new OfflineAudioContext(2, 1, 48000);
+    const buffer = await guard(src.blob.arrayBuffer().then((ab) => ctx.decodeAudioData(ab)), 60000, 'decodeAudioData', stats.flag);
+    return [{ start: 0, end: Infinity, buffer }];
   }
   return out;
 }
@@ -595,17 +652,17 @@ async function mixAudio(P, r0, r1, source, stats) {
     const off = s0 - part.start;
     node.start(from - r0 + Math.max(0, -off), Math.max(0, off), Math.max(0, to - from - Math.max(0, -off)));
   }
-  const out = any ? await ctx.startRendering() : null;
+  const out = any ? await guard(ctx.startRendering(), 30000 + (r1 - r0) * 500, 'audio mix (OfflineAudioContext)', stats.flag) : null;
   decoded.clear();
   return out;
 }
 
-async function encodeAudio(buf, onTick) {
+async function encodeAudio(buf, flag) {
   const base = { sampleRate: buf.sampleRate, numberOfChannels: 2, bitrate: 192000 };
   let cfg = null;
   for (const codec of ['mp4a.40.2', 'opus']) {
     const c = { ...base, codec };
-    if ((await AudioEncoder.isConfigSupported(c).catch(() => ({ supported: false }))).supported) { cfg = c; break; }
+    if ((await guard(AudioEncoder.isConfigSupported(c), CODEC_CHECK_MS, 'AudioEncoder.isConfigSupported').catch((e) => { if (e instanceof Unsupported) throw e; return { supported: false }; })).supported) { cfg = c; break; }
   }
   if (!cfg) throw unsupported('no AAC/Opus encoder');
   const chunks = [];
@@ -635,10 +692,12 @@ async function encodeAudio(buf, onTick) {
     enc.encode(ad);
     ad.close();
     if (enc.encodeQueueSize > 8) await new Promise((r) => setTimeout(r, 0));
-    onTick?.(i / L);
   }
-  await enc.flush();
-  enc.close();
+  try {
+    await guard(enc.flush(), 20000 + (L / buf.sampleRate) * 300, `AudioEncoder ${cfg.codec}`, flag);
+  } finally {
+    try { enc.close(); } catch { /* closed */ }
+  }
   if (error) throw error;
   return { codec: cfg.codec, sampleRate: buf.sampleRate, channels: 2, chunks, description };
 }
@@ -843,7 +902,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   let cfg = null;
   for (const prof of ['64', '4d', '42']) {
     const c = { codec: `avc1.${prof}00${hex2(lv)}`, width, height, bitrate, framerate: fps, latencyMode: 'quality', avc: { format: 'avc' } };
-    if ((await VideoEncoder.isConfigSupported(c).catch(() => ({ supported: false }))).supported) { cfg = c; break; }
+    if ((await guard(VideoEncoder.isConfigSupported(c), CODEC_CHECK_MS, 'VideoEncoder.isConfigSupported').catch((e) => { if (e instanceof Unsupported) throw e; return { supported: false }; })).supported) { cfg = c; break; }
   }
   if (!cfg) throw unsupported('no H.264 encoder');
 
@@ -861,12 +920,15 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   };
   const vClips = P.clips.filter((c) => c.type === 'video' && c.start < r1 && c.start + c.duration > r0);
   const tracks = new Map();
-  for (const c of vClips) if (!tracks.has(c.mediaId)) tracks.set(c.mediaId, demuxVideo(await (await source(c.mediaId)).moov()));
+  for (const c of vClips) if (!tracks.has(c.mediaId)) tracks.set(c.mediaId, demuxVideo(await guard((await source(c.mediaId)).moov(), 30000, 'reading the video file', flag)));
   stats.source_reads = 'windowed';
 
   // Audio first (fast): a failure here falls back before any video work.
+  stats.stage = 'audio';
+  Object.defineProperty(stats, 'flag', { value: flag, enumerable: false, configurable: true }); // (for the audio steps' cancel)
   const mixed = await mixAudio(P, r0, r1, source, stats);
-  const audio = mixed ? await encodeAudio(mixed) : null;
+  const audio = mixed ? await encodeAudio(mixed, flag) : null;
+  stats.stage = 'prepare';
   if (audio) {
     const d = audio.description;
     const from = audio.codec === 'opus' ? '' : !d?.length ? ' · tanpa deskripsi, dibuat' : d[0] === 0x03 || d[0] === 0x04 ? ' · ES_Descriptor (Safari) → ASC' : ' · ASC';
@@ -921,6 +983,8 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   enc.addEventListener?.('dequeue', () => { encWake?.(); encWake = null; });
   enc.configure(cfg);
   const total = Math.max(1, Math.round((r1 - r0) * fps));
+  stats.total = total;
+  stats.frame = 0;
   const prof = { decode: 0, render: 0, frame: 0, encodeWait: 0 }; // ms per stage (shown in the console)
   const tStart = performance.now();
   stats.prepare_ms = Math.round(tStart - tPrep);
@@ -943,7 +1007,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
           continue;
         }
         if (!sources.has(k)) sources.set(k, await VideoSource.open(new ByteSource((await source(clip.mediaId)).blob), tracks.get(clip.mediaId), decStats));
-        shown.set(k, await sources.get(k).frameAt(engine.localTime(clip, t)));
+        shown.set(k, await guard(sources.get(k).frameAt(engine.localTime(clip, t)), FRAME_TIMEOUT_MS + (i ? 0 : WARMUP_MS), `video decoder (frame ${i + 1})`, flag));
       }
       prof.decode += performance.now() - m; m = performance.now();
       renderFrame(ctx, t, env);
@@ -954,7 +1018,13 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
       prof.frame += performance.now() - m; m = performance.now();
       if (enc.encodeQueueSize > stats.encoder_queue_max) stats.encoder_queue_max = enc.encodeQueueSize;
       // (woken by the encoder as soon as it takes the next frame: a 1 ms timer is 4 ms or more in Safari)
-      while (enc.encodeQueueSize > 4 && !encError) await new Promise((r) => { encWake = r; setTimeout(r, 50); });
+      const tQ = performance.now();
+      while (enc.encodeQueueSize > 4 && !encError) {
+        if (flag?.cancelled) throw new Error('Ekspor dibatalkan');
+        if (performance.now() - tQ > FRAME_TIMEOUT_MS) throw unsupported(`video encoder did not answer within ${FRAME_TIMEOUT_MS / 1000} s (frame ${i + 1})`);
+        await new Promise((r) => { encWake = r; setTimeout(r, 50); });
+      }
+      stats.frame = i + 1;
       if (i % 30 === 0) {
         await spool.drain();
         // clearly broken already (twice the limit after 3 s of video): fall back now rather than at the end
@@ -974,7 +1044,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
     }
     stats.stage = 'encode';
     const tFlush = performance.now();
-    await enc.flush();
+    await guard(enc.flush(), 60000, 'video encoder flush', flag);
     if (encError) throw encError;
     Object.assign(stats, {
       frames: total,

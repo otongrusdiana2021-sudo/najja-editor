@@ -772,12 +772,28 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
   fg.style.strokeDashoffset = `${C}`;
   ov.querySelector('[data-cancel]').onclick = () => cancelExport();
   let started = performance.now();
+  let eta = null;
+  // What the export is doing now (stage, frame), so a slow step is visible instead of a silent 0%.
+  const stageTimer = setInterval(() => {
+    if (exportState.phase !== 'rendering') return;
+    const L = exportState.live || {};
+    const secs = Math.round((performance.now() - started) / 1000);
+    const left = eta != null ? ` · sisa ±${eta} detik` : '';
+    const text = exportState.mode === 'realtime' ? `Merender real-time${left}`
+      : L.stage === 'audio' ? `Menyiapkan audio… ${secs} dtk`
+        : L.stage === 'render' ? `Merender cepat · frame ${L.frame || 0}/${L.total || '…'}${left}`
+          : L.stage === 'encode' ? 'Menyelesaikan video…'
+            : L.stage === 'mux' ? 'Menyusun file MP4…'
+              : `Menyiapkan render… ${secs} dtk`;
+    const sub = ov.querySelector('.ex-sub');
+    if (sub) sub.textContent = `${text} · jangan tutup tab ini`;
+  }, 500);
   try {
     const res = await exportVideo(engine, opts, (p) => {
       ov.querySelector('.ex-pct').textContent = `${Math.round(p * 100)}%`;
       fg.style.strokeDashoffset = `${C * (1 - p)}`;
       const el = (performance.now() - started) / 1000;
-      if (p > 0.03) ov.querySelector('.ex-sub').textContent = `${exportState.mode === 'fast' ? 'Merender cepat' : 'Merender real-time'} · sisa ±${Math.max(0, Math.round(el / p - el))} detik · jangan tutup tab ini`;
+      eta = p > 0.03 ? Math.max(0, Math.round(el / p - el)) : null;
     }, (p, what) => {
       ov.querySelector('.ex-sub').textContent = what === 'quality'
         ? `Server menyiapkan salinan kualitas penuh… ${Math.round(p * 100)}%`
@@ -814,6 +830,8 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
     ov.remove();
     toast(err.message, { type: err.message.includes('dibatalkan') ? 'info' : 'error', timeout: 5000 });
     return null;
+  } finally {
+    clearInterval(stageTimer);
   }
 }
 

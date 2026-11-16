@@ -3,7 +3,7 @@ import { store } from './store.js';
 import { RESOLUTIONS } from './presets.js';
 import { preloadFonts } from './render.js';
 import { cacheProjectMedia } from './media.js';
-import { fastExport, fastExportAvailable } from './fastexport.js';
+import { fastExport, fastExportAvailable, guard } from './fastexport.js';
 import { metrics } from './metrics.js';
 import { storage } from './storage.js';
 
@@ -116,6 +116,7 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
   const flag = { cancelled: false };
   cancelFlag = flag;
   const stats = { stage: 'prepare' }; // per-stage timings for Diagnostik (metrics.js)
+  exportState.live = stats; // stage and frame for the progress dialog
   const record = (extra) => metrics.event('export', {
     width, height, fps, duration: Math.round((r1 - r0) * 10) / 10, mode: exportState.mode, fallback: stats.fallback || null, ...stats, ...extra,
   });
@@ -147,7 +148,8 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
       exportState.phase = 'rendering';
       exportState.mode = 'fast';
       try {
-        await preloadFonts(P);
+        // (a font that never loads must not hold the export: draw with the fallback font instead)
+        await guard(preloadFonts(P), 10000, 'fonts', flag).catch((e) => { if (flag.cancelled) throw e; });
         const blob = await fastExport({
           engine, P, width, height, fps, bitrate: videoBitsPerSecond, r0, r1, flag, stats,
           spool: storage.status?.features?.exportSpool !== false, // NAJJA_EXPORT_SPOOL=0 on the server turns it off
