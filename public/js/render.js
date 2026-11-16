@@ -1,11 +1,12 @@
 // Frame compositor: draws the project at time t onto a 2D canvas. Pure drawing — media elements come from env.
 import { FILTERS, FONTS } from './presets.js';
 import { clamp, ease, hash, rand2, rgba, hexToRgb } from './util.js';
+import { drawFiltered } from './gpufx.js';
 import { kfValue } from './store.js';
 import { compilePlan, clipsAt, mainStateAt } from './plan.js';
 
 const FILTER_MAP = Object.fromEntries(FILTERS.map((f) => [f.id, f]));
-const NEUTRAL = { brightness: 1, contrast: 1, saturate: 1, sepia: 0, grayscale: 0, invert: 0, 'hue-rotate': 0 };
+const NEUTRAL = { brightness: 1, contrast: 1, saturate: 1, sepia: 0, grayscale: 0, invert: 0, 'hue-rotate': 0, sharpen: 0 };
 const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
 
 // ---------------------------------------------------------------------------------------------
@@ -525,9 +526,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
     const direct = overlays.length && !chroma && clip.type === 'video' && alpha >= 0.999
       && (clip.blend || 'source-over') === 'source-over' && !/blur\(/.test(filter);
     if (direct) {
-      ctx.filter = filter;
-      ctx.drawImage(src.el, sx, sy, sw, sh, -size.w / 2, -size.h / 2, size.w, size.h);
-      ctx.filter = 'none';
+      drawFiltered(ctx, filter, src.el, sx, sy, sw, sh, -size.w / 2, -size.h / 2, size.w, size.h);
       for (const ov of overlays) {
         ctx.globalAlpha = clamp(ov.alpha, 0, 1);
         if (ov.vignette) {
@@ -549,9 +548,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
       lc.globalAlpha = 1;
       lc.globalCompositeOperation = 'source-over';
       lc.clearRect(0, 0, lw, lh);
-      lc.filter = filter;
-      lc.drawImage(src.el, sx, sy, sw, sh, 0, 0, lw, lh);
-      lc.filter = 'none';
+      drawFiltered(lc, filter, src.el, sx, sy, sw, sh, 0, 0, lw, lh);
       if (chroma && !chromaKeyGPU(L, lc, lw, lh, clip.chroma)) chromaKey(lc, lw, lh, clip.chroma);
       for (const ov of overlays) {
         lc.globalAlpha = clamp(ov.alpha, 0, 1);
@@ -571,9 +568,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
       }
       ctx.drawImage(L, -size.w / 2, -size.h / 2, size.w, size.h);
     } else {
-      ctx.filter = filter;
-      ctx.drawImage(src.el, sx, sy, sw, sh, -size.w / 2, -size.h / 2, size.w, size.h);
-      ctx.filter = 'none';
+      drawFiltered(ctx, filter, src.el, sx, sy, sw, sh, -size.w / 2, -size.h / 2, size.w, size.h);
     }
   } else {
     if (blurUnits > 0.05) ctx.filter = `blur(${(blurUnits * pxPerUnit).toFixed(2)}px)`;
@@ -832,9 +827,7 @@ export function applyAdjustLayer(ctx, clip, pxPerUnit = 1) {
   if (filter !== 'none') {
     const src = copyFrame(ctx);
     ctx.globalAlpha = k;
-    ctx.filter = filter;
-    ctx.drawImage(src, 0, 0);
-    ctx.filter = 'none';
+    drawFiltered(ctx, filter, src, 0, 0);
   }
   for (const ov of overlays) {
     ctx.globalAlpha = clamp(ov.alpha * k, 0, 1);
@@ -885,15 +878,13 @@ export function applyEffect(ctx, fx, t, local, dur) {
       if (Math.floor(local * 8) % 2) {
         const src = copyFrame(ctx);
         ctx.globalCompositeOperation = 'copy';
-        ctx.filter = `invert(${k}) grayscale(1)`;
-        ctx.drawImage(src, 0, 0);
+        drawFiltered(ctx, `invert(${k}) grayscale(1)`, src, 0, 0);
       }
       break;
     case 'rainbow': {
       const src = copyFrame(ctx);
       ctx.globalCompositeOperation = 'copy';
-      ctx.filter = `hue-rotate(${(local * 180 * (0.5 + k)) % 360}deg) saturate(${1 + k * 0.6})`;
-      ctx.drawImage(src, 0, 0);
+      drawFiltered(ctx, `hue-rotate(${(local * 180 * (0.5 + k)) % 360}deg) saturate(${1 + k * 0.6})`, src, 0, 0);
       break;
     }
     case 'glitch': {
@@ -943,10 +934,10 @@ export function applyEffect(ctx, fx, t, local, dur) {
       break;
     }
     case 'bw': {
+      // (v1.9: through drawFiltered — on an iPad the canvas filter did nothing, so this effect did nothing)
       const src = copyFrame(ctx);
       ctx.globalCompositeOperation = 'copy';
-      ctx.filter = `grayscale(${k}) contrast(${1 + 0.2 * k})`;
-      ctx.drawImage(src, 0, 0);
+      drawFiltered(ctx, `grayscale(${0.35 + 0.65 * k}) contrast(${1 + 0.2 * k})`, src, 0, 0);
       break;
     }
     case 'vignette': {
@@ -958,18 +949,17 @@ export function applyEffect(ctx, fx, t, local, dur) {
       break;
     }
     case 'blur': {
+      // drawn over the sharp frame (not 'copy'): the blurred picture fades out at the borders, and the frame under
+      // it keeps the borders from going dark. Stronger than v1.8 (1.2% of the short side at most): 1–4%.
       const src = copyFrame(ctx);
-      ctx.globalCompositeOperation = 'copy';
-      ctx.filter = `blur(${(Math.min(W, H) * 0.012 * k).toFixed(1)}px)`;
-      ctx.drawImage(src, 0, 0);
+      drawFiltered(ctx, `blur(${(Math.min(W, H) * (0.01 + 0.03 * k)).toFixed(1)}px)`, src, 0, 0);
       break;
     }
     case 'dreamy': {
       const src = copyFrame(ctx);
       ctx.globalCompositeOperation = 'screen';
       ctx.globalAlpha = 0.55 * k;
-      ctx.filter = `blur(${(Math.min(W, H) * 0.02).toFixed(1)}px) brightness(1.1)`;
-      ctx.drawImage(src, 0, 0);
+      drawFiltered(ctx, `blur(${(Math.min(W, H) * 0.02).toFixed(1)}px) brightness(1.1)`, src, 0, 0);
       break;
     }
     case 'letterbox': {
@@ -1025,8 +1015,7 @@ export function renderFrame(ctx, t, env) {
       if (src) {
         const k = Math.max(P.width / src.w, P.height / src.h) * 1.08;
         ctx.save();
-        ctx.filter = `blur(${(((P.background.blur ?? 40) / 100) * 60 * env.s).toFixed(1)}px) brightness(0.85)`;
-        ctx.drawImage(src.el, (P.width - src.w * k) / 2, (P.height - src.h * k) / 2, src.w * k, src.h * k);
+        drawFiltered(ctx, `blur(${(((P.background.blur ?? 40) / 100) * 60 * env.s).toFixed(1)}px) brightness(0.85)`, src.el, (P.width - src.w * k) / 2, (P.height - src.h * k) / 2, src.w * k, src.h * k);
         ctx.restore();
       }
     }

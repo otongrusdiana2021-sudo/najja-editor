@@ -7,6 +7,7 @@ import {
 import { icon } from './icons.js';
 import { escapeHtml, getPath, setPath, clamp, fmtSec, normHex, deepMerge, clone } from './util.js';
 import { presetStyle } from './actions.js';
+import { favs, star, onStar } from './favs.js';
 import * as actions from './actions.js';
 
 const sec = (title, body, extra = '') => `<section class="isec">${title ? `<div class="isec-head"><span>${title}</span>${extra}</div>` : ''}<div class="isec-body">${body}</div></section>`;
@@ -141,10 +142,14 @@ export class Inspector {
     const keys = { in: 'animIn', out: 'animOut', loop: 'animLoop' };
     const key = keys[this.animTab];
     const cur = c[key]?.type || 'none';
-    const items = lists[this.animTab].filter((a) => c.type === 'text' || a.id !== 'typewriter');
+    // favourites first (★), then the rest in their usual order
+    const all = lists[this.animTab].filter((a) => c.type === 'text' || a.id !== 'typewriter');
+    const favKind = `anim-${this.animTab}`;
+    const fav = favs.pick(favKind, all);
+    const items = [...fav, ...all.filter((a) => !fav.includes(a))];
     return `
       <div class="seg wide">${[['in', 'Masuk'], ['out', 'Keluar'], ['loop', 'Kombo']].map(([id, n]) => `<button class="${this.animTab === id ? 'on' : ''}" data-animtab="${id}">${n}${c[keys[id]]?.type && c[keys[id]].type !== 'none' ? ' •' : ''}</button>`).join('')}</div>
-      <div class="anim-grid">${items.map((a) => `<button class="anim-chip ${cur === a.id ? 'on' : ''}" data-anim="${a.id}" data-key="${key}"><span class="anim-demo a-${this.animTab}-${a.id}"></span><span>${a.name}</span></button>`).join('')}</div>
+      <div class="anim-grid">${items.map((a) => `<button class="anim-chip ${cur === a.id ? 'on' : ''}" data-anim="${a.id}" data-key="${key}"><span class="anim-demo a-${this.animTab}-${a.id}"></span><span>${a.name}</span>${a.id !== 'none' ? star(favKind, a.id) : ''}</button>`).join('')}</div>
       ${cur !== 'none' ? (this.animTab === 'loop'
         ? slider('Kecepatan', 'animLoop.speed', 0.25, 4, 0.05, { unit: 'x', decimals: 2 })
         : slider('Durasi', `${key}.duration`, 0.1, Math.max(0.2, Math.min(5, c.duration)), 0.1, { unit: 's', decimals: 1 })) : ''}`;
@@ -181,9 +186,9 @@ export class Inspector {
             <div class="seg">${['left', 'center', 'right'].map((a) => `<button class="${t.align === a ? 'on' : ''}" data-align="${a}" title="Rata ${a === 'left' ? 'kiri' : a === 'right' ? 'kanan' : 'tengah'}">${a === 'left' ? '⇤' : a === 'right' ? '⇥' : '↔'}</button>`).join('')}</div>
           </div>
           ${slider('Ukuran', 'text.size', 8, 400, 1, { unit: 'px' })}
-          ${FONT_CATS.map((cat) => {
-            const list = FONTS.filter((f) => (f.cat || 'Dasar') === cat);
-            return list.length ? `<div class="font-cat"><h5>${cat}</h5><div class="font-grid">${list.map((f) => `<button class="font-item ${t.font === f.name ? 'on' : ''}" data-font="${escapeHtml(f.name)}" style="font-family:'${f.name}'">${escapeHtml(f.name)}</button>`).join('')}</div></div>` : '';
+          ${['★ Favorit', ...FONT_CATS].map((cat) => {
+            const list = cat === '★ Favorit' ? favs.pick('font', FONTS, (f) => f.name) : FONTS.filter((f) => (f.cat || 'Dasar') === cat);
+            return list.length ? `<div class="font-cat"><h5>${cat}</h5><div class="font-grid">${list.map((f) => `<button class="font-item ${t.font === f.name ? 'on' : ''}" data-font="${escapeHtml(f.name)}" style="font-family:'${f.name}'">${escapeHtml(f.label || f.name)}${star('font', f.name)}</button>`).join('')}</div></div>` : '';
           }).join('')}`;
         break;
       case 'color':
@@ -297,6 +302,7 @@ export class Inspector {
   }
 
   onClick(e) {
+    if (onStar(e)) { this.render(true); return; }
     const c = this.target();
     const t = e.target.closest('button, input[data-do]');
     if (!t) return;

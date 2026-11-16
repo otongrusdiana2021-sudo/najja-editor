@@ -253,6 +253,8 @@ export const GRADIENTS = [
   ['#ee0979', '#ff6a00', 135], ['#8e2de2', '#4a00e0', 135], ['#f5f7fa', '#c3cfe2', 180], ['#232526', '#414345', 180],
 ];
 
+// Built-in sounds; SFX_VERSION changes when they are remade (v2: louder, peak −1 dBFS), so projects get the new ones.
+export const SFX_VERSION = 2;
 export const SFX = [
   { id: 'whoosh', name: 'Whoosh', kind: 'sfx', dur: 0.9 },
   { id: 'pop', name: 'Pop', kind: 'sfx', dur: 0.25 },
@@ -262,6 +264,19 @@ export const SFX = [
   { id: 'riser', name: 'Riser', kind: 'sfx', dur: 2.2 },
   { id: 'impact', name: 'Boom', kind: 'sfx', dur: 1.8 },
   { id: 'swipe', name: 'Swipe', kind: 'sfx', dur: 0.35 },
+  // v1.9: more basic sounds (made here, like the others: no third-party audio)
+  { id: 'shutter', name: 'Jepret Kamera', kind: 'sfx', dur: 0.4 },
+  { id: 'bell', name: 'Lonceng', kind: 'sfx', dur: 2.2 },
+  { id: 'tada', name: 'Ta-da', kind: 'sfx', dur: 1.6 },
+  { id: 'success', name: 'Berhasil', kind: 'sfx', dur: 0.9 },
+  { id: 'wrong', name: 'Salah', kind: 'sfx', dur: 0.7 },
+  { id: 'boing', name: 'Boing', kind: 'sfx', dur: 0.8 },
+  { id: 'bubble', name: 'Gelembung', kind: 'sfx', dur: 0.3 },
+  { id: 'cash', name: 'Kaching', kind: 'sfx', dur: 1.2 },
+  { id: 'typing', name: 'Ketik', kind: 'sfx', dur: 1.5 },
+  { id: 'heartbeat', name: 'Detak Jantung', kind: 'sfx', dur: 1.6 },
+  { id: 'drumroll', name: 'Drum Roll', kind: 'sfx', dur: 2.5 },
+  { id: 'glitchfx', name: 'Glitch', kind: 'sfx', dur: 0.6 },
   { id: 'lofi', name: 'Lo-fi Santai', kind: 'music', dur: 22.6 },
   { id: 'upbeat', name: 'Upbeat Ceria', kind: 'music', dur: 16 },
   { id: 'ambient', name: 'Ambient Tenang', kind: 'music', dur: 19.2 },

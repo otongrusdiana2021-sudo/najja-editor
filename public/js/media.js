@@ -2,7 +2,7 @@
 import { uid, waitEvent, clamp, objectUrl, revokeUrl } from './util.js';
 import { db } from './db.js';
 import { store } from './store.js';
-import { SFX } from './presets.js';
+import { SFX, SFX_VERSION } from './presets.js';
 import { remote } from './remote.js';
 import { toast } from './ui.js';
 import { deviceCache } from './devicecache.js';
@@ -843,6 +843,65 @@ function buildSfx(id, ctx, out, nb, dur) {
       tone(ctx, out, { type: 'sawtooth', f0: 110, f1: 1760, t: 0, a: 2.0, d: 0.15, peak: 0.16 });
       noise(ctx, out, nb, { t: 0, a: 2.0, d: 0.15, peak: 0.5, type: 'bandpass', f: 400, f1: 8000, q: 1.5 });
       break;
+    case 'shutter':
+      noise(ctx, out, nb, { t: 0, a: 0.001, d: 0.05, peak: 0.9, type: 'bandpass', f: 2500, q: 0.8 });
+      noise(ctx, out, nb, { t: 0.09, a: 0.001, d: 0.08, peak: 0.8, type: 'bandpass', f: 1800, q: 0.7 });
+      tone(ctx, out, { f0: 180, f1: 90, t: 0.09, a: 0.001, d: 0.06, peak: 0.5 });
+      break;
+    case 'bell':
+      for (const [f, p, d] of [[784, 0.5, 2.0], [1568, 0.25, 1.4], [2352, 0.14, 0.9], [3136, 0.08, 0.6], [1975, 0.1, 1.1]]) tone(ctx, out, { f0: f, t: 0, a: 0.003, d, peak: p });
+      break;
+    case 'tada':
+      for (const [n, t] of [[72, 0], [76, 0.11], [79, 0.22]]) tone(ctx, out, { type: 'triangle', f0: midi(n), t, a: 0.01, d: 0.25, peak: 0.45 });
+      for (const n of [72, 76, 79, 84]) tone(ctx, out, { type: 'sawtooth', f0: midi(n), t: 0.36, a: 0.02, d: 1.1, peak: 0.12 });
+      for (const n of [72, 76, 79, 84]) tone(ctx, out, { type: 'triangle', f0: midi(n), t: 0.36, a: 0.01, d: 1.15, peak: 0.25 });
+      break;
+    case 'success':
+      tone(ctx, out, { f0: midi(76), t: 0, a: 0.005, d: 0.18, peak: 0.55 });
+      tone(ctx, out, { f0: midi(83), t: 0.1, a: 0.005, d: 0.6, peak: 0.55 });
+      tone(ctx, out, { f0: midi(95), t: 0.1, a: 0.005, d: 0.3, peak: 0.12 });
+      break;
+    case 'wrong':
+      tone(ctx, out, { type: 'square', f0: 220, f1: 200, t: 0, a: 0.005, d: 0.22, peak: 0.3 });
+      tone(ctx, out, { type: 'square', f0: 165, f1: 150, t: 0.25, a: 0.005, d: 0.35, peak: 0.3 });
+      break;
+    case 'boing':
+      tone(ctx, out, { f0: 140, f1: 520, t: 0, a: 0.005, d: 0.18, peak: 0.6 });
+      tone(ctx, out, { type: 'triangle', f0: 520, f1: 160, t: 0.18, a: 0.005, d: 0.55, peak: 0.5 });
+      break;
+    case 'bubble':
+      tone(ctx, out, { f0: 300, f1: 1200, t: 0, a: 0.004, d: 0.12, peak: 0.8 });
+      tone(ctx, out, { f0: 900, f1: 1600, t: 0.05, a: 0.004, d: 0.08, peak: 0.3 });
+      break;
+    case 'cash':
+      noise(ctx, out, nb, { t: 0, a: 0.001, d: 0.08, peak: 0.7, type: 'bandpass', f: 3000, q: 2 });
+      for (const [f, p] of [[2637, 0.4], [3520, 0.3], [5274, 0.16]]) tone(ctx, out, { f0: f, t: 0.1, a: 0.003, d: 1.0, peak: p });
+      break;
+    case 'typing':
+      for (let i = 0; i < 9; i++) {
+        const t = i * 0.15 + (i % 3) * 0.02;
+        noise(ctx, out, nb, { t, a: 0.001, d: 0.03, peak: 0.7, type: 'bandpass', f: 2600 + (i % 4) * 400, q: 1.5 });
+        tone(ctx, out, { f0: 160, t, a: 0.001, d: 0.025, peak: 0.25 });
+      }
+      break;
+    case 'heartbeat':
+      for (const t0 of [0, 0.8]) {
+        tone(ctx, out, { f0: 70, f1: 45, t: t0, a: 0.005, d: 0.16, peak: 1 });
+        tone(ctx, out, { f0: 60, f1: 40, t: t0 + 0.22, a: 0.005, d: 0.2, peak: 0.8 });
+      }
+      break;
+    case 'drumroll':
+      for (let i = 0; i < 40; i++) noise(ctx, out, nb, { t: i * 0.05, a: 0.002, d: 0.06, peak: 0.25 + (i / 40) * 0.5, type: 'bandpass', f: 1500, q: 0.7 });
+      tone(ctx, out, { f0: 110, f1: 40, t: 2.0, a: 0.005, d: 0.45, peak: 1 });
+      noise(ctx, out, nb, { t: 2.0, a: 0.002, d: 0.45, peak: 0.6, type: 'highpass', f: 5000 });
+      break;
+    case 'glitchfx':
+      for (let i = 0; i < 8; i++) {
+        const t = i * 0.07;
+        tone(ctx, out, { type: 'square', f0: 200 + ((i * 397) % 1400), t, a: 0.001, d: 0.05, peak: 0.25 });
+        noise(ctx, out, nb, { t, a: 0.001, d: 0.04, peak: 0.4, type: 'bandpass', f: 800 + ((i * 911) % 5000), q: 3 });
+      }
+      break;
     case 'impact':
       tone(ctx, out, { f0: 110, f1: 32, t: 0, a: 0.005, d: 1.6, peak: 1 });
       noise(ctx, out, nb, { t: 0, a: 0.003, d: 0.9, peak: 0.6, type: 'lowpass', f: 1800, f1: 120 });
@@ -946,6 +1005,19 @@ export async function synthAudio(id) {
   const nb = noiseBuffer(ctx, 2.5);
   buildSfx(id, ctx, master, nb, def.dur);
   const buf = await ctx.startRendering();
+  // Loud like the sounds of phone editors (v1.9: the peaks were ±0.3–0.5 under a compressor): normalised to −1 dBFS,
+  // short effects a little denser (soft saturation), music only normalised.
+  let peak = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) for (const v of buf.getChannelData(c)) if (Math.abs(v) > peak) peak = Math.abs(v);
+  if (peak > 1e-4) {
+    const g = 0.891 / peak;
+    const drive = def.kind === 'sfx' ? 1.6 : 0;
+    const norm = drive ? Math.tanh(drive) : 1;
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const d = buf.getChannelData(c);
+      for (let i = 0; i < d.length; i++) d[i] = drive ? (Math.tanh(drive * d[i] * g / 0.891) / norm) * 0.891 : d[i] * g;
+    }
+  }
   const blob = encodeWav(buf);
   sfxCache.set(id, blob);
   return blob;
@@ -954,11 +1026,13 @@ export async function synthAudio(id) {
 /** Find a library entry created from a stock sound, or import it. */
 export async function ensureStockAudio(id) {
   const def = SFX.find((s) => s.id === id);
-  const existing = store.P.media.find((m) => m.stock === id && mediaRT.get(m.id)?.status === 'ready');
+  // (a copy made by an older version of the sounds is not reused: SFX_VERSION)
+  const existing = store.P.media.find((m) => m.stock === id && (m.stockV || 1) === SFX_VERSION && mediaRT.get(m.id)?.status === 'ready');
   if (existing) return existing;
   const blob = await synthAudio(id);
   const entry = await importFile(new File([blob], `${def.name}.wav`, { type: 'audio/wav' }), { name: def.name });
   entry.stock = id;
+  entry.stockV = SFX_VERSION;
   return entry;
 }
 

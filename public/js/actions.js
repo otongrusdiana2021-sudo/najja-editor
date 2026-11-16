@@ -168,11 +168,22 @@ export function duplicateClip(id, start) {
         let t = 0;
         for (const c of list) { c.start = t; t += c.duration; }
       }
-    } else {
+    } else if (start != null) {
       P.clips.push(copy);
-      const s = start ?? clipEnd(src);
-      copy.start = findFreeStart(P, copy.trackId, s, copy.duration, copy.id);
-      if (start != null && copy.start !== s) placeClip(P, copy, 'new', s);
+      copy.start = findFreeStart(P, copy.trackId, start, copy.duration, copy.id);
+      if (copy.start !== start) placeClip(P, copy, 'new', start);
+    } else {
+      // Right after the source (v1.9: it went to the next free place on the track, often the very end):
+      // - on the main track without magnet, the clips after it move along by the copy's length;
+      // - on other tracks, when the space right after it is taken, on a track above at that time.
+      P.clips.push(copy);
+      const s = clipEnd(src);
+      const free = findFreeStart(P, copy.trackId, s, copy.duration, copy.id) === s;
+      if (free) copy.start = s;
+      else if (src.trackId === 'main') {
+        for (const c of P.clips) if (c.trackId === 'main' && c.id !== copy.id && c.start >= s - 1e-4) c.start += copy.duration;
+        copy.start = s;
+      } else placeClip(P, copy, 'new', s);
     }
     return copy;
   });

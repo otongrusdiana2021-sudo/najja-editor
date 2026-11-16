@@ -589,6 +589,17 @@ export class Timeline {
     this.engine.scrub(clamp(sl / this.pps, 0, store.duration()));
   }
 
+  /**
+   * A tapped / clicked clip: the playhead goes to it (its start), unless it already is on it — the timeline scrolls
+   * so the clip sits under the centre line and the preview shows it (v1.9).
+   */
+  focusClip(clip) {
+    const c = store.clip(clip.id) || clip;
+    const t = this.engine.time;
+    if (t >= c.start - 1e-3 && t < c.start + c.duration - 1e-3) return;
+    this.seekTo(c.start + Math.min(0.001, c.duration / 2));
+  }
+
   /** Scroll so time t is under the playhead. */
   seekTo(t) {
     this.engine.pause();
@@ -654,7 +665,14 @@ export class Timeline {
       window.removeEventListener('pointermove', move);
       this.cancelPress = null;
     };
-    const up = () => { const tap = !done; finish(); if (tap) store.select(store.selection === clip.id ? null : clip.id); };
+    const up = () => {
+      const tap = !done;
+      finish();
+      if (!tap) return;
+      const off = store.selection === clip.id;
+      store.select(off ? null : clip.id);
+      if (!off) this.focusClip(clip);
+    };
     const move = (ev) => { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 10) finish(); };
     const timer = setTimeout(() => {
       if (done) return;
@@ -847,6 +865,7 @@ export class Timeline {
       this.hideGhost();
       onEnd?.();
       if (dragging) this.endHold();
+      if (!dragging && !immediate) this.focusClip(clip); // a click (no drag): the playhead goes to the clip
       if (!dragging || !state || !state.target?.row && !state.target?.newTrack) return;
       const { t, target, pt } = state;
       store.mutate('Pindah klip', (P) => {

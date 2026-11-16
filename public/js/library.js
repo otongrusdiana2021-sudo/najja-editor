@@ -10,6 +10,8 @@ import {
 import { icon } from './icons.js';
 import { escapeHtml, fmtDur, fmtBytes, pickFiles } from './util.js';
 import { cssFilterFor } from './render.js';
+import { drawFiltered } from './gpufx.js';
+import { favs, star, onStar } from './favs.js';
 import { setDragPayload } from './timeline.js';
 import * as actions from './actions.js';
 import { toast, modal, confirmDialog } from './ui.js';
@@ -22,6 +24,9 @@ const TITLES = {
 };
 
 /** Asset panels (music, sound effects, text templates, captions, effects, transitions, filters, AI), shown in a bottom sheet. */
+const tplTile = (t) => `<button class="ttpl" draggable="true" data-template="${t.id}"><span class="tp-prev tp-${t.preset}">${escapeHtml(t.text.split('\n')[0])}</span><em>${t.name}</em>${star('template', t.id)}</button>`;
+const styleTile = (p) => `<button class="tstyle" draggable="true" data-text="${p.id}" title="${p.name}"><span class="tp-prev tp-${p.id}">Teks</span><em>${p.name}</em>${star('textstyle', p.id)}</button>`;
+
 export class Library {
   constructor(engine) {
     this.panel = null;
@@ -88,6 +93,14 @@ export class Library {
     if (this.tab === 'filter' || this.tab === 'transition') this.paintFilterThumbs();
   }
 
+  /** "★ Favorit" section of a tab (nothing when there are none). */
+  favSection(kind, all, tile, gridClass) {
+    const list = favs.pick(kind, all);
+    if (!list.length) return '';
+    const items = list.map(tile).join('');
+    return `<div class="lib-section fav-section"><h4>★ Favorit</h4>${gridClass ? `<div class="${gridClass}">${items}</div>` : items}</div>`;
+  }
+
   // ---------------------------------------------------------------------------------------------
   mediaCard(m) {
     const rt = mediaRT.get(m.id) || {};
@@ -115,20 +128,21 @@ export class Library {
   audioRow(s) {
     return `<div class="audio-row" draggable="true" data-sfx="${s.id}">
         <button class="ar-play" data-play="${s.id}" title="Dengarkan" aria-label="Dengarkan">${icon(this.preview?.id === s.id ? 'pause' : 'play', 14)}</button>
-        <div class="ar-info"><b>${s.name}</b><span>${fmtDur(s.dur)} · ${s.kind === 'music' ? 'Musik' : 'Efek suara'}</span></div>
+        <div class="ar-info"><b>${s.name}</b><span>${fmtDur(s.dur)} · ${s.kind === 'music' ? 'Musik' : 'Efek suara'}</span></div>${star('sfx', s.id)}
         <button class="ar-add" data-addsfx="${s.id}" title="Tambah di playhead" aria-label="Tambah">${icon('plus', 16)}</button></div>`;
   }
 
   musicPanel() {
     const mine = store.P.media.filter((m) => m.type === 'audio' && !m.stock);
     return `
+      ${this.favSection('sfx', SFX.filter((s) => s.kind === 'music'), (s) => this.audioRow(s), '')}
       <div class="lib-section"><h4>Musik bawaan</h4>${SFX.filter((s) => s.kind === 'music').map((s) => this.audioRow(s)).join('')}</div>
       <div class="lib-section"><h4>Audio saya <button class="btn sm ghost" data-do="importAudio">${icon('upload', 14)} Impor audio</button></h4>
         ${mine.length ? `<div class="media-grid">${mine.map((m) => this.mediaCard(m)).join('')}</div>` : '<p class="hint">Audio yang kamu impor (MP3, WAV, M4A) muncul di sini. Ketuk untuk menambah di playhead.</p>'}</div>`;
   }
 
   sfxPanel() {
-    return `<div class="lib-section">${SFX.filter((s) => s.kind === 'sfx').map((s) => this.audioRow(s)).join('')}</div>
+    return `${this.favSection('sfx', SFX.filter((s) => s.kind === 'sfx'), (s) => this.audioRow(s), '')}<div class="lib-section">${SFX.filter((s) => s.kind === 'sfx').map((s) => this.audioRow(s)).join('')}</div>
       <p class="hint">Ketuk ▶ untuk mendengar, + untuk menaruh di playhead.</p>`;
   }
 
@@ -141,8 +155,10 @@ export class Library {
 
   templatePanel() {
     return `
-      <div class="lib-section"><h4>Template judul</h4><div class="ttpl-grid">${TEXT_TEMPLATES.map((t) => `<button class="ttpl" draggable="true" data-template="${t.id}"><span class="tp-prev tp-${t.preset}">${escapeHtml(t.text.split('\n')[0])}</span><em>${t.name}</em></button>`).join('')}</div></div>
-      <div class="lib-section"><h4>Gaya teks</h4><div class="tstyle-grid">${TEXT_PRESETS.map((p) => `<button class="tstyle" draggable="true" data-text="${p.id}" title="${p.name}"><span class="tp-prev tp-${p.id}">Teks</span><em>${p.name}</em></button>`).join('')}</div></div>`;
+      ${this.favSection('template', TEXT_TEMPLATES, (t) => tplTile(t), 'ttpl-grid')}
+      ${this.favSection('textstyle', TEXT_PRESETS, (p) => styleTile(p), 'tstyle-grid')}
+      <div class="lib-section"><h4>Template judul</h4><div class="ttpl-grid">${TEXT_TEMPLATES.map(tplTile).join('')}</div></div>
+      <div class="lib-section"><h4>Gaya teks</h4><div class="tstyle-grid">${TEXT_PRESETS.map(styleTile).join('')}</div></div>`;
   }
 
   captionPanel() {
@@ -157,11 +173,13 @@ export class Library {
   }
 
   effectPanel() {
-    const cats = ['Semua', ...new Set(EFFECTS.map((e) => e.cat))];
-    const list = EFFECTS.filter((e) => this.fxCat === 'Semua' || e.cat === this.fxCat);
+    const fav = favs.pick('effect', EFFECTS);
+    const cats = [...(fav.length ? ['★ Favorit'] : []), 'Semua', ...new Set(EFFECTS.map((e) => e.cat))];
+    if (!cats.includes(this.fxCat)) this.fxCat = 'Semua';
+    const list = this.fxCat === '★ Favorit' ? fav : EFFECTS.filter((e) => this.fxCat === 'Semua' || e.cat === this.fxCat);
     return `
       <div class="chip-row">${cats.map((c) => `<button class="chip ${this.fxCat === c ? 'on' : ''}" data-fxcat="${c}">${c}</button>`).join('')}</div>
-      <div class="tile-grid">${list.map((f) => `<button class="tile fx-tile" draggable="true" data-effect="${f.id}" style="--a:${f.colors[0]};--b:${f.colors[1]}"><span class="tile-art fx-${f.id}"><b>${f.icon}</b></span><em>${f.name}</em></button>`).join('')}</div>
+      <div class="tile-grid">${list.map((f) => `<button class="tile fx-tile" draggable="true" data-effect="${f.id}" style="--a:${f.colors[0]};--b:${f.colors[1]}"><span class="tile-art fx-${f.id}"><b>${f.icon}</b></span><em>${f.name}</em>${star('effect', f.id)}</button>`).join('')}</div>
       <p class="hint">${this.opts.range ? 'Efek dipasang sepanjang klip terpilih.' : 'Ketuk untuk menambah di playhead (3 detik).'}</p>`;
   }
 
@@ -170,9 +188,11 @@ export class Library {
     const list = sortedClips(store.P, 'main');
     const valid = sel && sel.trackId === 'main' && list.indexOf(sel) > 0;
     const cur = valid ? sel.transition?.type : null;
+    const trTile = (t) => `<button class="tile tr-tile ${cur === t.id ? 'on' : ''}" data-transition="${t.id}"><span class="tile-art tr-art tr-${t.id}"><i class="a"></i><i class="b"></i><b class="tr-ic">${t.icon}</b></span><em>${t.name}</em>${t.id !== 'none' ? star('transition', t.id) : ''}</button>`;
     return `
       <p class="hint">${valid ? `Transisi masuk ke klip <b>${escapeHtml(sel.name || '')}</b>.` : 'Ketuk tombol di antara dua klip di track utama untuk memilih sambungannya.'}</p>
-      <div class="tile-grid">${TRANSITIONS.map((t) => `<button class="tile tr-tile ${cur === t.id ? 'on' : ''}" data-transition="${t.id}"><span class="tile-art tr-art tr-${t.id}"><i class="a"></i><i class="b"></i><b class="tr-ic">${t.icon}</b></span><em>${t.name}</em></button>`).join('')}</div>
+      ${this.favSection('transition', TRANSITIONS.filter((t) => t.id !== 'none'), trTile, 'tile-grid')}
+      <div class="tile-grid">${TRANSITIONS.map(trTile).join('')}</div>
       <div class="ctl"><label>Durasi transisi: <b class="tr-dur-v">${this.trDuration.toFixed(1)}s</b></label><input type="range" class="tr-dur" min="0.2" max="2" step="0.1" value="${this.trDuration}"></div>
       <button class="btn sm ghost" data-do="trAll">${icon('layers', 14)} Terapkan ke semua klip</button>`;
   }
@@ -180,10 +200,12 @@ export class Library {
   filterPanel() {
     const c = actions.targetVisual();
     const cur = c?.filter?.name || 'none';
+    const fltTile = (f) => `<button class="tile flt-tile ${cur === f.id ? 'on' : ''}" data-filter="${f.id}"><canvas class="flt-thumb" data-f="${f.id}" width="120" height="80"></canvas><em>${f.name}</em>${f.id !== 'none' ? star('filter', f.id) : ''}</button>`;
     return `
       <p class="hint">${c ? `Diterapkan ke: <b>${escapeHtml(c.name || c.type)}</b>` : 'Pilih klip video/foto atau letakkan playhead di atas klip.'}</p>
       ${c && cur !== 'none' ? `<div class="ctl"><label>Intensitas: <b class="flt-v">${Math.round((c.filter.intensity ?? 1) * 100)}%</b></label><input type="range" class="flt-int" min="0" max="100" value="${Math.round((c.filter.intensity ?? 1) * 100)}"></div>` : ''}
-      <div class="tile-grid filter-grid">${FILTERS.map((f) => `<button class="tile flt-tile ${cur === f.id ? 'on' : ''}" data-filter="${f.id}"><canvas class="flt-thumb" data-f="${f.id}" width="120" height="80"></canvas><em>${f.name}</em></button>`).join('')}</div>
+      ${this.favSection('filter', FILTERS.filter((f) => f.id !== 'none'), fltTile, 'tile-grid filter-grid')}
+      <div class="tile-grid filter-grid">${FILTERS.map(fltTile).join('')}</div>
       <button class="btn sm ghost" data-do="fltAll">${icon('layers', 14)} Terapkan filter ini ke semua klip</button>`;
   }
 
@@ -375,6 +397,7 @@ export class Library {
   }
 
   onClick(e) {
+    if (onStar(e)) { this.render(); return; }
     const t = e.target.closest('button, [data-media]');
     if (!t) return;
     const d = t.dataset;
@@ -491,9 +514,7 @@ export class Library {
     for (const cv of this.panel.querySelectorAll('.flt-thumb')) {
       const ctx = cv.getContext('2d');
       const fake = { filter: { name: cv.dataset.f, intensity: 1 }, adjust: {} };
-      ctx.filter = cssFilterFor(fake);
-      ctx.drawImage(this.sample, 0, 0, cv.width, cv.height);
-      ctx.filter = 'none';
+      drawFiltered(ctx, cssFilterFor(fake), this.sample, 0, 0, cv.width, cv.height);
       const f = FILTERS.find((x) => x.id === cv.dataset.f);
       if (f?.overlay) {
         ctx.globalCompositeOperation = f.overlay.mode;

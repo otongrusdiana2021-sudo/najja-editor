@@ -716,3 +716,14 @@ body.kb-open .sheet.size-text { height: min(52vh, calc(100% - var(--kb) - 40px))
 @media (orientation: portrait) and (min-width: 700px) {
   :root { --tl-h: clamp(240px, 28vh, 360px); }
 }
+
+/* Favourites (v1.9): a star on tiles; starred items are listed first in their tab */
+.tile, .tstyle, .ttpl, .font-item, .anim-chip { position: relative; }
+.fav { position: absolute; top: 3px; right: 4px; z-index: 2; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; font-size: 14px; line-height: 1; color: rgba(255, 255, 255, 0.55); background: rgba(0, 0, 0, 0.35); opacity: 0; transition: opacity 0.15s, transform 0.15s; cursor: pointer; }
+.fav.on { opacity: 1; color: #ffd43b; }
+.tile:hover .fav, .tstyle:hover .fav, .ttpl:hover .fav, .font-item:hover .fav, .anim-chip:hover .fav, .audio-row:hover .fav { opacity: 1; }
+.fav:active { transform: scale(0.85); }
+@media (hover: none) { .fav { opacity: 0.85; } }
+.audio-row .fav { position: static; flex: none; background: none; width: 30px; height: 30px; font-size: 16px; }
+.font-item .fav { top: 50%; transform: translateY(-50%); }
+.fav-section h4 { color: #ffd43b; }
