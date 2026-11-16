@@ -46,6 +46,25 @@ const GREEN = path.join(dir, 'media', 'hijau.mp4');
 execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `color=c=0x00FF00:s=360x640:r=30:d=${SECS}`,
   '-vf', "drawbox=x='mod(t*200,240)':y=120:w=120:h=120:color=0xFFFFE0:t=fill,drawbox=x=60:y='mod(t*300,500)':w=80:h=80:color=0xFFFFE0:t=fill",
   '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', GREEN]);
+// iPhone-style file: B-frames with negative composition offsets in a version-0 ctts (QuickTime/Apple writers)
+const NEG = path.join(dir, 'media', 'iphone-ctts.mp4');
+execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=360x640:r=30:d=${SECS}`,
+  '-f', 'lavfi', '-i', `sine=f=440:sample_rate=48000:d=${SECS}`, '-vf', "drawbox=x='mod(t*480,336)':y=0:w=24:h=640:color=white:t=fill",
+  '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '1', '-g', '30', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest',
+  '-movflags', '+faststart+negative_cts_offsets', NEG]);
+const patchCtts = (file, fn) => {
+  const b = fs.readFileSync(file);
+  const at = b.indexOf('ctts');
+  b[at + 4] = 0; // version 0
+  const n = b.readUInt32BE(at + 8);
+  for (let e = 0; e < n; e++) { const o = at + 16 + e * 8; b.writeInt32BE(fn(b.readInt32BE(o)), o); }
+  fs.writeFileSync(file, b);
+};
+patchCtts(NEG, (v) => v);
+// the same, with every B-frame's time pushed 5 s later: a table this reader would get wrong, but not absurd
+const LATE = path.join(dir, 'media', 'telat.mp4');
+fs.copyFileSync(NEG, LATE);
+patchCtts(LATE, (v) => (v < 0 ? v + 5 * 15360 : v));
 const W = 90;
 const H = 160;
 const gray = (f) => {
@@ -360,6 +379,39 @@ try {
   const perFrame = (r) => (r.ev.composite_ms || 0) / Math.max(1, r.ev.frames || 1);
   console.log(`   komposit per frame (lab, WebGL di perangkat lunak): GPU ${perFrame(Ig).toFixed(1)} ms · CPU ${perFrame(Ic).toFixed(1)} ms · total GPU ${(Ig.ms / 1000).toFixed(1)} dtk · CPU ${(Ic.ms / 1000).toFixed(1)} dtk`);
   // (no speed check here: headless Chromium runs WebGL in software, so the lab cannot show the GPU's gain)
+
+  step('M. File gaya iPhone: B-frame dengan offset waktu negatif (ctts versi 0) → semua gambar dipakai');
+  const negSrc = gray(NEG);
+  await mcp('new_project', { name: 'E2E iPhone', aspect_ratio: '9:16' });
+  const neg = await mcp('import_media', { path: 'iphone-ctts.mp4' });
+  await mcp('add_media_clip', { media_id: neg.media_id, track: 'main', start: 0, duration: SECS });
+  for (let t = Date.now(); Date.now() - t < 60000; await wait(250)) {
+    if (await p.evaluate(async (id) => { const { mediaRT } = await import('/js/media.js'); return !!mediaRT.get(id)?.url; }, neg.media_id)) break;
+  }
+  const M = await runExport('');
+  const mOut = gray(M.file);
+  let mSame = 0;
+  let mDup = 0;
+  for (let i = 0; i < Math.min(mOut.length, negSrc.length); i++) {
+    let best = i;
+    let bestD = Infinity;
+    for (let j = Math.max(0, i - 3); j <= Math.min(negSrc.length - 1, i + 3); j++) { const d = mad(mOut[i], negSrc[j]); if (d < bestD) { bestD = d; best = j; } }
+    if (best === i) mSame++;
+    if (i > 0 && mad(mOut[i], mOut[i - 1]) < 0.4) mDup++;
+  }
+  check(M.mode === 'fast' && !M.ev.fallback, `ekspor cepat (${M.mode}${M.ev.fallback ? `: ${M.ev.fallback}` : ''})`);
+  check(mSame >= mOut.length - 2 && mDup <= 1, `M: ${mSame}/${mOut.length} frame tepat, berulang ${mDup} (v1.8.5: setiap B-frame hilang, gambar tampil 2×)`);
+  check(Math.abs((M.ev.video_motion_fps || 0) - 30) < 1.5, `M: gerakan video ${M.ev.video_motion_fps} gambar/dtk`);
+
+  step('N. Tabel waktu yang salah dibaca (B-frame 5 dtk terlambat) → jangan simpan video setengah fps');
+  await mcp('new_project', { name: 'E2E telat', aspect_ratio: '9:16' });
+  const late = await mcp('import_media', { path: 'telat.mp4' });
+  await mcp('add_media_clip', { media_id: late.media_id, track: 'main', start: 0, duration: SECS });
+  for (let t = Date.now(); Date.now() - t < 60000; await wait(250)) {
+    if (await p.evaluate(async (id) => { const { mediaRT } = await import('/js/media.js'); return !!mediaRT.get(id)?.url; }, late.media_id)) break;
+  }
+  const N = await runExport('');
+  check(N.mode === 'realtime' && /video shows .* pictures\/s/.test(N.ev.fallback || ''), `pindah ke real-time: ${N.ev.fallback} (${N.mode}, gerakan ${N.ev.video_motion_fps}/${N.ev.video_motion_expected_fps}, terlambat ${N.ev.video_stale}, hilang ${N.ev.video_lost}, sumber ${N.ev.video_source_fps})`);
 
   check(!errors.length, `tidak ada error halaman${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } finally {

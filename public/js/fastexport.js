@@ -80,15 +80,18 @@ function sampleTable(dv, trak, stbl, scale, movieScale) {
     const delta = dv.getUint32(stts.data + 12 + e * 8);
     for (let j = 0; j < count && k < n; j++, k++) { dts[k] = t; t += delta; }
   }
-  // composition offsets
+  // composition offsets, read as signed in both versions (v1.8.6). QuickTime and Apple's writers (iPhone, the iOS
+  // photo picker's copies) put negative offsets in a version-0 ctts, and FFmpeg and browsers read them as negative.
+  // Read as unsigned, every B-frame (every other picture in I-B-P-B-P…) landed hours later and was never shown:
+  // exports showed 15 different pictures a second of a 30 fps video that the preview (the browser's own reader)
+  // played smoothly.
   const cto = new Float64Array(n);
   const ctts = kid(dv, stbl, 'ctts');
   if (ctts) {
-    const v1 = dv.getUint8(ctts.data) === 1;
     k = 0;
     for (let e = 0, ec = dv.getUint32(ctts.data + 4); e < ec; e++) {
       const count = dv.getUint32(ctts.data + 8 + e * 8);
-      const off = v1 ? dv.getInt32(ctts.data + 12 + e * 8) : dv.getUint32(ctts.data + 12 + e * 8);
+      const off = dv.getInt32(ctts.data + 12 + e * 8);
       for (let j = 0; j < count && k < n; j++, k++) cto[k] = off;
     }
   }
@@ -130,6 +133,13 @@ function sampleTable(dv, trak, stbl, scale, movieScale) {
   }
   const samples = new Array(n);
   for (let i = 0; i < n; i++) samples[i] = { offset: offsets[i], size: sizes[i], key: !!key[i], pts: (dts[i] + cto[i] - shift) / scale + delay };
+  // Times that cannot be right (far outside the track) would silently drop those pictures: refuse instead (the
+  // real-time export, which plays the file in the browser, takes over).
+  // (composition offsets are a few frames: a picture more than 10 s outside the track's decode span is a bad table)
+  const end = t / scale + delay;
+  if (n && samples.some((x) => !(x.pts > -10 && x.pts < end + 10))) throw unsupported('sample times outside the track');
+  // pictures per second from the decode times (always in order): presentation times can be what is wrong
+  samples.rate = n > 1 && t > 0 ? n / (t / scale) : 0;
   return samples;
 }
 function traks(buf) {
@@ -957,12 +967,15 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   const sources = new Map(); // key -> VideoSource
   // Frame rate of the video files, and how many different pictures of the main video the export shows per second:
   // a 30 fps file exported at 60 fps shows every picture twice (only text and effects move 60 times a second).
-  const srcFps = [...tracks.values()].map((tr) => {
+  const fpsOf = new Map([...tracks].map(([id, tr]) => {
+    if (tr.samples.rate > 0) return [id, tr.samples.rate];
     const P2 = tr.samples.map((x) => x.pts).sort((a, b) => a - b);
-    return P2.length > 1 ? (P2.length - 1) / Math.max(1e-3, P2[P2.length - 1] - P2[0]) : 0;
-  }).filter((f) => f > 0);
+    return [id, P2.length > 1 ? (P2.length - 1) / Math.max(1e-3, P2[P2.length - 1] - P2[0]) : 0];
+  }));
+  const srcFps = [...fpsOf.values()].filter((f) => f > 0);
   if (srcFps.length) stats.video_source_fps = [...new Set(srcFps.map((f) => Math.round(f * 10) / 10))].sort((a, b) => b - a).join(', ');
-  const motion = { frames: 0, changes: 0, last: null };
+  // expected: different pictures the file can give per output frame (a 30 fps file at 30 fps: 1; at 60 fps: ½)
+  const motion = { frames: 0, changes: 0, expected: 0, last: null };
   const decStats = {}; // shared by every VideoSource: frames shown, stale, lost...
   const decReport = () => Object.assign(stats, { video_frames: decStats.frames || 0, video_stale: decStats.stale || 0, video_lost: decStats.lost || 0,
     decoder_flushes: decStats.flushes || 0, decoder_resyncs: decStats.resyncs || 0, decoder_window: decStats.window || MAX_IN_FLIGHT,
@@ -1039,7 +1052,9 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
       const mainKey = [...groups.keys()].find((k) => groups.get(k).some((c) => c.trackId === 'main' && t >= c.start && t < c.start + c.duration));
       if (mainKey != null && shown.get(mainKey)) {
         const f = shown.get(mainKey);
+        const mc = groups.get(mainKey).find((c) => t >= c.start && t < c.start + c.duration);
         motion.frames++;
+        motion.expected += Math.min(1, ((fpsOf.get(mc.mediaId) || fps) * Math.abs(mc.speed || 1)) / fps);
         if (f !== motion.last) motion.changes++;
         motion.last = f;
       }
@@ -1075,7 +1090,15 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
     if (decStats.frames && bad > Math.max(2, decStats.frames * STALE_LIMIT)) {
       throw unsupported(`video decoder dropped frames (${decStats.stale} late, ${decStats.lost} lost of ${decStats.frames})`);
     }
-    if (motion.frames > fps) stats.video_motion_fps = Math.round((motion.changes / motion.frames) * fps * 10) / 10;
+    if (motion.frames > fps) {
+      stats.video_motion_fps = Math.round((motion.changes / motion.frames) * fps * 10) / 10;
+      stats.video_motion_expected_fps = Math.round((motion.expected / motion.frames) * fps * 10) / 10;
+    }
+    // Safety net: the main video shows clearly fewer different pictures than its file has (a file this reader gets
+    // wrong). Do not save a choppier video than the preview: try the other codecs, then the real-time export.
+    if (motion.frames >= 2 * fps && motion.changes < 0.75 * motion.expected) {
+      throw unsupported(`video shows ${stats.video_motion_fps} pictures/s, the file has ${stats.video_motion_expected_fps}`);
+    }
     stats.stage = 'encode';
     const tFlush = performance.now();
     await guard(enc.flush(), 60000, 'video encoder flush', flag);

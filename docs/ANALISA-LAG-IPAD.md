@@ -1,4 +1,4 @@
-# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.5)
+# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.6)
 
 Sumber data: rekaman layar iPad mini (Safari, potret, proyek 1 klip 25 dtk), Diagnostik dari iPad pengguna, dan pengukuran ulang di lab (Chromium + Playwright, profil iPad).
 
@@ -547,3 +547,44 @@ Untuk memastikan, perlu file hasil ekspornya dan detik yang terlihat patah.
 - Video 30 fps diekspor 60 fps: gerakan video terukur 30 gambar/dtk, file terbaca "file asli (30 fps)".
 - fps file tersimpan di media proyek.
 - Peringatan muncul di 60 fps dan hilang di 30 fps.
+
+## 16. "Timeline smooth, hasil ekspor tidak" — penyebab sebenarnya (v1.8.6)
+
+### Analisa dua video pengguna
+
+| | Video 2: rekaman preview timeline (Bandicam) | Video 1: hasil ekspor (`NAJJA - 1 (6).mp4`) |
+|---|---|---|
+| Format | rekaman layar 29,4 fps | MP4 Najja, 30 fps konstan, 1080×1920, 9,8 Mbps, AAC |
+| Gambar video berbeda per detik | **±30**: setiap frame berubah | **±15**: 76 dari 190 frame sama persis dengan sebelumnya, berpola **selang-seling** (berubah, sama, berubah, sama…) |
+
+Waktu dan gerakan kedua video sama; hanya jumlah gambar videonya yang separuh. Teks dan overlay di ekspor tetap berubah setiap frame. Jadi masalahnya **bukan fps ekspor, bukan bitrate** (9,8 Mbps cukup untuk 1080×1920), dan bukan karena ekspor gagal. Ekspor memakai separuh gambar file videonya.
+
+### Penyebab: waktu B-frame dibaca salah oleh pembaca MP4 ekspor
+
+Video dari iPhone (termasuk salinan dari pemilih foto iOS) memakai **B-frame**. Setiap B-frame punya selisih waktu tampil negatif (composition offset) di kotak `ctts` versi 0, seperti format QuickTime Apple. FFmpeg dan browser membacanya sebagai angka bertanda; karena itu preview, yang memakai pemutar browser, mulus.
+
+Pembaca MP4 ekspor Najja (`fastexport.js`) membaca angka di `ctts` versi 0 tanpa tanda. Nilai −512 menjadi 4.294.966.784, sehingga **setiap B-frame jatuh ±77 jam kemudian** dan tidak pernah dipakai. Dengan pola I-B-P-B-P, itu tepat **setengah dari semua gambar**.
+
+Detektor frame "terlambat/hilang" juga tidak menangkapnya. Dari sisi tabel, frame-frame itu tidak hilang; waktunya memang tertulis di masa depan.
+
+Tes ulang dengan kode v1.8.5 (`test/e2e/export.mjs` M): 96/180 frame tepat, **84 berulang**, gerakan **16 gambar/dtk**. Polanya sama dengan file pengguna.
+
+### Perbaikan v1.8.6
+
+1. **`ctts` dibaca bertanda di kedua versi**, sama seperti FFmpeg. Waktu setiap sampel kini sama dengan ffprobe (`test/export-read.test.js`).
+2. **Tabel waktu yang mustahil ditolak**, tidak dilewati diam-diam. Gambar yang jatuh lebih dari 10 dtk di luar track membuat ekspor pindah ke jalur lain.
+3. **Jaring pengaman gerakan.** Selama render dihitung berapa gambar berbeda yang ditampilkan video utama, dibanding yang bisa diberikan filenya. Batasnya dihitung dari waktu decode, yang selalu urut, dikali kecepatan klip.
+   - Kalau kurang dari 75%, hasilnya tidak disimpan. Najja mencoba codec lain, lalu ekspor real-time yang memutar file lewat browser seperti preview.
+   - Diagnostik → Ekspor terakhir menampilkan "Gerakan video" dan angka yang diharapkan.
+4. **Salinan ringan tidak pernah di bawah 24 fps.** File 31–48 fps dulu dibagi dua (misalnya 35 → 17,5 fps); sekarang tetap. Yang lain tidak berubah: 60 → 30, 50 → 25, 120 → 30.
+
+### Bukti
+
+| Tes | v1.8.5 | v1.8.6 |
+|---|---|---|
+| M. File gaya iPhone (B-frame, `ctts` v0 negatif), ekspor 30 fps | 96/180 tepat, 84 berulang, 16 gambar/dtk | **180/180 tepat, 0 berulang, 30 gambar/dtk** |
+| N. Tabel waktu yang salah tapi masuk akal (B-frame 5 dtk terlambat) | disimpan setengah fps | ditolak: "video shows 18.3 pictures/s, the file has 30", lalu pindah ke real-time |
+| Waktu sampel vs ffprobe (`ctts` v0 dan v1 negatif) | B-frame +77 jam | sama dengan ffprobe (< 2 ms) |
+| Waktu sampel ±39 jam | dilewati diam-diam | ditolak |
+
+Ekspor lama tidak ikut berubah, karena gambar yang hilang tidak pernah tertulis ke filenya. **Ekspor ulang.**

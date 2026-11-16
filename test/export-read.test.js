@@ -97,3 +97,35 @@ test('MP4 written with Safari\'s AAC description plays everywhere (ffprobe: AAC-
   const frames = (file) => execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-vf', 'scale=32:24,format=gray', '-f', 'rawvideo', '-']);
   assert.ok(frames(out).equals(frames(f)), 'same pictures in the same order');
 });
+
+// v1.8.6: composition offsets are signed in both ctts versions (QuickTime/Apple writers put negative offsets in a
+// version-0 ctts; FFmpeg and browsers read them so). Read as unsigned, every B-frame landed hours later and exports
+// showed 15 pictures a second of a 30 fps video.
+test('negative composition offsets (ctts version 0 and 1) give the same times as ffprobe', { skip: !hasFfmpeg }, async () => {
+  const f = path.join(dir, 'negcts.mp4');
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=320x240:r=30:d=2',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '1', '-g', '30', '-pix_fmt', 'yuv420p', '-movflags', '+negative_cts_offsets', f]);
+  const v1 = fs.readFileSync(f);
+  const v0 = Buffer.from(v1);
+  const at = v0.indexOf('ctts');
+  assert.equal(v1[at + 4], 1, 'ffmpeg wrote a version-1 ctts');
+  v0[at + 4] = 0; // the same offsets in a version-0 box, as Apple's writers do
+  const ff = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'packet=pts_time', '-of', 'csv=p=0', f]).toString().trim().split('\n').map(Number);
+  for (const buf of [v1, v0]) {
+    const tr = demuxVideo(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+    const mine = tr.samples.map((x) => x.pts);
+    assert.equal(mine.length, ff.length);
+    for (let i = 0; i < ff.length; i++) assert.ok(Math.abs(mine[i] - ff[i]) < 0.002, `sample ${i}: ${mine[i]} vs ffprobe ${ff[i]}`);
+    assert.equal(new Set(mine.map((x) => x.toFixed(3))).size, mine.length, 'every picture has its own time');
+  }
+});
+
+test('sample times far outside the track are refused (no silently dropped pictures)', { skip: !hasFfmpeg }, async () => {
+  const f = path.join(dir, 'negcts2.mp4');
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=320x240:r=30:d=2',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '1', '-g', '30', '-pix_fmt', 'yuv420p', '-movflags', '+negative_cts_offsets', f]);
+  const b = Buffer.from(fs.readFileSync(f));
+  const at = b.indexOf('ctts');
+  b.writeInt32BE(0x7ffffff0, at + 24); // second entry's offset (type at, version+flags, count, entry 1, entry 2 count): ±39 hours
+  assert.throws(() => demuxVideo(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)), /sample times outside the track/);
+});
