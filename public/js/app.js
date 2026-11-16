@@ -398,7 +398,7 @@ async function diagnosticsDialog() {
         ])}<p class="hint">Upload diulang: ${c.upload_retry_count || 0} · simpan gagal: ${c.save_failed || 0}</p></section>
         <section>${ex ? kv(`Ekspor terakhir (${ex.ok ? 'berhasil' : ex.cancelled ? 'dibatalkan' : 'gagal'})`, [
           ['Mode', ex.mode === 'fast' ? 'cepat (WebCodecs)' : ex.mode === 'realtime' ? 'real-time (MediaRecorder)' : ex.mode],
-          ['Fallback', ex.fallback], ['Dicoba ulang dengan codec software', ex.retry || null], ['Codec', ex.codecs === 'software' ? 'software (prefer-software)' : ex.codecs ? 'perangkat (otomatis)' : null], ['Hasil', `${ex.width}×${ex.height} ${ex.fps} fps · ${ex.duration} dtk`],
+          ['Fallback', ex.fallback], ['Dicoba ulang (codec lain)', ex.retry || null], ['Codec video', ex.codecs ? `${ex.codecs}${ex.decoder_accel ? ` (decoder dipakai: ${ex.decoder_accel === 'software' ? 'software' : 'perangkat'})` : ''}` : null], ['Hasil', `${ex.width}×${ex.height} ${ex.fps} fps · ${ex.duration} dtk`],
           ['Hasil encode ditampung', ex.spool === 'opfs' ? 'file sementara di perangkat (hemat RAM)' : ex.spool === 'memory' ? 'memori' : null],
           ['Audio di-decode', ex.audio_decoded_s != null ? `${Math.round(ex.audio_decoded_s)} dtk (hanya bagian yang dipakai)` : null],
           ['File audio di-decode utuh', ex.audio_full_decode || null],
@@ -815,7 +815,7 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
     }
     // Your own export: the file is yours right away; the server copy uploads in the background.
     if (download) downloadBlob(res.blob, res.filename);
-    const took = `${res.mode === 'fast' ? `Dirender cepat${res.retry ? ' (codec software)' : ''}` : 'Dirender real-time'} dalam ${Math.max(1, Math.round(res.seconds))} detik`
+    const took = `${res.mode === 'fast' ? `Dirender cepat${res.retry ? ' (percobaan kedua)' : ''}` : 'Dirender real-time'} dalam ${Math.max(1, Math.round(res.seconds))} detik`
       // why not the fast renderer: real time can only be as smooth as this device draws while playing
       + (res.mode !== 'fast' && res.fallback ? `<br><small>Mode cepat tidak bisa dipakai: ${escapeHtml(res.fallback)}</small>` : '');
     ov.querySelector('.export-card').innerHTML = `

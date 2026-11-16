@@ -301,10 +301,21 @@ class VideoSource {
     });
     this.dec.addEventListener?.('dequeue', () => this.wake?.());
   }
-  static async open(src, track, stats, software = false) {
-    const cfg = { codec: track.codec, description: track.description, codedWidth: track.width, codedHeight: track.height, ...(software ? { hardwareAcceleration: 'prefer-software' } : {}) };
-    const ok = await guard(VideoDecoder.isConfigSupported(cfg), CODEC_CHECK_MS, 'VideoDecoder.isConfigSupported').catch((e) => { if (e instanceof Unsupported) throw e; return { supported: false }; });
+  /**
+   * accel 'prefer-software' (the first try, v1.8.4): the browser's software decoder where it has one. Hardware
+   * decoders have a few output pictures, may hold frames and, on some PCs, stop answering (a Radeon RX 580 under
+   * Windows: a flush that never ended and the page blocked for 14 s); for an export the software decoder is fast
+   * enough (1080p: hundreds of frames a second) and behaves the same everywhere. Where there is none (Safari,
+   * Android), the device decoder.
+   */
+  static async open(src, track, stats, accel = 'prefer-software') {
+    const base = { codec: track.codec, description: track.description, codedWidth: track.width, codedHeight: track.height };
+    const check = (c) => guard(VideoDecoder.isConfigSupported(c), CODEC_CHECK_MS, 'VideoDecoder.isConfigSupported').catch((e) => { if (e instanceof Unsupported) throw e; return { supported: false }; });
+    let cfg = accel === 'prefer-software' ? { ...base, hardwareAcceleration: 'prefer-software' } : base;
+    let ok = await check(cfg);
+    if (!ok.supported && cfg !== base) { cfg = base; ok = await check(cfg); }
     if (!ok.supported) throw unsupported(`decoder ${track.codec}`);
+    stats.decoder_accel = cfg === base ? 'device' : 'software';
     const s = new VideoSource(src, track, stats);
     s.cfg = cfg;
     return s;
@@ -894,14 +905,14 @@ function avcLevel(w, h, fps) {
  * engine: the live Engine (chain keys, image sources); flag.cancelled stops it; onProgress(0..1).
  * stats (optional object) receives the time spent per stage in ms (blueprint 9.1 "Export").
  */
-export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r1, flag, onProgress, stats = {}, spool: useSpool = true, software = false, cache = {} }) {
+export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r1, flag, onProgress, stats = {}, spool: useSpool = true, decoderAccel = 'prefer-software', encoderAccel = 'no-preference', cache = {} }) {
   const tPrep = performance.now();
   stats.stage = 'prepare';
   if (!fastExportAvailable()) throw unsupported('WebCodecs not available');
   const lv = avcLevel(width, height, fps);
   let cfg = null;
   for (const prof of ['64', '4d', '42']) {
-    const c = { codec: `avc1.${prof}00${hex2(lv)}`, width, height, bitrate, framerate: fps, latencyMode: 'quality', avc: { format: 'avc' }, ...(software ? { hardwareAcceleration: 'prefer-software' } : {}) };
+    const c = { codec: `avc1.${prof}00${hex2(lv)}`, width, height, bitrate, framerate: fps, latencyMode: 'quality', avc: { format: 'avc' }, ...(encoderAccel === 'prefer-software' ? { hardwareAcceleration: 'prefer-software' } : {}) };
     if ((await guard(VideoEncoder.isConfigSupported(c), CODEC_CHECK_MS, 'VideoEncoder.isConfigSupported').catch((e) => { if (e instanceof Unsupported) throw e; return { supported: false }; })).supported) { cfg = c; break; }
   }
   if (!cfg) throw unsupported('no H.264 encoder');
@@ -933,7 +944,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   }
   const audio = cache.audio;
   stats.stage = 'prepare';
-  stats.codecs = software ? 'software' : 'auto';
+  stats.codecs = `decoder ${decoderAccel === 'prefer-software' ? 'software' : 'device'} · encoder ${encoderAccel === 'prefer-software' ? 'software' : 'device'}`;
   if (audio) {
     const d = audio.description;
     const from = audio.codec === 'opus' ? '' : !d?.length ? ' · tanpa deskripsi, dibuat' : d[0] === 0x03 || d[0] === 0x04 ? ' · ES_Descriptor (Safari) → ASC' : ' · ASC';
@@ -946,7 +957,8 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   const sources = new Map(); // key -> VideoSource
   const decStats = {}; // shared by every VideoSource: frames shown, stale, lost...
   const decReport = () => Object.assign(stats, { video_frames: decStats.frames || 0, video_stale: decStats.stale || 0, video_lost: decStats.lost || 0,
-    decoder_flushes: decStats.flushes || 0, decoder_resyncs: decStats.resyncs || 0, decoder_window: decStats.window || MAX_IN_FLIGHT });
+    decoder_flushes: decStats.flushes || 0, decoder_resyncs: decStats.resyncs || 0, decoder_window: decStats.window || MAX_IN_FLIGHT,
+    ...(decStats.decoder_accel ? { decoder_accel: decStats.decoder_accel } : {}) });
   const shown = new Map(); // key -> current VideoFrame
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -1011,7 +1023,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
           if (sources.has(k) && list.every((c) => t >= c.start + c.duration + 1)) { sources.get(k).close(); sources.delete(k); shown.delete(k); }
           continue;
         }
-        if (!sources.has(k)) sources.set(k, await VideoSource.open(new ByteSource((await source(clip.mediaId)).blob), tracks.get(clip.mediaId), decStats, software));
+        if (!sources.has(k)) sources.set(k, await VideoSource.open(new ByteSource((await source(clip.mediaId)).blob), tracks.get(clip.mediaId), decStats, decoderAccel));
         shown.set(k, await guard(sources.get(k).frameAt(engine.localTime(clip, t)), FRAME_TIMEOUT_MS + (i ? 0 : WARMUP_MS), `video decoder (frame ${i + 1})`, flag));
       }
       prof.decode += performance.now() - m; m = performance.now();

@@ -127,12 +127,13 @@ const installShims = (mode) => {
     get decodeQueueSize() { return 0; }
     flush() { return new Promise(() => {}); }
   }
-  // 'hw-broken': the device (hardware) decoder loses frames; the browser's software decoder works
+  // 'hw-broken': the device (hardware) decoder loses frames, the browser's software decoder works; 'sw-broken': the
+  // other way round
   class HwBrokenDecoder extends ShimDecoder {
     configure(c) { this.software = c.hardwareAcceleration === 'prefer-software'; this.real.configure(c); }
-    got(f) { if (!this.software && ++this.n % 10 === 5) { f.close(); return; } this.output(f); }
+    got(f) { if (this.software === (mode === 'sw-broken') && ++this.n % 10 === 5) { f.close(); return; } this.output(f); }
   }
-  if (mode === 'hw-broken') { window.VideoDecoder = HwBrokenDecoder; window.AudioEncoder = window.__RealAE; return; }
+  if (mode === 'hw-broken' || mode === 'sw-broken') { window.VideoDecoder = HwBrokenDecoder; window.AudioEncoder = window.__RealAE; return; }
   window.VideoDecoder = mode === 'drop' ? class extends ShimDecoder {
     got(f) { if (++this.n % 10 === 5) { f.close(); return; } this.output(f); }
   } : mode === 'pool' ? PoolDecoder : mode === 'silent' ? SilentDecoder : mode === 'audio-stall' ? RealVD : ShimDecoder;
@@ -264,13 +265,18 @@ try {
   step('D. Decoder yang menghilangkan 1 dari 10 frame → jangan simpan video patah-patah');
   const D = await runExport('drop');
   check(D.mode === 'realtime' && /dropped frames|holds frames/.test(D.ev.fallback || ''), `fallback ke real-time: ${D.ev.fallback}`);
-  check(/dropped frames/.test(D.ev.retry || ''), `D: dicoba ulang dengan codec software dulu (${D.ev.retry})`);
+  check(/dropped frames/.test(D.ev.retry || ''), `D: dicoba ulang dengan codec lain dulu (${D.ev.retry})`);
   check(D.ev.video_lost > 0 || /holds frames/.test(D.ev.fallback || ''), `D: frame hilang terhitung (${D.ev.video_lost})`);
 
-  step('J. Decoder hardware yang menghilangkan frame, decoder software sehat → tetap ekspor cepat (codec software)');
+  step('J. Decoder perangkat (hardware) yang menghilangkan frame → tidak dipakai: decoder software lebih dulu');
   const J = await runExport('hw-broken');
-  check(J.mode === 'fast' && !J.ev.fallback && /dropped frames/.test(J.ev.retry || '') && J.ev.codecs === 'software', `ekspor cepat dengan codec software (coba ulang: ${J.ev.retry}) · ${(J.ms / 1000).toFixed(1)} dtk`);
+  check(J.mode === 'fast' && !J.ev.fallback && !J.ev.retry && J.ev.decoder_accel === 'software', `ekspor cepat langsung dengan decoder software (${J.ev.codecs}) · ${(J.ms / 1000).toFixed(1)} dtk`);
   verify('J', J);
+
+  step('K. Decoder software yang menghilangkan frame → percobaan kedua dengan decoder perangkat');
+  const K = await runExport('sw-broken');
+  check(K.mode === 'fast' && !K.ev.fallback && /dropped frames/.test(K.ev.retry || '') && K.ev.decoder_accel === 'device', `ekspor cepat di percobaan kedua (${K.ev.codecs}; coba ulang: ${K.ev.retry}) · ${(K.ms / 1000).toFixed(1)} dtk`);
+  verify('K', K);
 
   step('E. Decoder hardware dengan 4 gambar output (PC/Android): flush menunggu frame yang masih dipegang');
   const E = await runExport('pool');

@@ -1,4 +1,4 @@
-# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.3)
+# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.4)
 
 Sumber data: rekaman layar iPad mini (Safari, potret, proyek 1 klip 25 dtk), Diagnostik dari iPad pengguna, dan pengukuran ulang di lab (Chromium + Playwright, profil iPad).
 
@@ -492,3 +492,40 @@ Di lab, WebGL headless berjalan di perangkat lunak, jadi lab tidak bisa menunjuk
 2. Putar bagian overlay di preview; harus mulus.
 3. Ekspor ulang. Dialog selesai harus bertuliskan "Dirender cepat".
 4. Kalau masih "Dirender real-time", kirim screenshot dialog itu (alasannya tertulis di bawah) dan **Diagnostik → Ekspor terakhir**.
+
+## 14. Diagnostik PC sesudah v1.8.3: decoder hardware Radeon macet (v1.8.4)
+
+Data: Chrome 157 di Windows, 8 core, RAM 16 GB, GPU AMD Radeon RX 580 (ANGLE/Direct3D 11). Proyek 6,4 dtk dengan 12 klip, 5 media, 8 track. Diagnostik → Ekspor terakhir:
+
+| Isian | Nilai | Artinya |
+|---|---|---|
+| Mode | **cepat** (bukan real-time lagi) | setiap frame dirender, tidak ada rekaman real-time |
+| Frame terlambat / hilang | 0 / 0 dari 298 | gambar dari decoder tepat |
+| Dicoba ulang | "video decoder flush did not answer within 8 s" | percobaan pertama (decoder hardware) macet |
+| Codec percobaan kedua | software | percobaan kedua berhasil |
+| Decode / komposit / encode | 341 / 742 / 839 ms | ±3 dtk untuk 191 frame 1080×1920 |
+| Total | 11,5 dtk (0,55× real-time) | **8 dtk di antaranya terbuang** menunggu decoder hardware |
+| Lag event loop maks. | **14,4 dtk** | halaman sempat membeku |
+
+**Kesimpulan.** Hasil ekspor kini dirender per frame dengan benar. Masalah yang tersisa ada pada decoder video hardware PC ini (D3D11 di RX 580): flush-nya tidak pernah selesai. Halaman yang membeku 14 dtk cocok dengan GPU process yang tertahan decoder itu, karena canvas dan WebGL menunggu GPU process yang sama.
+
+**Perbaikan v1.8.4.**
+- Ekspor kini **memakai decoder video software browser lebih dulu**:
+  - 1080p di-decode ratusan frame per detik;
+  - tidak ada batas gambar output;
+  - perilakunya sama di semua perangkat.
+- Encoder tetap encoder perangkat.
+- Percobaan kedua (kalau yang pertama gagal) memakai kebalikannya: decoder perangkat dan encoder software.
+- Di browser tanpa decoder software (Safari, Chrome Android), decoder perangkat langsung dipakai.
+- Diagnostik menampilkan codec yang dipakai: "decoder software · encoder device (decoder dipakai: software)".
+
+**Tes (`test/e2e/export.mjs`).**
+- J. Decoder hardware menghilangkan frame: ekspor cepat **langsung** dengan decoder software, tanpa percobaan ulang (1,2 dtk).
+- K. Decoder software menghilangkan frame: percobaan kedua dengan decoder perangkat, tetap ekspor cepat.
+- D. Keduanya menghilangkan frame: baru pindah ke real-time.
+
+**Kalau hasil ekspor masih terlihat tidak mulus,** penyebabnya bukan frame yang hilang (Diagnostik: 0 hilang). Kemungkinannya:
+- frame rate overlay itu sendiri rendah (misalnya animasi 12–15 fps);
+- video asli 60 fps diekspor 30 fps. Pilih 60 di Ekspor → Frame rate.
+
+Untuk memastikan, perlu file hasil ekspornya dan detik yang terlihat patah.

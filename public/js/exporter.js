@@ -151,8 +151,10 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
         // (a font that never loads must not hold the export: draw with the fallback font instead)
         await guard(preloadFonts(P), 10000, 'fonts', flag).catch((e) => { if (flag.cancelled) throw e; });
         const cache = {}; // (the sound, mixed and encoded once)
-        const attempt = (software) => fastExport({
-          engine, P, width, height, fps, bitrate: videoBitsPerSecond, r0, r1, flag, stats, software, cache,
+        // first try: software video decoder (where there is one) + the device's encoder; second: the other way round
+        const attempt = (second) => fastExport({
+          engine, P, width, height, fps, bitrate: videoBitsPerSecond, r0, r1, flag, stats, cache,
+          decoderAccel: second ? 'no-preference' : 'prefer-software', encoderAccel: second ? 'prefer-software' : 'no-preference',
           spool: storage.status?.features?.exportSpool !== false, // NAJJA_EXPORT_SPOOL=0 on the server turns it off
           onProgress: (p) => { exportState.progress = p; onProgress(p); },
         });
@@ -160,11 +162,11 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
         try {
           blob = await attempt(false);
         } catch (err) {
-          // The video decoder/encoder of this device failed or stopped answering (hardware decoders on PCs and
-          // Android behave differently): try once more with the browser's software codecs before the real-time
-          // recorder, which can only be as smooth as the device draws in real time.
+          // The video decoder or encoder failed or stopped answering: try once more with the other decoder (device)
+          // and the software encoder before the real-time recorder, which can only be as smooth as the device draws
+          // in real time.
           if (flag.cancelled || !(stats.stage === 'render' || stats.stage === 'encode' || /video (de|en)coder|Video(De|En)coder/.test(err.message))) throw err;
-          console.warn('[najja] fast export failed with the device codecs, trying software codecs:', err.message);
+          console.warn('[najja] fast export failed, trying the other video codecs:', err.message);
           stats.retry = `${stats.stage}: ${err.message}`;
           exportState.progress = 0;
           onProgress(0);
