@@ -191,19 +191,19 @@ try {
   }
 
   let outN = 0;
-  const runExport = async (mode) => {
+  const runExport = async (mode, extra = {}) => {
     await p.evaluate(installShims, mode);
-    const r = await p.evaluate(async () => {
+    const r = await p.evaluate(async (extra) => {
       const { exportVideo } = await import('/js/exporter.js');
       const t0 = performance.now();
-      const res = await exportVideo(window.najja.engine, { resolution: '720p', format: 'mp4' });
+      const res = await exportVideo(window.najja.engine, { resolution: '720p', format: 'mp4', ...extra });
       const ms = performance.now() - t0;
       const ev = [...(await window.najjaMetrics.snapshot()).events].reverse().find((e) => e.kind === 'export') || {};
       const b = new Uint8Array(await res.blob.arrayBuffer());
       let s = '';
       for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
       return { mode: res.mode, ms, ev, data: btoa(s) };
-    });
+    }, extra);
     await p.evaluate(installShims, '');
     const f = path.join(dir, `out-${++outN}-${mode || 'chromium'}.mp4`); // (one file per export: later checks compare them)
     fs.writeFileSync(f, Buffer.from(r.data, 'base64'));
@@ -248,6 +248,7 @@ try {
   const A = await runExport('');
   check(A.mode === 'fast' && !A.ev.fallback, `ekspor cepat, tanpa fallback (${A.mode}${A.ev.fallback ? `: ${A.ev.fallback}` : ''}) · ${(A.ms / 1000).toFixed(1)} dtk`);
   verify('A', A);
+  check(Math.abs((A.ev.video_motion_fps || 0) - 30) < 1.5 && /^30/.test(A.ev.video_source_fps || ''), `A: gerakan video ${A.ev.video_motion_fps} gambar/dtk, file ${A.ev.video_source_fps} fps`);
   console.log(`   decoder: ${A.ev.video_frames} frame · terlambat ${A.ev.video_stale} · hilang ${A.ev.video_lost} · flush ${A.ev.decoder_flushes} · ${A.ev.audio_config}`);
 
   step('B. Perilaku Safari: frame keluar tidak urut + ditahan, deskripsi audio = ES_Descriptor');
@@ -267,6 +268,21 @@ try {
   check(D.mode === 'realtime' && /dropped frames|holds frames/.test(D.ev.fallback || ''), `fallback ke real-time: ${D.ev.fallback}`);
   check(/dropped frames/.test(D.ev.retry || ''), `D: dicoba ulang dengan codec lain dulu (${D.ev.retry})`);
   check(D.ev.video_lost > 0 || /holds frames/.test(D.ev.fallback || ''), `D: frame hilang terhitung (${D.ev.video_lost})`);
+
+  step('L. Ekspor 60 fps dari video 30 fps: gambar video diulang, dan itu dikatakan (statistik + dialog)');
+  const L = await runExport('', { fps: 60 });
+  check(/file asli \(30 fps\)/.test(L.ev.export_sources || ''), `video dibaca dari: ${L.ev.export_sources}`);
+  check(L.mode === 'fast' && L.ev.fps === 60 && Math.abs((L.ev.video_motion_fps || 0) - 30) < 1.5, `ekspor 60 fps: gerakan video ${L.ev.video_motion_fps} gambar/dtk (file ${L.ev.video_source_fps} fps)`);
+  const srcFps = await p.evaluate(async (id) => { const { store } = await import('/js/store.js'); return store.media(id)?.fps; }, media.media_id);
+  check(Math.abs((srcFps || 0) - 30) < 0.5, `fps file dari server tersimpan di media (${srcFps})`);
+  await p.click('[data-tb="res"]');
+  await p.click('.res-pop [data-fps="60"]').catch(() => {});
+  const note = await p.evaluate(() => document.querySelector('.res-pop .hint.warn')?.textContent || '');
+  check(/30 fps/.test(note) && /60 fps/.test(note), `catatan di pilihan ekspor: "${note}"`);
+  await p.click('.res-pop [data-fps="30"]').catch(() => {}); // (back to 30 for the next steps)
+  const note30 = await p.evaluate(() => document.querySelector('.res-pop .hint.warn')?.textContent || '');
+  check(!note30, 'tanpa catatan di 30 fps');
+  await p.evaluate(() => document.querySelector('.res-pop')?.remove());
 
   step('J. Decoder perangkat (hardware) yang menghilangkan frame → tidak dipakai: decoder software lebih dulu');
   const J = await runExport('hw-broken');

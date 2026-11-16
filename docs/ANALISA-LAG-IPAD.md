@@ -1,4 +1,4 @@
-# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.4)
+# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.5)
 
 Sumber data: rekaman layar iPad mini (Safari, potret, proyek 1 klip 25 dtk), Diagnostik dari iPad pengguna, dan pengukuran ulang di lab (Chromium + Playwright, profil iPad).
 
@@ -529,3 +529,21 @@ Data: Chrome 157 di Windows, 8 core, RAM 16 GB, GPU AMD Radeon RX 580 (ANGLE/Dir
 - video asli 60 fps diekspor 30 fps. Pilih 60 di Ekspor → Frame rate.
 
 Untuk memastikan, perlu file hasil ekspornya dan detik yang terlihat patah.
+
+## 15. "Di properties tertera 60 fps, tapi saat diputar tidak seperti 60 fps" (v1.8.5)
+
+**Penyebab.** Angka fps di properties hanya menunjukkan berapa frame per detik yang ditulis ke file, bukan berapa gambar video yang berbeda. Kalau video sumbernya 30 fps lalu diekspor 60 fps, setiap gambar video tampil 2×. Gerakan videonya tetap 30 fps; yang bergerak 60× per detik hanya teks, efek, dan animasi. Editor lain juga begitu, kecuali memakai interpolasi gerak yang membuat gambar "palsu".
+
+**Bukan karena ekspor membuang frame.** Tes lab dengan video **60 fps** yang diekspor 60 fps menghasilkan 240/240 frame tepat dan hanya 1 frame berulang (0,4%). Sumber 60 fps tetap 60 fps.
+
+**Yang ditambahkan v1.8.5.**
+- Server mengirim fps setiap file video ke editor (`probe.video.fps` di `/api/media/<id>/meta` dan `proxy-status`).
+- Pilihan ekspor (tombol resolusi dan dialog Ekspor) memberi peringatan kalau fps ekspor lebih tinggi dari video utama, misalnya: "Video utamanya 30 fps: di 60 fps setiap gambar videonya tampil 2×, jadi gerakan videonya tetap 30 fps (teks, efek, dan animasi 60 fps)."
+- Diagnostik → Ekspor terakhir:
+  - **Video dibaca dari**: file asli, salinan kualitas penuh, atau salinan ringan (720p, maks. 30 fps), beserta fps-nya;
+  - **Gerakan video**: berapa gambar berbeda per detik dari video utama, dibanding fps ekspor dan fps file.
+
+**Tes (`test/e2e/export.mjs` L).**
+- Video 30 fps diekspor 60 fps: gerakan video terukur 30 gambar/dtk, file terbaca "file asli (30 fps)".
+- fps file tersimpan di media proyek.
+- Peringatan muncul di 60 fps dan hilang di 30 fps.

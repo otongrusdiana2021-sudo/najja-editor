@@ -171,6 +171,7 @@ function resPopover(anchor) {
       <div class="pop-row"><label>Frame rate</label><div class="chip-row">${FPS_OPTIONS.map((f) => `<button class="chip ${o.fps === f ? 'on' : ''}" data-fps="${f}">${f}</button>`).join('')}</div></div>
       <div class="pop-row"><label>Kualitas</label><div class="seg wide">${[['low', 'Hemat'], ['recommended', 'Rekomendasi'], ['high', 'Tinggi']].map(([q, n]) => `<button class="${o.quality === q ? 'on' : ''}" data-q="${q}">${n}</button>`).join('')}</div></div>
       <p class="hint">${width}×${height} · ${o.fps} fps · ±${fmtBytes(bytes)} · MP4</p>
+      ${fpsNote(o.fps) ? `<p class="hint warn">${fpsNote(o.fps)}</p>` : ''}
       <button class="btn ghost wide" data-more>${icon('settings', 15)} Pengaturan lain…</button>`;
   };
   draw();
@@ -193,6 +194,22 @@ function resPopover(anchor) {
     const off = (e) => { if (!popEl?.contains(e.target) && !anchor.contains(e.target)) { closePopover(); window.removeEventListener('pointerdown', off, true); } };
     window.addEventListener('pointerdown', off, true);
   });
+}
+
+/** Frame rate of the main video (the highest among the main track's files; any video when there is none), or null. */
+function videoSourceFps() {
+  const vids = store.P.clips.filter((c) => c.type === 'video');
+  const main = vids.filter((c) => c.trackId === 'main');
+  let max = 0;
+  for (const c of main.length ? main : vids) { const f = store.media(c.mediaId)?.fps; if (f > max) max = f; }
+  return max || null;
+}
+/** A higher export frame rate than the video's repeats its pictures: say so, so 60 fps is not expected to look 60. */
+function fpsNote(fps) {
+  const src = videoSourceFps();
+  if (!src || fps <= src + 1) return '';
+  const n = Math.round(src);
+  return `Video utamanya ${n} fps: di ${fps} fps setiap gambar videonya tampil ${Math.round(fps / src) > 1 ? `${Math.round(fps / src)}×` : 'berulang'}, jadi gerakan videonya tetap ${n} fps (teks, efek, dan animasi ${fps} fps).`;
 }
 
 function quickExport() {
@@ -398,7 +415,9 @@ async function diagnosticsDialog() {
         ])}<p class="hint">Upload diulang: ${c.upload_retry_count || 0} · simpan gagal: ${c.save_failed || 0}</p></section>
         <section>${ex ? kv(`Ekspor terakhir (${ex.ok ? 'berhasil' : ex.cancelled ? 'dibatalkan' : 'gagal'})`, [
           ['Mode', ex.mode === 'fast' ? 'cepat (WebCodecs)' : ex.mode === 'realtime' ? 'real-time (MediaRecorder)' : ex.mode],
-          ['Fallback', ex.fallback], ['Dicoba ulang (codec lain)', ex.retry || null], ['Codec video', ex.codecs ? `${ex.codecs}${ex.decoder_accel ? ` (decoder dipakai: ${ex.decoder_accel === 'software' ? 'software' : 'perangkat'})` : ''}` : null], ['Hasil', `${ex.width}×${ex.height} ${ex.fps} fps · ${ex.duration} dtk`],
+          ['Fallback', ex.fallback], ['Dicoba ulang (codec lain)', ex.retry || null], ['Video dibaca dari', ex.export_sources || null],
+          ['Gerakan video', ex.video_motion_fps != null ? `${ex.video_motion_fps} gambar berbeda per detik di ekspor ${ex.fps} fps${ex.video_source_fps ? ` · file video ${ex.video_source_fps} fps` : ''}` : null],
+          ['Codec video', ex.codecs ? `${ex.codecs}${ex.decoder_accel ? ` (decoder dipakai: ${ex.decoder_accel === 'software' ? 'software' : 'perangkat'})` : ''}` : null], ['Hasil', `${ex.width}×${ex.height} ${ex.fps} fps · ${ex.duration} dtk`],
           ['Hasil encode ditampung', ex.spool === 'opfs' ? 'file sementara di perangkat (hemat RAM)' : ex.spool === 'memory' ? 'memori' : null],
           ['Audio di-decode', ex.audio_decoded_s != null ? `${Math.round(ex.audio_decoded_s)} dtk (hanya bagian yang dipakai)` : null],
           ['File audio di-decode utuh', ex.audio_full_decode || null],
@@ -723,6 +742,7 @@ function exportDialog() {
         <div class="ctl"><label>Frame rate</label><select class="exp-fps">${FPS_OPTIONS.map((f) => `<option ${f === o.fps ? 'selected' : ''}>${f}</option>`).join('')}</select></div>
         <div class="ctl"><label>Format</label><select class="exp-fmt">${fmts.mp4 ? `<option value="mp4" ${o.format === 'mp4' ? 'selected' : ''}>MP4 (H.264)</option>` : ''}${fmts.webm ? '<option value="webm">WebM</option>' : ''}</select></div>
       </div>
+      <p class="hint warn exp-fps-note" ${fpsNote(o.fps) ? '' : 'hidden'}>${fpsNote(o.fps)}</p>
       <div class="ctl"><label>Kualitas</label><div class="seg wide">${[['low', 'Rendah'], ['recommended', 'Rekomendasi'], ['high', 'Tinggi']].map(([q, n]) => `<button class="${o.quality === q ? 'on' : ''}" data-q="${q}">${n}</button>`).join('')}</div></div>
       <div class="ctl"><label>Rentang</label><div class="seg wide"><button class="on" data-range="all">Seluruh video</button><button data-range="sel" ${sel ? '' : 'disabled'}>Klip terpilih</button></div></div>
       ${!fmts.mp4 && !fmts.webm ? '<p class="hint danger">Browser ini tidak mendukung perekaman video. Gunakan Chrome atau Edge terbaru.</p>' : `<p class="hint">${fast ? 'MP4 dirender secepat kemampuan perangkat ini (lebih cepat dari durasi video di PC dengan GPU). WebM direkam real-time.' : 'Ekspor berjalan real-time di browser.'} Biarkan tab ini tetap terbuka.</p>`}`,
@@ -740,7 +760,13 @@ function exportDialog() {
     if (b.dataset.q) { o.quality = b.dataset.q; m.el.querySelectorAll('[data-q]').forEach((x) => x.classList.toggle('on', x === b)); refresh(); }
     if (b.dataset.range) { o.range = b.dataset.range; m.el.querySelectorAll('[data-range]').forEach((x) => x.classList.toggle('on', x === b)); refresh(); }
   });
-  m.el.querySelector('.exp-fps').onchange = (e) => { o.fps = Number(e.target.value); refresh(); };
+  m.el.querySelector('.exp-fps').onchange = (e) => {
+    o.fps = Number(e.target.value);
+    refresh();
+    const note = m.el.querySelector('.exp-fps-note');
+    note.textContent = fpsNote(o.fps);
+    note.hidden = !note.textContent;
+  };
   m.el.querySelector('.exp-fmt').onchange = (e) => { o.format = e.target.value; };
   m.el.querySelector('[data-x]').onclick = m.close;
   m.el.querySelector('[data-go]').onclick = () => {

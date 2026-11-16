@@ -2,7 +2,7 @@
 import { store } from './store.js';
 import { RESOLUTIONS } from './presets.js';
 import { preloadFonts } from './render.js';
-import { cacheProjectMedia } from './media.js';
+import { cacheProjectMedia, mediaRT } from './media.js';
 import { fastExport, fastExportAvailable, guard } from './fastexport.js';
 import { metrics } from './metrics.js';
 import { storage } from './storage.js';
@@ -143,6 +143,11 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
     const fetchMs = metrics.timer('export_fetch_media_ms');
     await cacheProjectMedia(P, onPrepare);
     stats.fetch_media_ms = Math.round(fetchMs());
+    // which copy of each video the export reads, and its frame rate (Diagnostik)
+    stats.export_sources = [...new Set(P.clips.filter((c) => c.type === 'video').map((c) => c.mediaId))].map((id) => {
+      const m = store.media(id);
+      return `${m?.name || id}: ${mediaRT.get(id)?.exportKind || 'file di perangkat'}${m?.fps ? ` (${Math.round(m.fps)} fps)` : ''}`;
+    }).join(' · ') || null;
     if (flag.cancelled) throw new Error('Ekspor dibatalkan');
     if (wantMp4 && !opts.realtime && fastExportAvailable()) {
       exportState.phase = 'rendering';

@@ -127,6 +127,8 @@ async function applyServerState(id, st, { entry, announce = false } = {}) {
     if (!e.duration && st.probe.duration) e.duration = st.probe.duration;
     if (!e.width && st.probe.width) { e.width = st.probe.width; e.height = st.probe.height; }
     if (st.probe.hasVideo) e.hasAudio = !!st.probe.hasAudio;
+    // frame rate of the file (the export dialog warns when the export asks for more than the video has)
+    if (st.probe.video?.fps > 0) e.fps = Math.round(st.probe.video.fps * 100) / 100;
   }
   const a = st.assets;
   if (a) {
@@ -149,6 +151,9 @@ async function applyServerState(id, st, { entry, announce = false } = {}) {
   const preview = editUrl || rt.local || hiUrl || (safe ? fileUrl : null);
   // Exports read full quality: the H.264 copy of a file browsers may not decode, else the original.
   rt.exportSrc = hiUrl || (st.state === 'none' && rt.local) || (safe ? fileUrl : null) || rt.local || editUrl || preview;
+  // what exports read (Diagnostik): the light copy (720p, ≤ 30 fps) only when nothing better exists
+  rt.exportKind = rt.exportSrc === hiUrl ? 'salinan kualitas penuh' : rt.exportSrc === rt.local || rt.exportSrc === fileUrl ? 'file asli'
+    : rt.exportSrc === editUrl ? 'salinan ringan (720p, maks. 30 fps)' : 'pratinjau';
   // upgrading: the server remakes an older light copy (e.g. 60 fps); keep playing this one, pick up the new one when ready
   const waiting = busy(ed?.state) || busy(st.state) || !a || !!ed?.upgrading;
   if (!preview) {

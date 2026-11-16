@@ -385,7 +385,11 @@ async function readJson(req) {
 function publicProxy(st, withProbe = false) {
   if (!st) return null;
   const out = { state: st.state, progress: st.progress ?? (st.state === 'ready' ? 1 : 0), error: st.error || null, v: st.updatedAt || 0 };
-  if (withProbe && st.probe) out.probe = { duration: st.probe.duration, width: st.probe.width, height: st.probe.height, hasVideo: !!st.probe.video, hasAudio: !!st.probe.audio };
+  if (withProbe && st.probe) {
+    out.probe = { duration: st.probe.duration, width: st.probe.width, height: st.probe.height, hasVideo: !!st.probe.video, hasAudio: !!st.probe.audio };
+    // frame rate (v1.8.5): the export dialog says when a 60 fps export of a 30 fps video only repeats its pictures
+    if (st.probe.video?.fps > 0) out.probe.video = { fps: st.probe.video.fps };
+  }
   // Light 720p preview copy, and thumbnails/waveform made on the server.
   const e = st.edit;
   // reasons: why the light copy exists (codec/size/bitrate/fps/hdr) — the editor plays it instead of a heavy original
@@ -844,13 +848,13 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
         const meta = await storage.getMeta(id);
         const st = meta.file ? await proxies.status(id) : null;
         const { ownerId, ...pub } = withServerAssets(id, meta, st);
-        return sendJson(res, 200, { ...pub, proxy: publicProxy(st) });
+        return sendJson(res, 200, { ...pub, proxy: publicProxy(st, true) });
       }
       const immutable = { 'Cache-Control': 'private, max-age=31536000, immutable' };
       if (part === 'edit' && (req.method === 'GET' || req.method === 'HEAD')) return sendFile(req, res, proxies.editPath(id), { 'Content-Type': 'video/mp4', ...immutable });
       if (part === 'sprite' && req.method === 'GET') return sendFile(req, res, proxies.assetPath(id, 'sprite.jpg'), { 'Content-Type': 'image/jpeg', ...immutable });
       if (part === 'poster' && req.method === 'GET') return sendFile(req, res, proxies.assetPath(id, 'poster.jpg'), { 'Content-Type': 'image/jpeg', ...immutable });
-      if (part === 'proxy-status' && req.method === 'GET') return sendJson(res, 200, publicProxy(await proxies.status(id)));
+      if (part === 'proxy-status' && req.method === 'GET') return sendJson(res, 200, publicProxy(await proxies.status(id), true));
       if (part === 'proxy' && req.method === 'POST') {
         const body = await readJson(req).catch(() => ({}));
         return sendJson(res, 200, publicProxy(await proxies.ensure(id, { force: !!body.force }), true));

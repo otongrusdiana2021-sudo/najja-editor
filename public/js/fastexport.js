@@ -955,6 +955,14 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   const groups = new Map();
   for (const c of vClips) { const k = keys.get(c.id) || c.id; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
   const sources = new Map(); // key -> VideoSource
+  // Frame rate of the video files, and how many different pictures of the main video the export shows per second:
+  // a 30 fps file exported at 60 fps shows every picture twice (only text and effects move 60 times a second).
+  const srcFps = [...tracks.values()].map((tr) => {
+    const P2 = tr.samples.map((x) => x.pts).sort((a, b) => a - b);
+    return P2.length > 1 ? (P2.length - 1) / Math.max(1e-3, P2[P2.length - 1] - P2[0]) : 0;
+  }).filter((f) => f > 0);
+  if (srcFps.length) stats.video_source_fps = [...new Set(srcFps.map((f) => Math.round(f * 10) / 10))].sort((a, b) => b - a).join(', ');
+  const motion = { frames: 0, changes: 0, last: null };
   const decStats = {}; // shared by every VideoSource: frames shown, stale, lost...
   const decReport = () => Object.assign(stats, { video_frames: decStats.frames || 0, video_stale: decStats.stale || 0, video_lost: decStats.lost || 0,
     decoder_flushes: decStats.flushes || 0, decoder_resyncs: decStats.resyncs || 0, decoder_window: decStats.window || MAX_IN_FLIGHT,
@@ -1027,6 +1035,14 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
         shown.set(k, await guard(sources.get(k).frameAt(engine.localTime(clip, t)), FRAME_TIMEOUT_MS + (i ? 0 : WARMUP_MS), `video decoder (frame ${i + 1})`, flag));
       }
       prof.decode += performance.now() - m; m = performance.now();
+      // (the main track's picture now: a new one, or the same as in the previous output frame)
+      const mainKey = [...groups.keys()].find((k) => groups.get(k).some((c) => c.trackId === 'main' && t >= c.start && t < c.start + c.duration));
+      if (mainKey != null && shown.get(mainKey)) {
+        const f = shown.get(mainKey);
+        motion.frames++;
+        if (f !== motion.last) motion.changes++;
+        motion.last = f;
+      }
       renderFrame(ctx, t, env);
       prof.render += performance.now() - m; m = performance.now();
       const vf = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / fps), duration: Math.round(1e6 / fps) });
@@ -1059,6 +1075,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
     if (decStats.frames && bad > Math.max(2, decStats.frames * STALE_LIMIT)) {
       throw unsupported(`video decoder dropped frames (${decStats.stale} late, ${decStats.lost} lost of ${decStats.frames})`);
     }
+    if (motion.frames > fps) stats.video_motion_fps = Math.round((motion.changes / motion.frames) * fps * 10) / 10;
     stats.stage = 'encode';
     const tFlush = performance.now();
     await guard(enc.flush(), 60000, 'video encoder flush', flag);
