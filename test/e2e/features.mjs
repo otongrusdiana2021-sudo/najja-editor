@@ -301,6 +301,45 @@ try {
   check(lay.front.index === lay.front.count && lay.aboveB, `Paling depan: lapisan ${lay.front.index}/${lay.front.count}, digambar di atas klip lain`);
   check(lay.back.index === 1 && lay.belowB && lay.aboveMain, `Paling belakang: lapisan 1/${lay.back.count}, tetap di atas track utama`);
 
+  step('J. Sampul: dari frame video (HD) dan dari galeri, jadi frame pertama video ekspor');
+  const cov = await p.evaluate(async () => {
+    const cover = await import('/js/cover.js');
+    const { store } = await import('/js/store.js');
+    const fr = await cover.frameCover(1.0);
+    await cover.setCoverImage(fr.canvas, { from: 'frame', t: 1 });
+    const c1 = { ...store.P.cover, thumb: !!store.P.cover?.thumb };
+    const hidden = store.P.media.find((m) => m.id === c1.mediaId)?.cover === true;
+    // a small magenta photo from the "gallery": cropped to 9:16, enlarged (no AI service in this test)
+    const ph = document.createElement('canvas'); ph.width = 300; ph.height = 200;
+    const x = ph.getContext('2d'); x.fillStyle = '#ff00ff'; x.fillRect(0, 0, 300, 200);
+    const blob = await new Promise((r) => ph.toBlob(r, 'image/png'));
+    const pc = await cover.photoCover(new File([blob], 'foto.png', { type: 'image/png' }));
+    await cover.setCoverImage(pc.canvas, { from: 'photo' });
+    const c2 = { ...store.P.cover, thumb: !!store.P.cover?.thumb };
+    const firstMediaGone = !store.P.media.some((m) => m.id === c1.mediaId);
+    return { hd: fr.hd, w: fr.canvas.width, h: fr.canvas.height, c1, hidden, c2, pw: pc.canvas.width, ph: pc.canvas.height, firstMediaGone };
+  }).catch((e) => ({ error: e.message }));
+  check(cov.hd && cov.w === 1080 && cov.h === 1920, `frame video → sampul HD ${cov.w}×${cov.h} dari video kualitas penuh${cov.error ? ` (${cov.error})` : ''}`);
+  check(cov.c1?.mediaId && cov.c1.thumb && cov.hidden, 'sampul tersimpan sebagai gambar proyek (tidak tampil di daftar media) + gambar kecil untuk kartu proyek');
+  check(cov.pw === 1080 && cov.ph === 1920 && cov.c2?.from === 'photo', `foto galeri dipotong ke rasio proyek: ${cov.pw}×${cov.ph}`);
+  check(cov.firstMediaGone, 'gambar sampul lama dihapus saat diganti');
+  // the export's first frame is the cover (magenta), the second is the video
+  const first = await p.evaluate(async () => {
+    const { exportVideo } = await import('/js/exporter.js');
+    const res = await exportVideo(window.najja.engine, { resolution: '480p', format: 'mp4', range: [0, 1] });
+    const url = URL.createObjectURL(res.blob);
+    const v = document.createElement('video'); v.muted = true; v.src = url; await v.play().catch(() => {}); v.pause();
+    const at = async (t) => { v.currentTime = t; await new Promise((r) => v.addEventListener('seeked', r, { once: true })); const c = document.createElement('canvas'); c.width = 32; c.height = 56; const x = c.getContext('2d'); x.drawImage(v, 0, 0, 32, 56); const d = x.getImageData(16, 28, 1, 1).data; return [...d.slice(0, 3)]; };
+    return { mode: res.mode, f0: await at(0.001), f1: await at(0.2) };
+  });
+  const magenta = (px) => px[0] > 200 && px[1] < 60 && px[2] > 200;
+  check(first.mode === 'fast' && magenta(first.f0) && !magenta(first.f1), `frame pertama ekspor = sampul (${first.f0}), lalu video (${first.f1})`);
+  await p.evaluate(() => window.najja.openSheet('cover'));
+  await p.waitForSelector('.sheet.in .cover-sheet');
+  const modes = await p.evaluate(() => [...document.querySelectorAll('.sheet.in [data-cm]')].map((b) => b.textContent.trim()));
+  check(modes.join('|') === 'Frame video|Dari galeri', `pilihan sampul: ${modes.join(', ')}`);
+  await p.evaluate(() => window.najja.sheet?.close?.());
+
   check(!errors.length, `tidak ada error halaman${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } finally {
   await browser.close();

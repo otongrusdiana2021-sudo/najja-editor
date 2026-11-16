@@ -5,7 +5,10 @@ import { store } from './store.js';
 import { importFile, onMediaChange, removeMedia, mediaRT } from './media.js';
 import { SOLIDS, GRADIENTS } from './presets.js';
 import { icon } from './icons.js';
-import { escapeHtml, pickFiles } from './util.js';
+import { escapeHtml, pickFiles, downloadBlob, fmtDur } from './util.js';
+import { frameCover, photoCover, setCoverImage, clearCover, setCoverFirstFrame, coverBlob } from './cover.js';
+
+const fmtTime = (t) => `${fmtDur(Math.floor(Math.max(0, t)))}.${Math.floor((Math.max(0, t) % 1) * 10)}`;
 import { toast, confirmDialog } from './ui.js';
 import * as actions from './actions.js';
 import { Library } from './library.js';
@@ -125,7 +128,7 @@ function mediaSheet(sheet, mode) {
     bound: replaceId,
     render: (body) => {
       const draw = () => {
-        const list = store.P.media.filter((m) => !m.stock && M.types.includes(m.type) && (filter === 'all' || m.type === filter)).slice().reverse();
+        const list = store.P.media.filter((m) => !m.stock && !m.cover && M.types.includes(m.type) && (filter === 'all' || m.type === filter)).slice().reverse();
         const chips = M.types.length > 1 ? [['all', 'Semua'], ['video', 'Video'], ['image', 'Foto']]
           .map(([id, n]) => `<button class="chip ${filter === id ? 'on' : ''}" data-mf="${id}">${n}</button>`).join('') : '';
         body.innerHTML = `<div class="lib-body media-picker">
@@ -193,42 +196,104 @@ function mediaSheet(sheet, mode) {
 }
 
 function coverSheet(sheet) {
-  const { engine, player } = actions.app;
+  const { engine } = actions.app;
+  let mode = 'frame';
+  let busy = false;
   sheet.open({
     id: 'cover',
     title: 'Sampul',
     size: 'dock',
     render: (body) => {
       const draw = () => {
-        const cur = store.P.cover?.thumb;
+        const C = store.P.cover;
+        const cur = C?.thumb;
+        const dur = Math.max(0.1, store.duration());
+        const hd = C?.w ? `${C.w}×${C.h}` : '';
         body.innerHTML = `<div class="lib-body cover-sheet">
+          <div class="seg wide"><button class="${mode === 'frame' ? 'on' : ''}" data-cm="frame">${icon('film', 15)} Frame video</button><button class="${mode === 'photo' ? 'on' : ''}" data-cm="photo">${icon('image', 15)} Dari galeri</button></div>
           <div class="cover-row">
-            <div class="cover-now">${cur ? `<img src="${cur}" alt="Sampul">` : `<span>${icon('cover', 26)}</span>`}<em>${cur ? 'Sampul sekarang' : 'Belum ada sampul'}</em></div>
+            <div class="cover-now">${cur ? `<img src="${cur}" alt="Sampul">` : `<span>${icon('cover', 26)}</span>`}<em>${cur ? `Sampul sekarang${hd ? ` · <b class="hd-badge">HD</b> ${hd}` : ''}` : 'Belum ada sampul'}</em></div>
             <div class="cover-actions">
-              <p class="hint">Geser timeline sampai frame yang kamu mau tepat di garis putih, lalu ketuk tombol di bawah. Sampul dipakai sebagai gambar proyek di daftar proyek.</p>
-              <button class="btn btn-primary" data-do="set">${icon('cover', 16)} Pakai frame di playhead</button>
-              ${cur ? `<button class="btn ghost" data-do="clear">${icon('x', 15)} Hapus sampul</button>` : ''}
+              ${mode === 'frame' ? `<p class="hint">Geser untuk memilih frame; pratinjau menampilkannya. Sampul dirender dari video kualitas penuh seukuran proyek (HD).</p>
+                <div class="cover-scrub"><input type="range" class="cover-t" min="0" max="${dur.toFixed(3)}" step="0.01" value="${Math.min(dur, engine.time).toFixed(3)}"><span class="cover-time">${fmtTime(engine.time)}</span></div>
+                <button class="btn btn-primary" data-do="frame" ${busy ? 'disabled' : ''}>${icon('cover', 16)} Pakai frame ini (HD)</button>`
+              : `<p class="hint">Foto dipotong sesuai rasio proyek. Foto yang lebih kecil dari ukuran proyek ditingkatkan ke HD dengan AI di server.</p>
+                <button class="btn btn-primary" data-do="photo" ${busy ? 'disabled' : ''}>${icon('image', 16)} Pilih foto dari galeri</button>`}
+              <div class="cover-prog" ${busy ? '' : 'hidden'}><div class="ai-bar"><i></i></div><span class="cover-prog-l"></span></div>
+              ${C ? `<label class="cover-toggle"><input type="checkbox" data-do="first" ${C.firstFrame !== false ? 'checked' : ''}><span>Tampilkan sampul di awal video ekspor<small>Galeri dan media sosial memakai frame pertama sebagai gambar video.</small></span></label>
+                <div class="btn-row"><button class="btn ghost" data-do="save">${icon('download', 15)} Simpan gambar</button><button class="btn ghost" data-do="clear">${icon('x', 15)} Hapus sampul</button></div>` : ''}
             </div>
           </div></div>`;
       };
-      const onClick = (e) => {
-        const b = e.target.closest('[data-do]');
-        if (!b) return;
-        if (b.dataset.do === 'set') {
-          engine.pause();
-          const src = player.canvas;
-          const c = document.createElement('canvas');
-          c.width = 320;
-          c.height = Math.round((320 * src.height) / Math.max(1, src.width));
-          c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
-          actions.setCover(c.toDataURL('image/jpeg', 0.75));
-          toast('Sampul disimpan', { type: 'ok' });
-        } else actions.setCover(null);
+      const progress = (p, label) => {
+        const bar = body.querySelector('.cover-prog');
+        if (!bar) return;
+        bar.hidden = false;
+        bar.querySelector('i').style.width = `${Math.max(3, Math.round(p * 100))}%`;
+        bar.querySelector('.cover-prog-l').textContent = label;
+      };
+      const make = async (fn, okText) => {
+        if (busy) return;
+        busy = true;
         draw();
+        try {
+          const r = await fn();
+          if (!r) return;
+          await setCoverImage(r.canvas, r.meta);
+          toast(r.hd ? okText : `${okText} (kualitas pratinjau: video kualitas penuh tidak bisa dibaca di sini)`, { type: r.hd ? 'ok' : 'warn', timeout: 4000 });
+        } catch (err) {
+          toast(`Sampul gagal: ${err.message}`, { type: 'error', timeout: 5000 });
+        } finally {
+          busy = false;
+          draw();
+        }
+      };
+      const onClick = async (e) => {
+        const m = e.target.closest('[data-cm]');
+        if (m) { mode = m.dataset.cm; draw(); return; }
+        const b = e.target.closest('[data-do]');
+        if (!b || b.tagName === 'INPUT') return;
+        switch (b.dataset.do) {
+          case 'frame': {
+            const t = Math.min(store.duration() - 0.01, Math.max(0, engine.time));
+            await make(async () => { const r = await frameCover(t, progress); return { ...r, meta: { from: 'frame', t } }; }, 'Sampul HD dari frame video disimpan');
+            break;
+          }
+          case 'photo': {
+            const [file] = await pickFiles({ accept: 'image/*' });
+            if (!file) return;
+            await make(async () => { const r = await photoCover(file, progress); return { ...r, meta: { from: 'photo' } }; }, 'Sampul dari galeri disimpan');
+            break;
+          }
+          case 'save': {
+            const blob = await coverBlob();
+            if (!blob) return;
+            const name = `${(store.P.name || 'sampul').replace(/[\\/:*?"<>|]+/g, '')}-sampul.jpg`;
+            const file = new File([blob], name, { type: 'image/jpeg' });
+            if (navigator.canShare?.({ files: [file] })) {
+              try { await navigator.share({ files: [file], title: name }); return; } catch (err) { if (err?.name === 'AbortError') return; }
+            }
+            downloadBlob(blob, name);
+            break;
+          }
+          case 'clear': clearCover(); draw(); break;
+          default: break;
+        }
+      };
+      const onInput = (e) => {
+        if (e.target.classList.contains('cover-t')) {
+          engine.pause();
+          engine.seek(Number(e.target.value));
+          const l = body.querySelector('.cover-time');
+          if (l) l.textContent = fmtTime(Number(e.target.value));
+        }
+        if (e.target.dataset.do === 'first') setCoverFirstFrame(e.target.checked);
       };
       draw();
       body.addEventListener('click', onClick);
-      return () => body.removeEventListener('click', onClick);
+      body.addEventListener('input', onInput);
+      body.addEventListener('change', onInput);
+      return () => { body.removeEventListener('click', onClick); body.removeEventListener('input', onInput); body.removeEventListener('change', onInput); };
     },
   });
 }

@@ -9,6 +9,7 @@ import { renderFrame } from './render.js';
 import { compilePlan } from './plan.js';
 import { blobOfUrl } from './util.js';
 import { aacConfig } from './aac.js';
+import { coverForExport } from './cover.js';
 
 export class Unsupported extends Error {}
 const unsupported = (why) => new Unsupported(why);
@@ -961,6 +962,8 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
     stats.audio_config = `${audio.codec} ${audio.sampleRate} Hz ${audio.channels} ch${from}`;
   }
 
+  const coverImg = await coverForExport(P).catch(() => null);
+  if (coverImg) stats.cover_first_frame = true;
   const keys = engine.chainKeys(P);
   const groups = new Map();
   for (const c of vClips) { const k = keys.get(c.id) || c.id; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
@@ -1058,7 +1061,9 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
         if (f !== motion.last) motion.changes++;
         motion.last = f;
       }
-      renderFrame(ctx, t, env);
+      // the project's cover as the first frame (galleries and social apps show it as the video's picture)
+      if (i === 0 && coverImg && r0 <= 0) ctx.drawImage(coverImg, 0, 0, width, height);
+      else renderFrame(ctx, t, env);
       prof.render += performance.now() - m; m = performance.now();
       const vf = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / fps), duration: Math.round(1e6 / fps) });
       enc.encode(vf, { keyFrame: i % (fps * 2) === 0 });
@@ -1131,3 +1136,50 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   stats.stage = 'done';
   return out;
 }
+
+/**
+ * One frame of the project at time t, at width×height, from the full-quality copies (the export's own decoder and
+ * compositor): the "HD" cover from a video frame (v1.9). The media must be on this device (cacheProjectMedia).
+ * Returns a canvas, or null where WebCodecs cannot do it (the caller uses the preview's picture instead).
+ */
+export async function renderStill({ engine, P, t, width, height }) {
+  if (!fastExportAvailable()) return null;
+  const near = P.clips.filter((c) => c.type === 'video' && t >= c.start - 1 && t < c.start + c.duration + 1);
+  const shown = new Map();
+  const opened = [];
+  try {
+    for (const c of near) {
+      const rt = mediaRT.get(c.mediaId);
+      const url = rt?.exportUrl || rt?.url;
+      if (!url) continue;
+      const bs = await guard(ByteSource.open(url), 30000, 'reading the video file');
+      const track = demuxVideo(await guard(bs.moov(), 30000, 'reading the video file'));
+      const vs = await VideoSource.open(new ByteSource(bs.blob), track, {}, 'prefer-software');
+      opened.push(vs);
+      const f = await guard(vs.frameAt(engine.localTime(c, Math.min(Math.max(t, c.start), c.start + c.duration - 1e-3))), FRAME_TIMEOUT_MS + WARMUP_MS, 'video decoder');
+      if (f) shown.set(c.id, f);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    renderFrame(canvas.getContext('2d', { alpha: false }), t, {
+      project: P,
+      plan: compilePlan(P),
+      s: width / P.width,
+      boxes: null,
+      mediaMeta: (id) => store.media(id),
+      source: (clip) => {
+        if (clip.type !== 'video') return engine.sourceFor(clip);
+        const f = shown.get(clip.id);
+        return f ? { el: f, w: f.displayWidth, h: f.displayHeight } : null;
+      },
+    });
+    return canvas;
+  } catch (err) {
+    console.warn('[najja] HD still not possible, using the preview:', err.message);
+    return null;
+  } finally {
+    for (const s of opened) s.close();
+  }
+}
+

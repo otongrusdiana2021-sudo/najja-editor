@@ -55,6 +55,7 @@ const P = {
   skipForward: '<path d="m5 4 10 8-10 8z" fill="currentColor"/><path d="M19 5v14"/>',
   stepBack: '<path d="M14 6l-6 6 6 6"/>',
   stepForward: '<path d="m10 6 6 6-6 6"/>',
+  film: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
   video: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3z"/>',
   sparkles: '<path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15.2l-1.8-4.6L5.5 9l4.7-1.4z"/>',

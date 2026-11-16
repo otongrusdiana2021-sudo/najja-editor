@@ -739,3 +739,17 @@ canvas.anim-prev { width: 100%; max-width: 96px; height: auto; aspect-ratio: 16 
 .layer-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 4px; border-radius: 12px; background: var(--panel-2); font-size: 12px; color: var(--text); }
 .layer-btn:disabled { opacity: 0.35; }
 .layer-btn:not(:disabled):active { transform: scale(0.96); }
+
+/* Sampul (v1.9): frame video / from the gallery */
+.cover-sheet .seg { margin-bottom: 14px; }
+.cover-sheet .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.cover-now img, .cover-now > span { object-fit: cover; }
+.hd-badge { display: inline-block; padding: 0 5px; border-radius: 4px; background: var(--accent); color: #062b30; font-size: 10px; font-weight: 800; }
+.cover-scrub { display: flex; align-items: center; gap: 10px; width: 100%; }
+.cover-scrub input { flex: 1; }
+.cover-time { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text-2); min-width: 44px; }
+.cover-prog { width: 100%; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-2); }
+.cover-prog[hidden] { display: none; }
+.cover-toggle { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; cursor: pointer; }
+.cover-toggle small { display: block; color: var(--text-3); font-size: 11.5px; margin-top: 2px; }
+.cover-actions .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
