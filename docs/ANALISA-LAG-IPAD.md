@@ -1,4 +1,4 @@
-# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.2)
+# Analisa: pratinjau patah-patah di iPad, dan ekspor dari iPad (v1.7.1–v1.8.3)
 
 Sumber data: rekaman layar iPad mini (Safari, potret, proyek 1 klip 25 dtk), Diagnostik dari iPad pengguna, dan pengukuran ulang di lab (Chromium + Playwright, profil iPad).
 
@@ -442,3 +442,53 @@ Di lab, decoder Chromium Linux berjalan di perangkat lunak dan tidak punya batas
 | H. Tombol Ekspor di editor | label "Merender cepat · frame #/# · sisa ±# detik" tampil, ekspor selesai |
 
 Skenario A–D (Chromium, perilaku Safari, decoder yang menahan, decoder yang menghilangkan frame) tetap lolos.
+
+## 13. "Hasil ekspor stutter pas ada efek" (v1.8.3)
+
+### Analisa file ekspor dari PC
+
+**File ini bukan hasil render cepat.** Isinya MP4 terfragmentasi (`moof`/`mdat`, brand `iso6`) dengan frame rate berubah-ubah (rata-rata 25,3 fps). Itu keluaran perekam real-time (`MediaRecorder`), bukan muxer Najja. Jadi ekspor cepat tidak bisa dipakai di PC itu dan pindah ke mode real-time. Mode itu memutar timeline lalu merekamnya, sehingga hasilnya hanya semulus kecepatan perangkat menggambar.
+
+Jarak antar-frame di file itu:
+
+| Rentang | Jarak antar-frame | Artinya |
+|---|---|---|
+| 0–0,8 dtk dan 2,6–6,3 dtk | 30–35 ms | ±30 fps, mulus |
+| **0,82–2,56 dtk** | **75–95 ms** | **±12 fps, stutter** |
+
+Rentang 0,82–2,56 dtk tepat saat **overlay polkadot ("TERPOLKADOT")** tampil. Tepi bulatannya bersih tanpa sisa hijau, cocok dengan overlay layar hijau yang dihapus dengan **kunci kroma**.
+
+### Penyebab: kunci kroma di CPU
+
+Kunci kroma lama, per frame:
+1. membaca seluruh layer dari GPU (`getImageData`);
+2. menghitung setiap piksel di JavaScript, dengan `Math.hypot` per piksel;
+3. menulis layer kembali (`putImageData`).
+
+Untuk layer 1080×1920, perulangan JavaScript-nya saja **86 ms per frame** di CPU lab. Angka itu cocok dengan jarak 75–95 ms di file. Hal yang sama memperlambat preview saat overlay tampil, dan ekspor cepat di iPad.
+
+### Perbaikan v1.8.3
+
+- **Kunci kroma di GPU** (`render.js`): rumusnya sama (jarak CbCr, kemiripan, kehalusan, penekanan tumpahan hijau), dijalankan di fragment shader WebGL. Hasilnya disalin kembali ke layer tanpa dibaca oleh CPU.
+  - Dipakai di preview, ekspor cepat, dan ekspor real-time.
+  - Batas 1920×1080 untuk layer kroma tidak berlaku lagi di GPU.
+- **Cadangan CPU yang lebih cepat**: dipakai kalau WebGL tidak ada atau konteksnya hilang. Jarak dibandingkan dalam bentuk kuadrat, akar hanya dihitung di tepi. Hasil sama, perulangan **86 → 7,5 ms** per frame 1080×1920.
+- **Ekspor cepat dicoba ulang dengan codec software** sebelum pindah ke real-time. Ini berlaku kalau decoder/encoder video perangkat gagal, menghilangkan frame, atau tidak menjawab. Decoder/encoder hardware di PC dan Android berbeda-beda; codec software browser jalan di mana saja. Suara yang sudah di-mix dan di-encode tidak dibuat ulang.
+- **Alasan pindah ke real-time ditampilkan** di dialog "Ekspor selesai" ("Mode cepat tidak bisa dipakai: …"). Diagnostik → Ekspor terakhir juga menampilkan percobaan ulang dan codec yang dipakai.
+
+### Bukti (`test/e2e/export.mjs`)
+
+| Skenario | Hasil |
+|---|---|
+| I. Overlay layar hijau dengan kunci kroma, GPU vs CPU | latar hijau hilang (hanya ±8% gambar berubah, yaitu kotak overlay); hasil GPU = CPU (beda rata-rata 0,09 dari 255) |
+| J. Decoder hardware menghilangkan frame, decoder software sehat | tetap **ekspor cepat** dengan codec software, semua frame tepat |
+| D. Decoder yang selalu menghilangkan frame | dicoba ulang dengan software dulu, baru pindah ke real-time |
+
+Di lab, WebGL headless berjalan di perangkat lunak, jadi lab tidak bisa menunjukkan kecepatan GPU (26 ms vs CPU baru 16 ms per frame 720p). Di PC/iPad dengan GPU, shader seperti ini butuh sekitar 1 ms.
+
+### Cara cek
+
+1. Deploy, lalu muat ulang editor dengan Ctrl+Shift+R.
+2. Putar bagian overlay di preview; harus mulus.
+3. Ekspor ulang. Dialog selesai harus bertuliskan "Dirender cepat".
+4. Kalau masih "Dirender real-time", kirim screenshot dialog itu (alasannya tertulis di bawah) dan **Diagnostik → Ekspor terakhir**.

@@ -301,8 +301,8 @@ class VideoSource {
     });
     this.dec.addEventListener?.('dequeue', () => this.wake?.());
   }
-  static async open(src, track, stats) {
-    const cfg = { codec: track.codec, description: track.description, codedWidth: track.width, codedHeight: track.height };
+  static async open(src, track, stats, software = false) {
+    const cfg = { codec: track.codec, description: track.description, codedWidth: track.width, codedHeight: track.height, ...(software ? { hardwareAcceleration: 'prefer-software' } : {}) };
     const ok = await guard(VideoDecoder.isConfigSupported(cfg), CODEC_CHECK_MS, 'VideoDecoder.isConfigSupported').catch((e) => { if (e instanceof Unsupported) throw e; return { supported: false }; });
     if (!ok.supported) throw unsupported(`decoder ${track.codec}`);
     const s = new VideoSource(src, track, stats);
@@ -894,14 +894,14 @@ function avcLevel(w, h, fps) {
  * engine: the live Engine (chain keys, image sources); flag.cancelled stops it; onProgress(0..1).
  * stats (optional object) receives the time spent per stage in ms (blueprint 9.1 "Export").
  */
-export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r1, flag, onProgress, stats = {}, spool: useSpool = true }) {
+export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r1, flag, onProgress, stats = {}, spool: useSpool = true, software = false, cache = {} }) {
   const tPrep = performance.now();
   stats.stage = 'prepare';
   if (!fastExportAvailable()) throw unsupported('WebCodecs not available');
   const lv = avcLevel(width, height, fps);
   let cfg = null;
   for (const prof of ['64', '4d', '42']) {
-    const c = { codec: `avc1.${prof}00${hex2(lv)}`, width, height, bitrate, framerate: fps, latencyMode: 'quality', avc: { format: 'avc' } };
+    const c = { codec: `avc1.${prof}00${hex2(lv)}`, width, height, bitrate, framerate: fps, latencyMode: 'quality', avc: { format: 'avc' }, ...(software ? { hardwareAcceleration: 'prefer-software' } : {}) };
     if ((await guard(VideoEncoder.isConfigSupported(c), CODEC_CHECK_MS, 'VideoEncoder.isConfigSupported').catch((e) => { if (e instanceof Unsupported) throw e; return { supported: false }; })).supported) { cfg = c; break; }
   }
   if (!cfg) throw unsupported('no H.264 encoder');
@@ -926,9 +926,14 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
   // Audio first (fast): a failure here falls back before any video work.
   stats.stage = 'audio';
   Object.defineProperty(stats, 'flag', { value: flag, enumerable: false, configurable: true }); // (for the audio steps' cancel)
-  const mixed = await mixAudio(P, r0, r1, source, stats);
-  const audio = mixed ? await encodeAudio(mixed, flag) : null;
+  // (a second try with software codecs keeps the sound of the first)
+  if (!('audio' in cache)) {
+    const mixed = await mixAudio(P, r0, r1, source, stats);
+    cache.audio = mixed ? await encodeAudio(mixed, flag) : null;
+  }
+  const audio = cache.audio;
   stats.stage = 'prepare';
+  stats.codecs = software ? 'software' : 'auto';
   if (audio) {
     const d = audio.description;
     const from = audio.codec === 'opus' ? '' : !d?.length ? ' · tanpa deskripsi, dibuat' : d[0] === 0x03 || d[0] === 0x04 ? ' · ES_Descriptor (Safari) → ASC' : ' · ASC';
@@ -1006,7 +1011,7 @@ export async function fastExport({ engine, P, width, height, fps, bitrate, r0, r
           if (sources.has(k) && list.every((c) => t >= c.start + c.duration + 1)) { sources.get(k).close(); sources.delete(k); shown.delete(k); }
           continue;
         }
-        if (!sources.has(k)) sources.set(k, await VideoSource.open(new ByteSource((await source(clip.mediaId)).blob), tracks.get(clip.mediaId), decStats));
+        if (!sources.has(k)) sources.set(k, await VideoSource.open(new ByteSource((await source(clip.mediaId)).blob), tracks.get(clip.mediaId), decStats, software));
         shown.set(k, await guard(sources.get(k).frameAt(engine.localTime(clip, t)), FRAME_TIMEOUT_MS + (i ? 0 : WARMUP_MS), `video decoder (frame ${i + 1})`, flag));
       }
       prof.decode += performance.now() - m; m = performance.now();

@@ -121,7 +121,7 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
     width, height, fps, duration: Math.round((r1 - r0) * 10) / 10, mode: exportState.mode, fallback: stats.fallback || null, ...stats, ...extra,
   });
   const finish = (blob, ext, mode) => {
-    const result = { blob, mime: blob.type, ext, filename: `${base}.${ext}`, width, height, fps, size: blob.size, duration: r1 - r0, mode, seconds: (Date.now() - exportState.startedAt) / 1000 };
+    const result = { blob, mime: blob.type, ext, filename: `${base}.${ext}`, width, height, fps, size: blob.size, duration: r1 - r0, mode, seconds: (Date.now() - exportState.startedAt) / 1000, fallback: stats.fallback || null, retry: stats.retry || null };
     Object.assign(exportState, { state: 'done', progress: 1, phase: null, mode, result: { ...result, blob: undefined } });
     cancelFlag = null;
     record({ ok: true, output_size: blob.size, total_ms: Math.round(result.seconds * 1000), realtime_factor: Math.round(((r1 - r0) / Math.max(0.001, result.seconds)) * 100) / 100 });
@@ -150,11 +150,26 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
       try {
         // (a font that never loads must not hold the export: draw with the fallback font instead)
         await guard(preloadFonts(P), 10000, 'fonts', flag).catch((e) => { if (flag.cancelled) throw e; });
-        const blob = await fastExport({
-          engine, P, width, height, fps, bitrate: videoBitsPerSecond, r0, r1, flag, stats,
+        const cache = {}; // (the sound, mixed and encoded once)
+        const attempt = (software) => fastExport({
+          engine, P, width, height, fps, bitrate: videoBitsPerSecond, r0, r1, flag, stats, software, cache,
           spool: storage.status?.features?.exportSpool !== false, // NAJJA_EXPORT_SPOOL=0 on the server turns it off
           onProgress: (p) => { exportState.progress = p; onProgress(p); },
         });
+        let blob;
+        try {
+          blob = await attempt(false);
+        } catch (err) {
+          // The video decoder/encoder of this device failed or stopped answering (hardware decoders on PCs and
+          // Android behave differently): try once more with the browser's software codecs before the real-time
+          // recorder, which can only be as smooth as the device draws in real time.
+          if (flag.cancelled || !(stats.stage === 'render' || stats.stage === 'encode' || /video (de|en)coder|Video(De|En)coder/.test(err.message))) throw err;
+          console.warn('[najja] fast export failed with the device codecs, trying software codecs:', err.message);
+          stats.retry = `${stats.stage}: ${err.message}`;
+          exportState.progress = 0;
+          onProgress(0);
+          blob = await attempt(true);
+        }
         return finish(blob, 'mp4', 'fast');
       } catch (err) {
         if (flag.cancelled) throw err;

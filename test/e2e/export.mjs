@@ -41,6 +41,11 @@ execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi
   '-vf', "drawbox=x='mod(t*480,336)':y=0:w=24:h=640:color=white:t=fill",
   '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '3', '-g', '30', '-keyint_min', '30', '-sc_threshold', '0', '-pix_fmt', 'yuv420p',
   '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', SRC]);
+// green-screen overlay: cream squares moving on pure green (the polka-dot overlay of the iPad project, simplified)
+const GREEN = path.join(dir, 'media', 'hijau.mp4');
+execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `color=c=0x00FF00:s=360x640:r=30:d=${SECS}`,
+  '-vf', "drawbox=x='mod(t*200,240)':y=120:w=120:h=120:color=0xFFFFE0:t=fill,drawbox=x=60:y='mod(t*300,500)':w=80:h=80:color=0xFFFFE0:t=fill",
+  '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', GREEN]);
 const W = 90;
 const H = 160;
 const gray = (f) => {
@@ -122,6 +127,12 @@ const installShims = (mode) => {
     get decodeQueueSize() { return 0; }
     flush() { return new Promise(() => {}); }
   }
+  // 'hw-broken': the device (hardware) decoder loses frames; the browser's software decoder works
+  class HwBrokenDecoder extends ShimDecoder {
+    configure(c) { this.software = c.hardwareAcceleration === 'prefer-software'; this.real.configure(c); }
+    got(f) { if (!this.software && ++this.n % 10 === 5) { f.close(); return; } this.output(f); }
+  }
+  if (mode === 'hw-broken') { window.VideoDecoder = HwBrokenDecoder; window.AudioEncoder = window.__RealAE; return; }
   window.VideoDecoder = mode === 'drop' ? class extends ShimDecoder {
     got(f) { if (++this.n % 10 === 5) { f.close(); return; } this.output(f); }
   } : mode === 'pool' ? PoolDecoder : mode === 'silent' ? SilentDecoder : mode === 'audio-stall' ? RealVD : ShimDecoder;
@@ -178,6 +189,7 @@ try {
     if (await p.evaluate(async (id) => { const { mediaRT } = await import('/js/media.js'); return !!mediaRT.get(id)?.url; }, media.media_id)) break;
   }
 
+  let outN = 0;
   const runExport = async (mode) => {
     await p.evaluate(installShims, mode);
     const r = await p.evaluate(async () => {
@@ -192,7 +204,7 @@ try {
       return { mode: res.mode, ms, ev, data: btoa(s) };
     });
     await p.evaluate(installShims, '');
-    const f = path.join(dir, `out-${mode || 'chromium'}.mp4`);
+    const f = path.join(dir, `out-${++outN}-${mode || 'chromium'}.mp4`); // (one file per export: later checks compare them)
     fs.writeFileSync(f, Buffer.from(r.data, 'base64'));
     return { ...r, file: f };
   };
@@ -252,7 +264,13 @@ try {
   step('D. Decoder yang menghilangkan 1 dari 10 frame → jangan simpan video patah-patah');
   const D = await runExport('drop');
   check(D.mode === 'realtime' && /dropped frames|holds frames/.test(D.ev.fallback || ''), `fallback ke real-time: ${D.ev.fallback}`);
+  check(/dropped frames/.test(D.ev.retry || ''), `D: dicoba ulang dengan codec software dulu (${D.ev.retry})`);
   check(D.ev.video_lost > 0 || /holds frames/.test(D.ev.fallback || ''), `D: frame hilang terhitung (${D.ev.video_lost})`);
+
+  step('J. Decoder hardware yang menghilangkan frame, decoder software sehat → tetap ekspor cepat (codec software)');
+  const J = await runExport('hw-broken');
+  check(J.mode === 'fast' && !J.ev.fallback && /dropped frames/.test(J.ev.retry || '') && J.ev.codecs === 'software', `ekspor cepat dengan codec software (coba ulang: ${J.ev.retry}) · ${(J.ms / 1000).toFixed(1)} dtk`);
+  verify('J', J);
 
   step('E. Decoder hardware dengan 4 gambar output (PC/Android): flush menunggu frame yang masih dipegang');
   const E = await runExport('pool');
@@ -283,6 +301,43 @@ try {
   check(labels.some((l) => /Merender cepat · frame #\/#/.test(l)), `label progres per frame: ${labels.filter((l) => /Merender|Menyiapkan/.test(l)).slice(0, 4).join(' | ')}`);
   check(await p.evaluate(() => /Ekspor selesai/.test(document.querySelector('.export-overlay')?.textContent || '')), 'ekspor dari tombol selesai');
   await p.evaluate(() => document.querySelector('.export-overlay')?.remove());
+
+  step('I. Overlay layar hijau (kunci kroma): GPU sama dengan CPU');
+  const green = await mcp('import_media', { path: 'hijau.mp4' });
+  const ov = await mcp('add_media_clip', { media_id: green.media_id, track: 'overlay', start: 0, duration: SECS });
+  for (let t = Date.now(); Date.now() - t < 60000; await wait(250)) {
+    if (await p.evaluate(async (id) => { const { mediaRT } = await import('/js/media.js'); return !!mediaRT.get(id)?.url; }, green.media_id)) break;
+  }
+  await p.evaluate(async (id) => {
+    const { store } = await import('/js/store.js');
+    store.mutate('chroma', () => {
+      const c = store.project.clips.find((x) => x.mediaId === id && x.type === 'video' && x.trackId !== 'main') || store.project.clips.find((x) => x.mediaId === id);
+      c.chroma = { enabled: true, color: '#00ff00', similarity: 0.4, smoothness: 0.08 };
+      c.scale = 1;
+    });
+  }, green.media_id);
+  void ov;
+  const gpuOn = await p.evaluate(async () => { const r = await import('/js/render.js'); r.setRenderOptions({ gpuChroma: true }); return true; });
+  const Ig = await runExport('');
+  await p.evaluate(async () => { (await import('/js/render.js')).setRenderOptions({ gpuChroma: false }); });
+  const Ic = await runExport('');
+  await p.evaluate(async () => { (await import('/js/render.js')).setRenderOptions({ gpuChroma: true }); });
+  const fg = gray(Ig.file);
+  const fc = gray(Ic.file);
+  let diff = 0;
+  for (let i = 0; i < Math.min(fg.length, fc.length); i++) diff += mad(fg[i], fc[i]);
+  diff /= Math.max(1, Math.min(fg.length, fc.length));
+  // the overlay really is keyed: outside the two squares (±9% of the picture) the video below shows, as in export A
+  const fa = gray(A.file);
+  let changed = 0;
+  for (let k = 0; k < fa[30].length; k++) if (Math.abs(fa[30][k] - fg[30][k]) > 40) changed++;
+  const changedPct = (changed / fa[30].length) * 100;
+  check(gpuOn && Ig.mode === 'fast' && Ic.mode === 'fast', `kedua ekspor cepat (GPU ${Ig.mode}, CPU ${Ic.mode})`);
+  check(changedPct < 20, `latar hijau hilang: hanya ${changedPct.toFixed(1)}% gambar berubah oleh overlay (kotak ±9%)`);
+  check(diff < 1.5, `hasil GPU = hasil CPU (beda rata-rata ${diff.toFixed(2)} dari 255)`);
+  const perFrame = (r) => (r.ev.composite_ms || 0) / Math.max(1, r.ev.frames || 1);
+  console.log(`   komposit per frame (lab, WebGL di perangkat lunak): GPU ${perFrame(Ig).toFixed(1)} ms · CPU ${perFrame(Ic).toFixed(1)} ms · total GPU ${(Ig.ms / 1000).toFixed(1)} dtk · CPU ${(Ic.ms / 1000).toFixed(1)} dtk`);
+  // (no speed check here: headless Chromium runs WebGL in software, so the lab cannot show the GPU's gain)
 
   check(!errors.length, `tidak ada error halaman${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } finally {

@@ -142,7 +142,111 @@ function overlaysFor(clip) {
   return out;
 }
 
-// Chroma key: remove pixels close to the key color (distance in CbCr space)
+// Chroma key: remove pixels close to the key color (distance in CbCr space).
+// On the GPU (WebGL) where possible (v1.8.3): the CPU version reads the layer back (getImageData), loops over every
+// pixel in JavaScript and writes it back — ±80 ms per 1080×1920 frame, which made a green-screen overlay stutter in
+// the preview and in exports. The GPU does the same math per pixel in a fragment shader in about a millisecond.
+const CHROMA_VS = 'attribute vec2 p; varying vec2 uv; void main() { uv = vec2((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5); gl_Position = vec4(p, 0.0, 1.0); }';
+const CHROMA_FS = `precision highp float;
+varying vec2 uv;
+uniform sampler2D tex;
+uniform vec2 key;
+uniform float sim;
+uniform float smooth_;
+uniform float spill;
+void main() {
+  vec4 c = texture2D(tex, uv);
+  vec3 rgb = c.rgb;
+  float cb = -0.168736 * rgb.r - 0.331264 * rgb.g + 0.5 * rgb.b;
+  float cr = 0.5 * rgb.r - 0.418688 * rgb.g - 0.081312 * rgb.b;
+  float dist = distance(vec2(cb, cr), key);
+  float a = c.a;
+  if (dist < sim) a = 0.0;
+  else if (dist < sim + smooth_) {
+    a *= (dist - sim) / smooth_;
+    if (spill > 0.5) rgb.g = min(rgb.g, max(rgb.r, rgb.b));
+  }
+  gl_FragColor = vec4(rgb * a, a);
+}`;
+let chromaGL = null; // null: not tried yet; false: not available here
+let gpuChroma = true;
+/** Render options (tests and A/B): { gpuChroma: false } keys on the CPU as before v1.8.3. */
+export function setRenderOptions(o = {}) { if ('gpuChroma' in o) gpuChroma = !!o.gpuChroma; }
+function chromaContext() {
+  if (chromaGL !== null) return chromaGL || null;
+  chromaGL = false;
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl', { premultipliedAlpha: true, preserveDrawingBuffer: true, antialias: false, depth: false, stencil: false, alpha: true });
+    if (!gl) return null;
+    const sh = (type, src) => {
+      const o = gl.createShader(type);
+      gl.shaderSource(o, src);
+      gl.compileShader(o);
+      if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o) || 'shader');
+      return o;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, CHROMA_VS));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, CHROMA_FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || 'link');
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    const u = (n) => gl.getUniformLocation(prog, n);
+    // a lost context (GPU reset, too many contexts) falls back to the CPU until the page is reloaded
+    canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); chromaGL = false; });
+    chromaGL = { canvas, gl, key: u('key'), sim: u('sim'), smooth: u('smooth_'), spill: u('spill') };
+  } catch (err) {
+    console.warn('[najja] GPU chroma key not available, using the CPU:', err?.message || err);
+    chromaGL = false;
+  }
+  return chromaGL || null;
+}
+/** Key the layer canvas `L` (w×h) on the GPU and copy the result back into it. false: not possible here. */
+function chromaKeyGPU(L, lc, w, h, ck) {
+  const G = gpuChroma && chromaContext();
+  if (!G) return false;
+  const { gl, canvas } = G;
+  try {
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    gl.viewport(0, 0, w, h);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, L);
+    const [kr, kg, kb] = hexToRgb(ck.color || '#00ff00').map((v) => v / 255);
+    gl.uniform2f(G.key, -0.168736 * kr - 0.331264 * kg + 0.5 * kb, 0.5 * kr - 0.418688 * kg - 0.081312 * kb);
+    gl.uniform1f(G.sim, ((ck.similarity ?? 0.4) * 140) / 255);
+    gl.uniform1f(G.smooth, Math.max(1, (ck.smoothness ?? 0.08) * 140) / 255);
+    gl.uniform1f(G.spill, kg >= kr && kg >= kb ? 1 : 0);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    if (gl.isContextLost()) return false;
+    lc.save();
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.globalAlpha = 1;
+    lc.globalCompositeOperation = 'copy';
+    lc.drawImage(canvas, 0, 0, w, h);
+    lc.restore();
+    return true;
+  } catch (err) {
+    console.warn('[najja] GPU chroma key failed, using the CPU:', err?.message || err);
+    chromaGL = false;
+    return false;
+  }
+}
 function chromaKey(lc, w, h, ck) {
   let img;
   try { img = lc.getImageData(0, 0, w, h); } catch { return; }
@@ -152,18 +256,20 @@ function chromaKey(lc, w, h, ck) {
   const kcr = 0.5 * kr - 0.418688 * kg - 0.081312 * kb;
   const sim = (ck.similarity ?? 0.4) * 140;
   const smooth = Math.max(1, (ck.smoothness ?? 0.08) * 140);
+  // compared squared (no square root per pixel): same result, several times faster than Math.hypot
+  const sim2 = sim * sim;
+  const outer2 = (sim + smooth) * (sim + smooth);
+  const spill = kg >= kr && kg >= kb;
   for (let i = 0; i < d.length; i += 4) {
     const r = d[i], g = d[i + 1], b = d[i + 2];
-    const cb = -0.168736 * r - 0.331264 * g + 0.5 * b;
-    const cr = 0.5 * r - 0.418688 * g - 0.081312 * b;
-    const dist = Math.hypot(cb - kcb, cr - kcr);
-    if (dist < sim) d[i + 3] = 0;
-    else if (dist < sim + smooth) {
-      const a = (dist - sim) / smooth;
-      d[i + 3] = d[i + 3] * a;
-      // spill suppression toward the key color channel
-      if (kg >= kr && kg >= kb) d[i + 1] = Math.min(g, Math.max(r, b));
-    }
+    const x = -0.168736 * r - 0.331264 * g + 0.5 * b - kcb;
+    const y = 0.5 * r - 0.418688 * g - 0.081312 * b - kcr;
+    const dd = x * x + y * y;
+    if (dd >= outer2) continue;
+    if (dd < sim2) { d[i + 3] = 0; continue; }
+    d[i + 3] = d[i + 3] * ((Math.sqrt(dd) - sim) / smooth);
+    // spill suppression toward the key color channel
+    if (spill) d[i + 1] = Math.min(g, Math.max(r, b));
   }
   lc.putImageData(img, 0, 0);
 }
@@ -436,7 +542,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
     } else if (overlays.length || chroma) {
       let lw = clamp(Math.round(size.w * pxPerUnit), 2, 4096);
       let lh = clamp(Math.round(size.h * pxPerUnit), 2, 4096);
-      if (chroma && lw * lh > 1920 * 1080) { const r = Math.sqrt((1920 * 1080) / (lw * lh)); lw = Math.round(lw * r); lh = Math.round(lh * r); }
+      if (chroma && lw * lh > 1920 * 1080 && !(gpuChroma && chromaContext())) { const r = Math.sqrt((1920 * 1080) / (lw * lh)); lw = Math.round(lw * r); lh = Math.round(lh * r); }
       const L = scratch('layer', lw, lh);
       const lc = L.getContext('2d');
       lc.setTransform(1, 0, 0, 1, 0, 0);
@@ -446,7 +552,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
       lc.filter = filter;
       lc.drawImage(src.el, sx, sy, sw, sh, 0, 0, lw, lh);
       lc.filter = 'none';
-      if (chroma) chromaKey(lc, lw, lh, clip.chroma);
+      if (chroma && !chromaKeyGPU(L, lc, lw, lh, clip.chroma)) chromaKey(lc, lw, lh, clip.chroma);
       for (const ov of overlays) {
         lc.globalAlpha = clamp(ov.alpha, 0, 1);
         if (ov.vignette) {
