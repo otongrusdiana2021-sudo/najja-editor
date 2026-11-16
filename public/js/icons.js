@@ -48,6 +48,7 @@ const P = {
   freeze: '<path d="M12 2v20M4.9 6l14.2 12M19.1 6 4.9 18"/>',
   detach: '<path d="M3 17h4l3-10 4 14 3-7h4"/>',
   chevronDown: '<path d="m6 9 6 6 6-6"/>',
+  chevronUp: '<path d="m6 15 6-6 6 6"/>',
   chevronLeft: '<path d="m15 18-6-6 6-6"/>',
   chevronRight: '<path d="m9 18 6-6-6-6"/>',
   skipBack: '<path d="M19 20 9 12l10-8z" fill="currentColor"/><path d="M5 19V5"/>',

@@ -125,9 +125,10 @@ void main() {
   vec4 c = fetch(uv);
   vec3 rgb = c.rgb;
   if (sharpen > 0.0) {
-    // unsharp mask on a 3×3 neighbourhood (clarity for "Crystal Clear" / "4K")
-    vec3 blur = (fetch(uv + vec2(texel.x, 0.0)).rgb + fetch(uv - vec2(texel.x, 0.0)).rgb + fetch(uv + vec2(0.0, texel.y)).rgb + fetch(uv - vec2(0.0, texel.y)).rgb) * 0.25;
-    rgb = clamp(rgb + (rgb - blur) * sharpen, 0.0, 1.0);
+    // unsharp mask at two scales (fine detail 1 px, texture 2 px): the clarity of "Crystal Clear" / "4K"
+    vec3 b1 = (fetch(uv + vec2(texel.x, 0.0)).rgb + fetch(uv - vec2(texel.x, 0.0)).rgb + fetch(uv + vec2(0.0, texel.y)).rgb + fetch(uv - vec2(0.0, texel.y)).rgb) * 0.25;
+    vec3 b2 = (fetch(uv + texel * 2.0).rgb + fetch(uv - texel * 2.0).rgb + fetch(uv + vec2(texel.x, -texel.y) * 2.0).rgb + fetch(uv + vec2(-texel.x, texel.y) * 2.0).rgb) * 0.25;
+    rgb = clamp(rgb + (rgb - (b1 * 0.6 + b2 * 0.4)) * sharpen, 0.0, 1.0);
   }
   for (int i = 0; i < ${MAX_OPS}; i++) {
     if (i >= count) break;

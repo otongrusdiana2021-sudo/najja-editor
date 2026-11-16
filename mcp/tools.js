@@ -30,7 +30,7 @@ const ANIMATION = {
 
 const TEXT_STYLE = {
   preset: enm(ids(TEXT_PRESETS), 'Text style preset. It is applied first, and any other style field below overrides it.'),
-  font: enm(FONTS.map((f) => f.name), 'Font family.'),
+  font: enm([...FONTS.map((f) => f.name), ...FONTS.filter((f) => f.label).map((f) => f.label)], 'Font family (or the name it is shown with, e.g. "Scholar").'),
   size: num('Font size in canvas pixels (the canvas short side is 1080). Titles are usually 110-180, captions 56-80.', { minimum: 8, maximum: 600 }),
   color: str('Text fill color as a CSS hex value, for example #ffffff.'),
   bold: bool('Bold weight.'),
@@ -151,7 +151,7 @@ export const TOOLS = [
       preset: enm(ids(TEXT_PRESETS), 'Style preset (default "subtitle").'),
       y: num('Vertical position as a fraction from center (default 0.36, near the bottom).'),
       size: num('Font size (default 64).'),
-      font: enm(FONTS.map((f) => f.name), 'Font family.'),
+      font: enm([...FONTS.map((f) => f.name), ...FONTS.filter((f) => f.label).map((f) => f.label)], 'Font family (or the name it is shown with, e.g. "Scholar").'),
       color: str('Text color.'),
       animation_in: enm(ids(ANIM_IN), 'Entrance animation applied to every caption.'),
       replace_existing: bool('Delete the existing subtitle track first.'),

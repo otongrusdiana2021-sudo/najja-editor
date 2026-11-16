@@ -727,3 +727,15 @@ body.kb-open .sheet.size-text { height: min(52vh, calc(100% - var(--kb) - 40px))
 .audio-row .fav { position: static; flex: none; background: none; width: 30px; height: 30px; font-size: 16px; }
 .font-item .fav { top: 50%; transform: translateY(-50%); }
 .fav-section h4 { color: #ffd43b; }
+
+/* Live previews of transitions and animations (v1.9, previews.js) */
+canvas.tr-prev { width: 100%; height: auto; aspect-ratio: 16 / 10; display: block; background: #16171b; }
+canvas.anim-prev { width: 100%; max-width: 96px; height: auto; aspect-ratio: 16 / 10; border-radius: 7px; display: block; background: #16171b; }
+.anim-chip.on canvas.anim-prev { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Lapisan (v1.9): layer order of overlapping clips */
+.layer-pos { margin: 0 0 10px; font-size: 13px; color: var(--text-2); }
+.layer-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.layer-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 4px; border-radius: 12px; background: var(--panel-2); font-size: 12px; color: var(--text); }
+.layer-btn:disabled { opacity: 0.35; }
+.layer-btn:not(:disabled):active { transform: scale(0.96); }

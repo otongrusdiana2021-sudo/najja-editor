@@ -8,6 +8,7 @@ import { icon } from './icons.js';
 import { escapeHtml, getPath, setPath, clamp, fmtSec, normHex, deepMerge, clone } from './util.js';
 import { presetStyle } from './actions.js';
 import { favs, star, onStar } from './favs.js';
+import { startPreviews } from './previews.js';
 import * as actions from './actions.js';
 
 const sec = (title, body, extra = '') => `<section class="isec">${title ? `<div class="isec-head"><span>${title}</span>${extra}</div>` : ''}<div class="isec-body">${body}</div></section>`;
@@ -24,7 +25,7 @@ const select = (label, path, options) => `<div class="ctl ctl-inline"><label>${l
 
 const TEXT_TABS = [['style', 'Gaya'], ['font', 'Font'], ['color', 'Warna'], ['anim', 'Animasi']];
 const SWATCHES = ['#ffffff', '#000000', '#ffe600', '#f8f8a8', '#ff2d55', '#ff7a1a', '#22c55e', '#47c9d7', '#3b82f6', '#a855f7', '#ff5fa8', '#8b5a2b'];
-const FONT_CATS = ['Dasar', 'Tebal', 'Serif', 'Tulisan tangan'];
+const FONT_CATS = ['Populer', 'Dasar', 'Tebal', 'Serif', 'Tulisan tangan'];
 
 export class Inspector {
   constructor(engine) {
@@ -88,6 +89,7 @@ export class Inspector {
       case 'transform': body = this.transformSection(c, { fit: c.type === 'video' || c.type === 'image' }); break;
       case 'blend': body = sec('', `${slider('Opasitas', 'opacity', 0, 100, 1, { scale: 100, unit: '%' })}${select('Mode campuran', 'blend', BLEND_MODES.map((b) => [b.id, b.name]))}`); break;
       case 'crop': body = this.cropPanel(c); break;
+      case 'layer': body = this.layerPanel(c); break;
       case 'chroma': body = this.chromaPanel(c); break;
       case 'anim': body = this.animPanel(c); break;
       case 'adjust': body = this.adjustPanel(); break;
@@ -101,6 +103,7 @@ export class Inspector {
     }
     this.root.innerHTML = `<div class="insp-body sec-${this.section}" data-type="${c.type}">${body}</div>`;
     this.syncValues(true);
+    startPreviews(this.root); // live previews of the animations, where the section has them (previews.js)
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -132,6 +135,17 @@ export class Inspector {
       <div class="btn-row"><button class="btn sm ghost" data-do="resetCrop">Reset pangkas</button></div>`);
   }
 
+  /** "Lapisan": the clip's place among the clips it overlaps (front/back), like a layer list. */
+  layerPanel(c) {
+    const info = actions.layerInfo(c.id);
+    if (!info) return '<p class="hint pad">Klip di track utama selalu paling bawah. Pindahkan ke Overlay untuk mengatur lapisannya.</p>';
+    const top = info.index === info.count;
+    const bottom = info.index === 1;
+    const b = (doId, ic, label, off) => `<button class="layer-btn" data-do="${doId}" ${off ? 'disabled' : ''}>${icon(ic, 18)}<span>${label}</span></button>`;
+    return `${sec('', `<p class="layer-pos">${info.count > 1 ? `Lapisan <b>${info.index}</b> dari ${info.count} <span class="hint">(1 = paling belakang)</span>` : '<span class="hint">Tidak ada klip lain yang tumpang tindih di waktu ini.</span>'}</p>
+      <div class="layer-grid">${b('layerFront', 'layers', 'Paling depan', top)}${b('layerUp', 'chevronUp', 'Maju', top)}${b('layerDown', 'chevronDown', 'Mundur', bottom)}${b('layerBack', 'layers', 'Paling belakang', bottom)}</div>`)}`;
+  }
+
   chromaPanel(c) {
     return `<div class="soon-card">${icon('bgRemove', 22)}<div><b>Hapus otomatis</b><span>Memisahkan orang dari latar tanpa layar hijau. Segera hadir.</span></div></div>
       ${sec('Kunci kroma (layar hijau/biru)', `${toggle('Hapus warna latar', 'chroma.enabled')}${c.chroma?.enabled ? `${color('Warna kunci', 'chroma.color')}${slider('Kemiripan', 'chroma.similarity', 0, 100, 1, { scale: 100, unit: '%' })}${slider('Kehalusan', 'chroma.smoothness', 0, 100, 1, { scale: 100, unit: '%' })}` : ''}`)}`;
@@ -149,7 +163,7 @@ export class Inspector {
     const items = [...fav, ...all.filter((a) => !fav.includes(a))];
     return `
       <div class="seg wide">${[['in', 'Masuk'], ['out', 'Keluar'], ['loop', 'Kombo']].map(([id, n]) => `<button class="${this.animTab === id ? 'on' : ''}" data-animtab="${id}">${n}${c[keys[id]]?.type && c[keys[id]].type !== 'none' ? ' •' : ''}</button>`).join('')}</div>
-      <div class="anim-grid">${items.map((a) => `<button class="anim-chip ${cur === a.id ? 'on' : ''}" data-anim="${a.id}" data-key="${key}"><span class="anim-demo a-${this.animTab}-${a.id}"></span><span>${a.name}</span>${a.id !== 'none' ? star(favKind, a.id) : ''}</button>`).join('')}</div>
+      <div class="anim-grid">${items.map((a) => `<button class="anim-chip ${cur === a.id ? 'on' : ''}" data-anim="${a.id}" data-key="${key}"><canvas class="anim-prev" data-prev="${this.animTab}:${a.id}" data-target="${c.type === 'text' ? 'text' : 'visual'}" width="128" height="80"></canvas><span>${a.name}</span>${a.id !== 'none' ? star(favKind, a.id) : ''}</button>`).join('')}</div>
       ${cur !== 'none' ? (this.animTab === 'loop'
         ? slider('Kecepatan', 'animLoop.speed', 0.25, 4, 0.05, { unit: 'x', decimals: 2 })
         : slider('Durasi', `${key}.duration`, 0.1, Math.max(0.2, Math.min(5, c.duration)), 0.1, { unit: 's', decimals: 1 })) : ''}`;
@@ -339,6 +353,10 @@ export class Inspector {
     if (d.swatch) { mut('Warna teks', (x) => { x.text.color = d.swatch; x.text.gradient.enabled = false; }); return; }
     if (d.align) { mut('Rata', (x) => { x.text.align = d.align; }); return; }
     if (d.effect) { mut('Efek', (x) => { x.effect.type = d.effect; x.name = EFFECTS.find((f) => f.id === d.effect)?.name || x.name; }); return; }
+    if (d.do && d.do.startsWith('layer') && c) {
+      const where = { layerFront: 'front', layerUp: 'up', layerDown: 'down', layerBack: 'back' }[d.do];
+      if (where) { actions.moveLayer(c.id, where); this.render(true); return; }
+    }
     switch (d.do) {
       case 'flipH': mut('Cermin', (x) => { x.flipH = !x.flipH; }); break;
       case 'flipV': mut('Balik', (x) => { x.flipV = !x.flipV; }); break;

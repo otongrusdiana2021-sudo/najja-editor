@@ -57,6 +57,7 @@ const CLIP_SECTIONS = {
   crop: ['crop', 'Pangkas'],
   transform: ['transform', 'Transformasi'],
   blend: ['blend', 'Campuran'],
+  layer: ['layer', 'Lapisan'],
   adjust: ['adjust', 'Sesuaikan'],
   bgremove: ['chroma', 'Hapus latar belakang'],
   text: ['text', 'Teks'],

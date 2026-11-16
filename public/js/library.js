@@ -12,6 +12,7 @@ import { escapeHtml, fmtDur, fmtBytes, pickFiles } from './util.js';
 import { cssFilterFor } from './render.js';
 import { drawFiltered } from './gpufx.js';
 import { favs, star, onStar } from './favs.js';
+import { startPreviews } from './previews.js';
 import { setDragPayload } from './timeline.js';
 import * as actions from './actions.js';
 import { toast, modal, confirmDialog } from './ui.js';
@@ -91,6 +92,7 @@ export class Library {
     if (!fn) return;
     this.panel.innerHTML = `<div class="lib-body tab-${this.tab}">${fn.call(this)}</div>`;
     if (this.tab === 'filter' || this.tab === 'transition') this.paintFilterThumbs();
+    if (this.tab === 'transition') startPreviews(this.panel); // each tile plays the real transition (previews.js)
   }
 
   /** "★ Favorit" section of a tab (nothing when there are none). */
@@ -188,7 +190,7 @@ export class Library {
     const list = sortedClips(store.P, 'main');
     const valid = sel && sel.trackId === 'main' && list.indexOf(sel) > 0;
     const cur = valid ? sel.transition?.type : null;
-    const trTile = (t) => `<button class="tile tr-tile ${cur === t.id ? 'on' : ''}" data-transition="${t.id}"><span class="tile-art tr-art tr-${t.id}"><i class="a"></i><i class="b"></i><b class="tr-ic">${t.icon}</b></span><em>${t.name}</em>${t.id !== 'none' ? star('transition', t.id) : ''}</button>`;
+    const trTile = (t) => `<button class="tile tr-tile ${cur === t.id ? 'on' : ''}" data-transition="${t.id}"><canvas class="tile-art tr-prev" data-prev="tr:${t.id}" width="160" height="100"></canvas><em>${t.name}</em>${t.id !== 'none' ? star('transition', t.id) : ''}</button>`;
     return `
       <p class="hint">${valid ? `Transisi masuk ke klip <b>${escapeHtml(sel.name || '')}</b>.` : 'Ketuk tombol di antara dua klip di track utama untuk memilih sambungannya.'}</p>
       ${this.favSection('transition', TRANSITIONS.filter((t) => t.id !== 'none'), trTile, 'tile-grid')}

@@ -15,6 +15,11 @@ export const RESOLUTIONS = { '480p': 480, '720p': 720, '1080p': 1080, '2k': 1440
 export const FPS_OPTIONS = [24, 25, 30, 50, 60];
 
 export const FONTS = [
+  // v1.9 "Populer": the looks asked for by name. The fonts with those names are proprietary (CapCut's library,
+  // Comicraft's CC fonts), so these are open (SIL OFL) Google Fonts in the same style; label = the name shown.
+  { name: 'Libre Baskerville', label: 'Scholar', weights: [400, 700], italic: true, cat: 'Populer' },
+  { name: 'Bangers', label: 'Abrason', weights: [400], cat: 'Populer' },
+  { name: 'Patrick Hand', label: 'Starry', weights: [400], cat: 'Populer' },
   { name: 'Poppins', weights: [300, 400, 500, 600, 700, 800, 900], italic: true, cat: 'Dasar' },
   { name: 'Inter', weights: [400, 500, 600, 700, 800, 900], cat: 'Dasar' },
   { name: 'Roboto', weights: [400, 500, 700, 900], italic: true, cat: 'Dasar' },
@@ -38,6 +43,10 @@ export const FONTS = [
 
 export const FILTERS = [
   { id: 'none', name: 'Asli', css: [], cat: 'Dasar' },
+  // v1.9: clearer and sharper, like the popular "Crystal Clear" / "4K" filters of phone editors. sharpen(n) is an
+  // unsharp mask done on the GPU (gpufx.js); the rest are ordinary colour filters.
+  { id: 'crystal', name: 'Crystal Clear', css: [['brightness', 1.06], ['contrast', 1.08], ['saturate', 1.22], ['sharpen', 0.9]], overlay: { color: '#cfeaff', mode: 'soft-light', alpha: 0.12 }, cat: 'Populer' },
+  { id: 'uhd4k', name: '4K', css: [['contrast', 1.12], ['saturate', 1.08], ['brightness', 1.02], ['sharpen', 2.2]], cat: 'Populer' },
   { id: 'clear', name: 'Jernih', css: [['contrast', 1.08], ['saturate', 1.15], ['brightness', 1.04]], cat: 'Dasar' },
   { id: 'vivid', name: 'Vivid', css: [['saturate', 1.55], ['contrast', 1.12]], cat: 'Dasar' },
   { id: 'warm', name: 'Hangat', css: [['saturate', 1.15], ['sepia', 0.12]], overlay: { color: '#ff8a3d', mode: 'soft-light', alpha: 0.32 }, cat: 'Dasar' },

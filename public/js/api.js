@@ -14,6 +14,9 @@ import { clamp, normHex, deepMerge } from './util.js';
 const ids = (a) => a.map((x) => x.id);
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
+/** A font by its family or by the name it is shown with ("Scholar" → Libre Baskerville). */
+const fontFamily = (v) => FONTS.find((f) => f.label && f.label.toLowerCase() === String(v).toLowerCase())?.name || v;
+
 function need(cond, msg) { if (!cond) throw new Error(msg); }
 function oneOf(value, list, what) {
   if (value == null) return value;
@@ -40,7 +43,7 @@ function applyTextStyle(tx, a) {
     for (const k of Object.keys(tx)) delete tx[k];
     Object.assign(tx, base, { content });
   }
-  if (a.font) { oneOf(a.font, FONTS.map((f) => f.name), 'font'); tx.font = a.font; }
+  if (a.font) { a.font = fontFamily(a.font); oneOf(a.font, FONTS.map((f) => f.name), 'font'); tx.font = a.font; }
   if (a.size != null) tx.size = clamp(Number(a.size), 8, 600);
   if (a.color) tx.color = color(a.color);
   if (a.bold != null) tx.weight = a.bold ? Math.max(700, tx.weight) : 400;
@@ -208,7 +211,7 @@ export const tools = {
   async add_subtitles(a) {
     need(Array.isArray(a.items) && a.items.length, 'items must be a non-empty array of {start, end, text}');
     if (a.preset) oneOf(a.preset, ids(TEXT_PRESETS), 'preset');
-    if (a.font) oneOf(a.font, FONTS.map((f) => f.name), 'font');
+    if (a.font) { a.font = fontFamily(a.font); oneOf(a.font, FONTS.map((f) => f.name), 'font'); }
     const created = actions.addSubtitles(a.items, {
       preset: a.preset || 'subtitle', y: a.y ?? 0.36, size: a.size, font: a.font, color: a.color ? color(a.color) : undefined,
       animIn: a.animation_in || 'fade', replace: !!a.replace_existing,

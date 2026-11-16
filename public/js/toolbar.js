@@ -104,6 +104,7 @@ export class Toolbar {
     const filter = tool('filter', 'Filter', 'filter', () => this.open('filter'));
     const transform = tool('transform', 'Transformasi', 'transform', () => this.open('transform'));
     const blend = tool('blend', 'Campuran', 'blend', () => this.open('blend'));
+    const layer = tool('layer', 'Lapisan', 'layers', () => this.open('layer'));
     const move = onMain
       ? tool('to-overlay', 'Overlay', 'toOverlay', () => { actions.moveToOverlay(id); toast('Klip dipindah ke overlay', { type: 'ok' }); })
       : tool('to-main', 'Utama', 'toMain', () => { actions.moveToMain(id); toast('Klip dipindah ke track utama', { type: 'ok' }); });
@@ -118,16 +119,16 @@ export class Toolbar {
         transform, soon('stab', 'Stabilkan', 'stabilize'), soon('track', 'Pelacakan kamera', 'crosshair'), SEP,
         ...audioSoon, SEP,
         tool('freeze', 'Beku', 'freeze', () => actions.freezeFrame()), soon('reverse', 'Putar mundur', 'reverse'), soon('mask', 'Tutupi', 'mask'),
-        ...(onMain ? [] : [blend]),
+        ...(onMain ? [] : [blend, layer]),
       ];
       case 'image': return [
         split, anim, fx, del, tool('crop', 'Pangkas', 'crop', () => this.open('crop')), dup,
         tool('replace', 'Ganti', 'replace', () => this.open('media', { mode: 'replace' })), move, adjust, filter, SEP,
         soon('retouch', 'Retouch', 'retouch'), tool('bgremove', 'Hapus Latar Belakang', 'bgRemove', () => this.open('bgremove')), SEP,
-        transform, soon('mask', 'Tutupi', 'mask'), ...(onMain ? [] : [blend]),
+        transform, soon('mask', 'Tutupi', 'mask'), ...(onMain ? [] : [blend, layer]),
       ];
       case 'solid': return [
-        tool('solid', 'Warna', 'palette', () => this.open('solid')), split, anim, fx, del, dup, move, adjust, filter, transform, ...(onMain ? [] : [blend]),
+        tool('solid', 'Warna', 'palette', () => this.open('solid')), split, anim, fx, del, dup, move, adjust, filter, transform, ...(onMain ? [] : [blend, layer]),
       ];
       case 'text': return [
         tool('text-edit', 'Edit', 'edit', () => this.open('text', { tab: 'style', focus: true })),
@@ -138,7 +139,7 @@ export class Toolbar {
       ];
       case 'sticker': return [
         ...(c.sticker?.badge ? [tool('label', 'Edit', 'edit', () => this.open('sticker'))] : []),
-        anim, split, dup, del, transform, blend,
+        anim, split, dup, del, transform, blend, layer,
       ];
       case 'audio': return [
         split, tool('volume', 'Volume', 'volume', () => this.open('volume')), tool('speed', 'Kecepatan', 'speed', () => this.open('speed')), del, dup, SEP, ...audioSoon,

@@ -4,6 +4,7 @@
 //   C. a duplicate goes right next to its source (main track with and without magnet, overlay track)
 //   D. built-in sounds: louder (peak −1 dBFS), new basic sounds, remade for projects with the old ones
 //   E. favourites: a star on effects, transitions, filters, fonts, animations…; favourites listed first
+//   F–I. Crystal Clear / 4K filters, the Scholar/Abrason/Starry fonts, live transition previews, layer order
 // Needs Playwright (with Chromium) and ffmpeg. Run: npm run test:e2e
 import { createRequire } from 'node:module';
 import { spawn, execFileSync } from 'node:child_process';
@@ -209,6 +210,96 @@ try {
   const clipsBefore = await p.evaluate(async () => (await import('/js/store.js')).store.P.clips.length);
   check(clipsBefore === await p.evaluate(async () => (await import('/js/store.js')).store.P.clips.length), 'mengetuk bintang tidak menambah efek');
   check(JSON.stringify(await p.evaluate(() => JSON.parse(localStorage.getItem('najja:fav.effect')))) === '["glitch"]', 'favorit tersimpan di perangkat');
+
+  step('F. Filter Crystal Clear & 4K: lebih jernih dan lebih tajam');
+  const flt = await p.evaluate(async () => {
+    const { FILTERS } = await import('/js/presets.js');
+    const { cssFilterFor } = await import('/js/render.js');
+    const g = await import('/js/gpufx.js');
+    const src = document.createElement('canvas'); src.width = 200; src.height = 120;
+    const sc = src.getContext('2d');
+    sc.fillStyle = '#7a8a6a'; sc.fillRect(0, 0, 200, 120);
+    sc.filter = 'blur(1.5px)'; sc.fillStyle = '#c8b090'; for (let x = 10; x < 200; x += 20) sc.fillRect(x, 10, 8, 100); sc.filter = 'none';
+    const measure = (id) => {
+      const c = document.createElement('canvas'); c.width = 200; c.height = 120;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      g.drawFiltered(ctx, cssFilterFor({ filter: { name: id, intensity: 1 }, adjust: {} }), src, 0, 0, 200, 120, 0, 0, 200, 120);
+      const d = ctx.getImageData(0, 0, 200, 120).data;
+      let edge = 0, sat = 0;
+      const luma = (i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      for (let y = 0; y < 120; y++) for (let x = 1; x < 200; x++) { const i = (y * 200 + x) * 4; edge += Math.abs(luma(i) - luma(i - 4)); sat += Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]); }
+      return { edge: edge / 24000, sat: sat / 24000 };
+    };
+    return { ids: FILTERS.map((f) => f.id), none: measure('none'), crystal: measure('crystal'), uhd4k: measure('uhd4k') };
+  });
+  check(flt.ids.includes('crystal') && flt.ids.includes('uhd4k'), 'filter Crystal Clear dan 4K tersedia');
+  check(flt.crystal.edge > flt.none.edge * 1.15 && flt.crystal.sat > flt.none.sat * 1.1, `Crystal Clear: lebih tajam (tepi ${flt.none.edge.toFixed(1)} → ${flt.crystal.edge.toFixed(1)}) dan lebih hidup (saturasi ${flt.none.sat.toFixed(0)} → ${flt.crystal.sat.toFixed(0)})`);
+  check(flt.uhd4k.edge > flt.crystal.edge, `4K paling tajam (tepi ${flt.uhd4k.edge.toFixed(1)})`);
+
+  step('G. Font Scholar, Abrason, Starry (font terbuka bergaya serupa)');
+  const fonts = await p.evaluate(async () => {
+    const { FONTS } = await import('/js/presets.js');
+    const css = [...document.querySelectorAll('link[rel=stylesheet]')].map((l) => l.href).join(' ');
+    return { labels: FONTS.filter((f) => f.label).map((f) => `${f.label}=${f.name}`), css };
+  });
+  check(['Scholar=Libre Baskerville', 'Abrason=Bangers', 'Starry=Patrick Hand'].every((x) => fonts.labels.includes(x)), `font: ${fonts.labels.join(', ')}`);
+  check(/Libre\+Baskerville/.test(fonts.css) && /Bangers/.test(fonts.css) && /Patrick\+Hand/.test(fonts.css), 'ketiga font dimuat dari Google Fonts');
+  const tx = await mcp('add_text', { text: 'Gaya Scholar', font: 'Scholar', start: 0, duration: 2 });
+  const txFont = await p.evaluate(async (id) => (await import('/js/store.js')).store.clip(id)?.text?.font, tx.clip_id || tx.id);
+  check(txFont === 'Libre Baskerville', `MCP add_text font "Scholar" → ${txFont}`);
+
+  step('H. Pratinjau transisi memutar transisi aslinya');
+  await p.evaluate(async () => { const { store } = await import('/js/store.js'); store.select(null); });
+  await p.evaluate(() => { window.najja.openSheet('transition'); });
+  await p.waitForSelector('.sheet.in canvas.tr-prev', { timeout: 5000 }).catch(() => {});
+  const trPrev = await p.evaluate(async () => {
+    const cvs = [...document.querySelectorAll('.sheet.in canvas.tr-prev')];
+    const { TRANSITIONS } = await import('/js/presets.js');
+    const fade = cvs.find((c) => c.dataset.prev === 'tr:slideLeft');
+    const snap = () => { const t = document.createElement('canvas'); t.width = fade.width; t.height = fade.height; const x = t.getContext('2d'); x.drawImage(fade, 0, 0); return x.getImageData(0, 0, t.width, t.height).data; };
+    const frames = [];
+    for (let i = 0; i < 8; i++) { await new Promise((r) => setTimeout(r, 250)); frames.push(snap()); }
+    let changes = 0;
+    for (let i = 1; i < frames.length; i++) { let d = 0; for (let k = 0; k < frames[i].length; k += 16) d += Math.abs(frames[i][k] - frames[i - 1][k]); if (d > 1000) changes++; }
+    return { n: cvs.length, total: TRANSITIONS.length, changes };
+  }).catch((e) => ({ error: e.message }));
+  check(trPrev.n >= trPrev.total, `${trPrev.n} kotak transisi dengan pratinjau langsung${trPrev.error ? ` (${trPrev.error})` : ''}`);
+  check(trPrev.changes >= 3, `pratinjau "Geser Kiri" bergerak (${trPrev.changes} perubahan dalam 2 dtk)`);
+  await p.evaluate(() => window.najja.sheet?.close?.());
+  // animations of a text clip: each tile shows the text itself (over a picture) doing the animation
+  await p.evaluate(async (id) => { const { store } = await import('/js/store.js'); store.select(id); window.najja.openSheet('anim'); }, tx.clip_id || tx.id);
+  await p.waitForSelector('.sheet.in canvas.anim-prev', { timeout: 5000 }).catch(() => {});
+  await wait(1200);
+  const anim = await p.evaluate(() => [...document.querySelectorAll('.sheet.in canvas.anim-prev')].slice(0, 6).map((c) => {
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let stroke = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 30 && d[i + 1] < 30 && d[i + 2] < 30 && d[i + 3] > 200) stroke++;
+    return { spec: c.dataset.prev, stroke };
+  }));
+  check(anim.length >= 6 && anim.filter((a) => a.stroke > 50).length >= 4, `pratinjau animasi menampilkan teksnya: ${anim.map((a) => `${a.spec}=${a.stroke}`).join(', ')}`);
+  await p.evaluate(() => window.najja.sheet?.close?.());
+
+  step('I. Lapisan: urutan klip yang tumpang tindih');
+  const lay = await p.evaluate(async () => {
+    const { store } = await import('/js/store.js');
+    const actions = await import('/js/actions.js');
+    const m = store.P.media[0].id;
+    const a = actions.addMediaClip(m, { track: 'overlay', start: 0.5, duration: 2 });
+    const b = actions.addMediaClip(m, { track: 'overlay', start: 1, duration: 2 });
+    const ida = a.id || a;
+    const idb = b.id || b;
+    const before = actions.layerInfo(ida);
+    const idx = (id) => store.P.tracks.findIndex((t) => t.id === store.clip(id).trackId);
+    actions.moveLayer(ida, 'front');
+    const front = actions.layerInfo(ida);
+    const aboveB = idx(ida) < idx(idb);
+    actions.moveLayer(ida, 'back');
+    const back = actions.layerInfo(ida);
+    const belowB = idx(ida) > idx(idb);
+    const mainIdx = store.P.tracks.findIndex((t) => t.id === 'main');
+    return { before, front, back, aboveB, belowB, aboveMain: idx(ida) < mainIdx };
+  });
+  check(lay.front.index === lay.front.count && lay.aboveB, `Paling depan: lapisan ${lay.front.index}/${lay.front.count}, digambar di atas klip lain`);
+  check(lay.back.index === 1 && lay.belowB && lay.aboveMain, `Paling belakang: lapisan 1/${lay.back.count}, tetap di atas track utama`);
 
   check(!errors.length, `tidak ada error halaman${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } finally {
