@@ -10,6 +10,7 @@ import { compilePlan } from './plan.js';
 import { blobOfUrl } from './util.js';
 import { aacConfig } from './aac.js';
 import { coverForExport } from './cover.js';
+import { voiceKey, processedFor } from './voicefx.js';
 
 export class Unsupported extends Error {}
 const unsupported = (why) => new Unsupported(why);
@@ -660,7 +661,10 @@ async function mixAudio(P, r0, r1, source, stats) {
       return g;
     };
     const node = ctx.createBufferSource();
-    node.buffer = part.buffer;
+    // noise reduction / voice enhance (voicefx.js): the same processing as the preview's
+    const vk = voiceKey(c);
+    node.buffer = vk ? await guard(processedFor(part.buffer, vk), 120000, 'voice clean-up', stats.flag) : part.buffer;
+    if (vk) stats.voice_fx = (stats.voice_fx || 0) + 1;
     const g = ctx.createGain();
     // gain envelope at the fade corners, in context time
     const pts = new Set([from - c.start, to - c.start]);
@@ -1181,5 +1185,49 @@ export async function renderStill({ engine, P, t, width, height }) {
   } finally {
     for (const s of opened) s.close();
   }
+}
+
+/**
+ * The sound of some clips, mixed where they are on the timeline, at `rate` Hz mono (v1.9: what auto subtitles listen
+ * to — timestamps of the transcript are then timeline times). Volume and mute are ignored (the speech is wanted even
+ * when the clip is silenced for a voice-over); sped-up clips play at their speed.
+ */
+export async function mixForSpeech(P, clips, { rate = 16000 } = {}) {
+  clips = clips.filter((c) => store.media(c.mediaId)?.hasAudio !== false);
+  if (!clips.length) return null;
+  const end = Math.max(...clips.map((c) => c.start + c.duration));
+  const ctx = new OfflineAudioContext(1, Math.max(1, Math.ceil(end * rate)), rate);
+  const cache = new Map();
+  const source = async (id) => {
+    if (!cache.has(id)) {
+      const rt = mediaRT.get(id);
+      const url = rt?.exportUrl || rt?.url;
+      if (!url) throw new Error('media belum dimuat di perangkat ini');
+      cache.set(id, ByteSource.open(url));
+    }
+    return cache.get(id);
+  };
+  const need = new Map();
+  for (const c of clips) {
+    const sp = Math.abs(c.speed || 1);
+    if (!need.has(c.mediaId)) need.set(c.mediaId, []);
+    need.get(c.mediaId).push([c.in, c.in + c.duration * sp]);
+  }
+  const decoded = new Map();
+  for (const [id, ranges] of need) decoded.set(id, await audioFor(id, ranges, source, {}));
+  let any = false;
+  for (const c of clips) {
+    const sp = Math.abs(c.speed || 1);
+    const part = (decoded.get(c.mediaId) || []).find((r) => c.in >= r.start - 0.05 && c.in < r.end);
+    if (!part) continue;
+    any = true;
+    const node = ctx.createBufferSource();
+    node.buffer = part.buffer;
+    node.playbackRate.value = sp;
+    node.connect(ctx.destination);
+    const off = c.in - part.start;
+    node.start(c.start + Math.max(0, -off) / sp, Math.max(0, off), Math.max(0, c.duration * sp - Math.max(0, -off)));
+  }
+  return any ? ctx.startRendering() : null;
 }
 

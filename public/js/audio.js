@@ -16,6 +16,7 @@ import { mediaRT } from './media.js';
 import { blobOfUrl } from './util.js';
 import { metrics } from './metrics.js';
 import { ByteSource, demuxAudio, decodeAudioRange } from './fastexport.js';
+import { voiceKey, processedFor } from './voicefx.js';
 
 const BLOCK = 8; // seconds of source decoded at a time
 const AHEAD = 1.0; // timeline seconds of sound scheduled ahead of what the speakers play
@@ -174,9 +175,27 @@ export class PreviewAudio {
       if (!s || s.state === 'opening') return false;
       if (s.state === 'failed' || s.state === 'silent') continue;
       const k = s.blockOf(c.in + Math.max(0, t - c.start) * speedOf(c));
-      if (s.blocks.get(k)?.state !== 'ready') { this.request(s, k, t); return false; }
+      const blk = s.blocks.get(k);
+      if (blk?.state !== 'ready') { this.request(s, k, t); return false; }
+      if (!this.bufFor(c, blk)) return false; // its cleaned-up sound is still being made (voicefx.js)
     }
     return true;
+  }
+  /**
+   * The sound to play for clip c from block b: the block's own, or its cleaned-up version when the clip asks for noise
+   * reduction / voice enhance (made once per block, in a worker); null while that is being made.
+   */
+  bufFor(c, b) {
+    const key = voiceKey(c);
+    if (!key) return b.buffer;
+    if (!b.fx) b.fx = new Map();
+    let v = b.fx.get(key);
+    if (!v) {
+      v = { state: 'busy', buffer: null };
+      b.fx.set(key, v);
+      processedFor(b.buffer, key).then((buf) => { v.state = 'ready'; v.buffer = buf; }, (err) => { v.state = 'failed'; this.problem('voice', err?.message || String(err), null); });
+    }
+    return v.state === 'ready' ? v.buffer : v.state === 'failed' ? b.buffer : null;
   }
   /**
    * Timeline time being heard now. Before the first sound it returns the start time (the playhead waits for the
@@ -224,7 +243,7 @@ export class PreviewAudio {
         if (b?.state === 'ready') b.used = now;
         else this.request(s, seg.k, seg.ts);
         if (seg.ts >= to || this.done.has(seg.key)) continue;
-        if (b?.state === 'ready') {
+        if (b?.state === 'ready' && this.bufFor(c, b)) {
           try { this.schedule(c, seg, b); } catch (err) { this.done.add(seg.key); this.problem('schedule', err, s); }
         } else if (s.state !== 'opening' && seg.ts <= from + 0.02 && !this.done.has(`${seg.key}:u`)
           && ![...this.nodes.values()].some((r) => r.clipId === c.id && r.end > ctx.currentTime + 0.02)) {
@@ -278,7 +297,8 @@ export class PreviewAudio {
       }
     }
     if (offset < 0) { at -= offset; dur += offset; offset = 0; } // the block starts a hair after: start that much later
-    dur = Math.min(dur, b.buffer.duration - offset);
+    const sound = this.bufFor(c, b) || b.buffer;
+    dur = Math.min(dur, sound.duration - offset);
     if (dur <= 0.01) return;
     // Another piece of this clip still sounding past `at` (the file switched to a whole-file decode): it hands over
     // here instead of playing twice.
@@ -292,7 +312,7 @@ export class PreviewAudio {
       } catch { /* already stopped */ }
     }
     const node = ctx.createBufferSource();
-    node.buffer = b.buffer;
+    node.buffer = sound;
     const g = ctx.createGain();
     const rec = { node, g, clipId: c.id, at, end: at + dur, ta: seg.ts + (at - when) };
     // joining a sound in the middle (start of play, after a seek or a late block): a few ms fade, no click
@@ -352,7 +372,7 @@ export class PreviewAudio {
     const gsig = [];
     for (const c of store.P?.clips || []) {
       if (!audibleType(c)) continue;
-      sig.push(`${c.id}:${c.mediaId}:${c.trackId}:${c.start}:${c.duration}:${c.in}:${speedOf(c)}:${!!c.muted}:${!!store.track(c.trackId)?.muted}:${(c.volume ?? 1) > 0}`);
+      sig.push(`${c.id}:${c.mediaId}:${c.trackId}:${c.start}:${c.duration}:${c.in}:${speedOf(c)}:${!!c.muted}:${!!store.track(c.trackId)?.muted}:${(c.volume ?? 1) > 0}:${voiceKey(c)}`);
       gsig.push(`${c.volume ?? 1}:${c.fadeIn || 0}:${c.fadeOut || 0}`);
     }
     return [sig.join('|'), gsig.join('|')];

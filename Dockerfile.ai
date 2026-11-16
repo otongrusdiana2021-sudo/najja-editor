@@ -1,9 +1,11 @@
-# Najja AI service (v1.8): background removal and upscaling for the home screen tools, with onnxruntime on the CPU.
+# Najja AI service (v1.8): background removal and upscaling for the home screen tools, with onnxruntime on the CPU;
+# v1.9: speech to text (Whisper) for auto subtitles.
 # Its own container so that a model running out of memory never takes the editor down. The models (~200 MB) are
 # fetched at the first start into the data volume (/data/models), pinned by sha256 in ai/models.json.
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-RUN pip install --no-cache-dir onnxruntime==1.29.0 numpy==2.5.3 pillow==12.3.0
+# faster-whisper (MIT; CTranslate2, MIT): speech to text for auto subtitles (v1.9)
+RUN pip install --no-cache-dir onnxruntime==1.29.0 numpy==2.5.3 pillow==12.3.0 faster-whisper==1.2.1
 WORKDIR /app
 COPY ai/server.py ai/models.json ./ai/
 # same user id as the editor container (node = 1000): both read and write /data

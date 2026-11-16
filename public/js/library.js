@@ -13,6 +13,7 @@ import { cssFilterFor } from './render.js';
 import { drawFiltered } from './gpufx.js';
 import { favs, star, onStar } from './favs.js';
 import { startPreviews } from './previews.js';
+import { LANGUAGES, SOURCES, LINE_LENGTH, langName, transcribeProject, cuesFromSegments, transcribeStatus } from './captions.js';
 import { setDragPayload } from './timeline.js';
 import * as actions from './actions.js';
 import { toast, modal, confirmDialog } from './ui.js';
@@ -93,6 +94,7 @@ export class Library {
     this.panel.innerHTML = `<div class="lib-body tab-${this.tab}">${fn.call(this)}</div>`;
     if (this.tab === 'filter' || this.tab === 'transition') this.paintFilterThumbs();
     if (this.tab === 'transition') startPreviews(this.panel); // each tile plays the real transition (previews.js)
+    if (this.tab === 'caption') this.wireCaptions();
   }
 
   /** "★ Favorit" section of a tab (nothing when there are none). */
@@ -163,15 +165,88 @@ export class Library {
       <div class="lib-section"><h4>Gaya teks</h4><div class="tstyle-grid">${TEXT_PRESETS.map(styleTile).join('')}</div></div>`;
   }
 
+  /** "Hasilkan keterangan otomatis" (v1.9): auto subtitles from the speech, like a phone editor's; plus script / SRT. */
   captionPanel() {
+    const C = this.cap || (this.cap = { from: 'video', lang: 'id', preset: 'subtitle', len: 'medium', pos: '0.36', upper: false, replace: true, open: null, adv: false, q: '' });
+    const presets = [{ id: 'subtitle', name: 'Default' }, ...TEXT_PRESETS.filter((p) => !['default', 'subtitle', 'minimal', 'bebas'].includes(p.id))];
+    const st = this.capStatus;
+    const langs = LANGUAGES.filter(([c, n]) => !C.q || n.toLowerCase().includes(C.q.toLowerCase()) || c.startsWith(C.q.toLowerCase()));
+    const row = (key, ic, label, value) => `<button class="ac-row ${C.open === key ? 'open' : ''}" data-capopen="${key}">${icon(ic, 20)}<span>${label}</span><em>${escapeHtml(value)}</em>${icon('chevronRight', 16)}</button>`;
     return `
-      <div class="soon-card">${icon('mic', 22)}<div><b>Teks otomatis dari suara</b><span>Subtitle langsung dari ucapan di video (transkripsi). Segera hadir — sementara pakai naskah, SRT, atau minta AI lewat MCP (<code>add_subtitles</code>).</span></div></div>
+      <div class="autocap">
+        <h3 class="ac-title">Hasilkan keterangan otomatis</h3>
+        ${row('from', 'sparkle', 'Hasilkan dari', SOURCES.find(([k]) => k === C.from)[1])}
+        ${C.open === 'from' ? `<div class="ac-pick">${SOURCES.map(([k, n]) => `<button class="chip ${C.from === k ? 'on' : ''}" data-capfrom="${k}">${n}</button>`).join('')}</div>` : ''}
+        ${row('lang', 'translate', 'Bahasa sumber', langName(C.lang))}
+        ${C.open === 'lang' ? `<div class="ac-pick ac-langs"><input class="ac-q" type="search" placeholder="Cari bahasa…" value="${escapeHtml(C.q)}"><div class="ac-lang-list">${langs.map(([c, n]) => `<button class="ac-lang ${C.lang === c ? 'on' : ''}" data-caplang="${c}">${escapeHtml(n)}${c !== 'auto' ? `<small>${c}</small>` : ''}</button>`).join('')}</div></div>` : ''}
+        <div class="ac-card"><div class="ac-card-h">${icon('subtitle', 20)}<span>Template</span></div>
+          <div class="ac-tpls">${presets.map((p) => `<button class="ac-tpl ${C.preset === p.id ? 'on' : ''}" data-cappreset="${p.id}"><span class="tp-prev tp-${p.id === 'subtitle' ? 'default' : p.id}">${p.id === 'subtitle' ? 'Default' : escapeHtml(p.name)}</span></button>`).join('')}</div></div>
+        <button class="ac-row ac-adv ${C.adv ? 'open' : ''}" data-capadv>${icon('settings', 20)}<span>Opsi lanjutan</span>${icon(C.adv ? 'chevronUp' : 'chevronDown', 16)}</button>
+        ${C.adv ? `<div class="ac-advbody">
+          <div class="ctl ctl-inline"><label>Panjang baris</label><div class="seg">${[['short', 'Pendek'], ['medium', 'Sedang'], ['long', 'Panjang']].map(([k, n]) => `<button class="${C.len === k ? 'on' : ''}" data-caplen="${k}">${n}</button>`).join('')}</div></div>
+          <div class="ctl ctl-inline"><label>Posisi</label><div class="seg">${[['0.36', 'Bawah'], ['0', 'Tengah'], ['-0.36', 'Atas']].map(([k, n]) => `<button class="${C.pos === k ? 'on' : ''}" data-cappos="${k}">${n}</button>`).join('')}</div></div>
+          <label class="ac-check"><input type="checkbox" data-capupper ${C.upper ? 'checked' : ''}> Huruf kapital semua</label>
+          <label class="ac-check"><input type="checkbox" data-capreplace ${C.replace ? 'checked' : ''}> Ganti subtitle yang sudah ada</label>
+        </div>` : ''}
+        ${this.capBusy ? `<div class="ac-prog"><div class="ai-bar"><i style="width:${Math.max(3, Math.round((this.capBusy.p || 0) * 100))}%"></i></div><span>${escapeHtml(this.capBusy.label || '')}</span><button class="btn sm ghost" data-do="capCancel">Batal</button></div>`
+          : `<button class="ac-go" data-do="autoCaptions" ${st && !st.ok ? 'disabled' : ''}>Hasilkan</button>`}
+        ${st && !st.ok ? `<p class="hint warn">${escapeHtml(st.reason)}</p>` : st?.state && st.state !== 'ready' ? '<p class="hint">Model suara diunduh ke server saat pertama dipakai (sekali saja).</p>' : ''}
+      </div>
+      <details class="ac-manual" ${this.capManual ? 'open' : ''}><summary>Buat dari naskah atau file SRT</summary>
       <div class="seg wide"><button class="${(this.capMode || 'script') === 'script' ? 'on' : ''}" data-capmode="script">Naskah</button><button class="${this.capMode === 'srt' ? 'on' : ''}" data-capmode="srt">SRT</button></div>
-      <textarea class="cap-input" rows="8" placeholder="${this.capMode === 'srt' ? '1\n00:00:00,000 --> 00:00:02,500\nHalo semuanya!' : 'Tempel naskah di sini. Kalimat akan dibagi rata sepanjang video.'}">${escapeHtml(this.capText || '')}</textarea>
-      <div class="ctl ctl-inline"><label>Gaya</label><select class="cap-preset">${TEXT_PRESETS.map((p) => `<option value="${p.id}" ${p.id === (this.capPreset || 'subtitle') ? 'selected' : ''}>${p.name}</option>`).join('')}</select></div>
-      <div class="ctl ctl-inline"><label>Posisi</label><select class="cap-pos"><option value="0.36">Bawah</option><option value="0">Tengah</option><option value="-0.36">Atas</option></select></div>
-      <div class="btn-row"><button class="btn btn-primary" data-do="makeCaptions">${icon('subtitle', 15)} Buat subtitle</button><button class="btn ghost" data-do="srtFile">${icon('file', 15)} Buka .srt</button></div>
+      <textarea class="cap-input" rows="6" placeholder="${this.capMode === 'srt' ? '1\n00:00:00,000 --> 00:00:02,500\nHalo semuanya!' : 'Tempel naskah di sini. Kalimat akan dibagi rata sepanjang video.'}">${escapeHtml(this.capText || '')}</textarea>
+      <div class="btn-row"><button class="btn btn-primary" data-do="makeCaptions">${icon('subtitle', 15)} Buat subtitle</button><button class="btn ghost" data-do="srtFile">${icon('file', 15)} Buka .srt</button></div></details>
       ${store.P.tracks.some((t) => t.subtitle) ? `<button class="btn sm ghost danger" data-do="clearCaptions">${icon('trash', 14)} Hapus semua subtitle</button>` : ''}`;
+  }
+
+  /** Caption tab controls that are not buttons; and whether the server can transcribe (checked once a minute). */
+  wireCaptions() {
+    const C = this.cap;
+    const q = this.panel.querySelector('.ac-q');
+    if (q) {
+      q.oninput = () => {
+        C.q = q.value;
+        const v = q.value.toLowerCase();
+        for (const b of this.panel.querySelectorAll('.ac-lang')) b.hidden = !!v && !b.textContent.toLowerCase().includes(v);
+      };
+    }
+    const up = this.panel.querySelector('[data-capupper]');
+    if (up) up.onchange = () => { C.upper = up.checked; };
+    const rp = this.panel.querySelector('[data-capreplace]');
+    if (rp) rp.onchange = () => { C.replace = rp.checked; };
+    const man = this.panel.querySelector('.ac-manual');
+    if (man) man.ontoggle = () => { this.capManual = man.open; };
+    if (!this.capStatusAt || Date.now() - this.capStatusAt > 60000) {
+      this.capStatusAt = Date.now();
+      transcribeStatus().then((st) => { this.capStatus = st; if (this.tab === 'caption' && !this.capBusy) this.render(); });
+    }
+  }
+
+  /** Auto subtitles: mix the chosen sound, transcribe it on the server, put the lines on the subtitle track. */
+  async autoCaptions() {
+    const C = this.cap;
+    if (this.capBusy) return;
+    const ctl = new AbortController();
+    this.capBusy = { p: 0, label: 'Menyiapkan…', ctl };
+    this.render();
+    const progress = (p, label) => {
+      if (!this.capBusy) return;
+      Object.assign(this.capBusy, { p, label });
+      const bar = this.panel?.querySelector('.ac-prog');
+      if (bar) { bar.querySelector('i').style.width = `${Math.max(3, Math.round(p * 100))}%`; bar.querySelector('span').textContent = label; }
+    };
+    try {
+      const res = await transcribeProject({ from: C.from, lang: C.lang, onProgress: progress, signal: ctl.signal });
+      const cues = cuesFromSegments(res.segments, { maxChars: LINE_LENGTH[C.len] || LINE_LENGTH.medium, upper: C.upper });
+      if (!cues.length) { toast('Tidak ada ucapan yang terdengar di audio itu', { type: 'warn', timeout: 5000 }); return; }
+      actions.addSubtitles(cues, { preset: C.preset, y: Number(C.pos), replace: C.replace });
+      toast(`${cues.length} baris subtitle dibuat${C.lang === 'auto' && res.language ? ` (bahasa: ${langName(res.language)})` : ''}`, { type: 'ok', timeout: 4000 });
+    } catch (err) {
+      if (!ctl.signal.aborted) toast(`Subtitle otomatis gagal: ${err.message}`, { type: 'error', timeout: 6000 });
+    } finally {
+      this.capBusy = null;
+      this.render();
+    }
   }
 
   effectPanel() {
@@ -349,8 +424,8 @@ export class Library {
   makeCaptions() {
     const text = this.panel.querySelector('.cap-input').value;
     this.capText = text;
-    this.capPreset = this.panel.querySelector('.cap-preset').value;
-    const y = Number(this.panel.querySelector('.cap-pos').value);
+    this.capPreset = this.cap?.preset || 'subtitle';
+    const y = Number(this.cap?.pos ?? 0.36);
     let items;
     if ((this.capMode || 'script') === 'srt') items = actions.parseSrt(text);
     else items = actions.scriptToItems(text, 0, Math.max(store.duration(), 4));
@@ -413,7 +488,19 @@ export class Library {
     if (d.copy) { navigator.clipboard?.writeText(d.copy).then(() => toast('Disalin', { type: 'ok' })).catch(() => toast('Gagal menyalin', { type: 'error' })); return; }
     if (d.mfilter) { this.mediaFilter = d.mfilter; this.render(); return; }
     if (d.fxcat) { this.fxCat = d.fxcat; this.render(); return; }
-    if (d.capmode) { this.capText = this.panel.querySelector('.cap-input')?.value; this.capMode = d.capmode; this.render(); return; }
+    if (d.capmode) { this.capText = this.panel.querySelector('.cap-input')?.value; this.capMode = d.capmode; this.capManual = true; this.render(); return; }
+    if (this.cap && (d.capopen || d.capfrom || d.caplang || d.cappreset || d.caplen || d.cappos || 'capadv' in d)) {
+      const C = this.cap;
+      if (d.capopen) C.open = C.open === d.capopen ? null : d.capopen;
+      if (d.capfrom) { C.from = d.capfrom; C.open = null; }
+      if (d.caplang) { C.lang = d.caplang; C.open = null; C.q = ''; }
+      if (d.cappreset) C.preset = d.cappreset;
+      if (d.caplen) C.len = d.caplen;
+      if (d.cappos) C.pos = d.cappos;
+      if ('capadv' in d) C.adv = !C.adv;
+      this.render();
+      return;
+    }
     if (d.retry) { e.stopPropagation(); mediaRT.get(d.retry)?.upload?.retry?.(); return; }
     if (d.add || (t.dataset.media && !e.target.closest('button'))) {
       const id = d.add || t.dataset.media;
@@ -473,6 +560,8 @@ export class Library {
       case 'record': this.toggleRecord(); break;
       case 'extract': actions.extractAudio(); break;
       case 'makeCaptions': this.makeCaptions(); break;
+      case 'autoCaptions': this.autoCaptions(); break;
+      case 'capCancel': this.capBusy?.ctl.abort(); break;
       case 'srtFile': {
         pickFiles({ accept: '.srt,.vtt,text/plain' }).then(async (files) => { if (!files.length) return; this.capText = await files[0].text(); this.capMode = 'srt'; this.render(); });
         break;

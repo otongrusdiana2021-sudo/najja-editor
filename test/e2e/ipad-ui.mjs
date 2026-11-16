@@ -256,7 +256,8 @@ try {
   await p.evaluate(() => document.querySelector('.tl-scroll').scrollLeft = 0);
   await p.waitForTimeout(250);
   await p.tap('.gut-cover');
-  await p.tap('.sheet.in [data-do="set"]');
+  await p.tap('.sheet.in [data-do="frame"]'); // v1.9: "Pakai frame ini (HD)" (rendered from the full-quality copy)
+  await p.waitForSelector('.gut-cover img[src^="data:image/jpeg"]', { timeout: 30000 }).catch(() => {});
   await p.tap('.sh-ok');
   await p.waitForTimeout(300);
   check(!!(await p.$('.gut-cover img[src^="data:image/jpeg"]')), 'Sampul: frame di playhead jadi gambar sampul');

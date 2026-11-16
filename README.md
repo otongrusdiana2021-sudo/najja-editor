@@ -6,6 +6,14 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.9** (lihat [docs/NAJJA-V1.9-FITUR.md](docs/NAJJA-V1.9-FITUR.md))
+- **Subtitle otomatis** dari video atau pengisi suara, 99 bahasa (Whisper di server sendiri), tampilan seperti editor ponsel.
+- **Kurangi kebisingan** dan **Sempurnakan suara** di panel Volume, sama di pratinjau dan ekspor.
+- Filter **Crystal Clear** & **4K**, font Scholar/Abrason/Starry (font terbuka bergaya serupa).
+- **Sampul HD** dari frame video atau dari galeri, sekaligus frame pertama video ekspor.
+- Pratinjau transisi & animasi yang memutar efek aslinya, **favorit** di setiap tab, **Lapisan** (urutan layer).
+- Efek suara lebih keras + 12 suara dasar baru. Efek Hitam Putih/Kabur dan semua filter kini jalan di iPad (filter GPU).
+
 **Beranda & alat AI** (v1.8, lihat [docs/AI-TOOLS.md](docs/AI-TOOLS.md))
 - Najja dibuka di beranda bergaya tablet:
   - kartu besar **Proyek baru**;

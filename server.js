@@ -803,9 +803,10 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     // ---- AI tools (home screen): background removal, upscaling. Each request belongs to its account.
     const ownAi = (meta) => tenancy.owns(meta, who);
     if (p === '/api/ai' && req.method === 'GET') return sendJson(res, 200, await ai.status());
-    if ((m = /^\/api\/ai\/(cutout|upscale)$/.exec(p)) && req.method === 'POST') {
-      const image = await readBody(req, 40 * 1024 * 1024);
-      const rec = await ai.create({ owner: who.id, tool: m[1], image, mime: req.headers['content-type'], scale: url.searchParams.get('scale'), name: url.searchParams.get('name') || '' });
+    if ((m = /^\/api\/ai\/(cutout|upscale|transcribe)$/.exec(p)) && req.method === 'POST') {
+      // (transcribe: 16 kHz mono WAV, 1.9 MB a minute — up to ±30 minutes)
+      const image = await readBody(req, m[1] === 'transcribe' ? 64 * 1024 * 1024 : 40 * 1024 * 1024);
+      const rec = await ai.create({ owner: who.id, tool: m[1], image, mime: req.headers['content-type'], scale: url.searchParams.get('scale'), name: url.searchParams.get('name') || '', language: url.searchParams.get('lang') || 'auto' });
       return sendJson(res, 200, rec);
     }
     if ((m = /^\/api\/ai\/(ai_[0-9a-f]{16})$/.exec(p))) {

@@ -34,6 +34,21 @@ fs.mkdirSync(path.join(dir, 'media'), { recursive: true });
 execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=4',
   '-f', 'lavfi', '-i', 'sine=f=440:sample_rate=48000:d=4', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
   '-c:a', 'aac', '-shortest', '-movflags', '+faststart', path.join(dir, 'media', 'warna.mp4')]);
+// speech (espeak-ng, Indonesian) with a pause, plus steady hiss: for noise reduction and auto subtitles
+const hasEspeak = (() => { try { execFileSync('espeak-ng', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
+let pause = null;
+if (hasEspeak) {
+  const a = path.join(dir, 's1.wav');
+  const b = path.join(dir, 's2.wav');
+  execFileSync('espeak-ng', ['-v', 'id', '-s', '135', '-w', a, 'Halo semuanya, selamat datang di toko kami.']);
+  execFileSync('espeak-ng', ['-v', 'id', '-s', '135', '-w', b, 'Hari ini ada diskon untuk semua produk.']);
+  const d1 = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', a]).toString());
+  pause = [d1 + 0.3, d1 + 1.3];
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', a, '-f', 'lavfi', '-t', '1.6', '-i', 'anullsrc=r=22050:cl=mono', '-i', b,
+    '-f', 'lavfi', '-t', '12', '-i', 'anoisesrc=color=white:amplitude=0.04:sample_rate=48000', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=8',
+    '-filter_complex', '[0:a][1:a][2:a]concat=n=3:v=0:a=1,aresample=48000[sp];[sp][3:a]amix=inputs=2:duration=first:normalize=0[a]',
+    '-map', '4:v', '-map', '[a]', '-shortest', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', path.join(dir, 'media', 'bicara.mp4')]);
+}
 const port = await freePort();
 const BASE = `http://localhost:${port}`;
 const server = spawn(process.execPath, ['server.js', '--no-open'], { cwd: ROOT, env: { ...process.env, NAJJA_TOKEN: TOKEN, NAJJA_DATA_DIR: dir, PORT: String(port) }, stdio: 'ignore' });
@@ -339,6 +354,80 @@ try {
   const modes = await p.evaluate(() => [...document.querySelectorAll('.sheet.in [data-cm]')].map((b) => b.textContent.trim()));
   check(modes.join('|') === 'Frame video|Dari galeri', `pilihan sampul: ${modes.join(', ')}`);
   await p.evaluate(() => window.najja.sheet?.close?.());
+
+  step('K. Volume: Kurangi kebisingan & Sempurnakan suara (pratinjau dan ekspor sama)');
+  if (!hasEspeak) console.log('SKIP  espeak-ng tidak terpasang');
+  else {
+    await mcp('new_project', { name: 'E2E suara', aspect_ratio: '9:16' });
+    const sp = await mcp('import_media', { path: 'bicara.mp4' });
+    const clip = await mcp('add_media_clip', { media_id: sp.media_id, track: 'main', start: 0 });
+    for (let t = Date.now(); Date.now() - t < 60000; await wait(250)) {
+      if (await p.evaluate(async (id) => { const { mediaRT } = await import('/js/media.js'); return !!mediaRT.get(id)?.url; }, sp.media_id)) break;
+    }
+    const exportPcm = async (voice) => {
+      await p.evaluate(async ([id, v]) => { const { store } = await import('/js/store.js'); store.mutate('suara', () => { store.clip(id).voice = v; }); }, [clip.clip_id || clip.id, voice]);
+      const r = await p.evaluate(async () => {
+        const { exportVideo } = await import('/js/exporter.js');
+        const res = await exportVideo(window.najja.engine, { resolution: '480p', format: 'mp4' });
+        const b = new Uint8Array(await res.blob.arrayBuffer());
+        let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+        const ev = [...(await window.najjaMetrics.snapshot()).events].reverse().find((e) => e.kind === 'export') || {};
+        return { data: btoa(s), mode: res.mode, voice: ev.voice_fx || 0 };
+      });
+      const f = path.join(dir, `suara-${voice ? 'fx' : 'asli'}.mp4`);
+      fs.writeFileSync(f, Buffer.from(r.data, 'base64'));
+      const pcm = execFileSync('ffmpeg', ['-v', 'error', '-i', f, '-vn', '-ac', '1', '-ar', '16000', '-f', 's16le', '-'], { maxBuffer: 1 << 26 });
+      return { ...r, x: new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length >> 1) };
+    };
+    const lvl = (x, a, b) => { let q = 0; const i0 = Math.round(a * 16000), i1 = Math.round(b * 16000); for (let i = i0; i < i1; i++) q += (x[i] / 32768) ** 2; return 10 * Math.log10(q / (i1 - i0) + 1e-12); };
+    const plain = await exportPcm(null);
+    const clean = await exportPcm({ denoise: true });
+    const both = await exportPcm({ denoise: true, enhance: true });
+    const nPlain = lvl(plain.x, ...pause);
+    const nClean = lvl(clean.x, ...pause);
+    const sPlain = lvl(plain.x, 0.3, pause[0] - 0.4);
+    const sClean = lvl(clean.x, 0.3, pause[0] - 0.4);
+    check(clean.voice >= 1 && nPlain - nClean > 10, `Kurangi kebisingan: desis di jeda ${nPlain.toFixed(1)} → ${nClean.toFixed(1)} dB`);
+    check(Math.abs(sPlain - sClean) < 3, `suara orang tetap (${sPlain.toFixed(1)} → ${sClean.toFixed(1)} dB)`);
+    check(both.voice >= 1 && lvl(both.x, 0.3, pause[0] - 0.4) >= sClean - 0.5 && lvl(both.x, ...pause) < nPlain - 6, `Sempurnakan suara (+ kurangi kebisingan): suara ${lvl(both.x, 0.3, pause[0] - 0.4).toFixed(1)} dB, jeda ${lvl(both.x, ...pause).toFixed(1)} dB`);
+    // the preview plays the same cleaned-up sound
+    const prev = await p.evaluate(async () => {
+      const A = window.najja.engine.audio;
+      const { store } = await import('/js/store.js');
+      const c = store.P.clips.find((x) => x.type === 'video');
+      A.prefetch?.(0.5);
+      for (let i = 0; i < 60; i++) { if (A.firstReady(0.5)) break; await new Promise((r) => setTimeout(r, 200)); }
+      const s = A.source(c.mediaId);
+      const b = [...s.blocks.values()].find((x) => x.state === 'ready');
+      return { ready: A.firstReady(0.5), processed: !!b && A.bufFor(c, b) !== b.buffer };
+    });
+    check(prev.ready && prev.processed, 'pratinjau memakai suara yang sudah dibersihkan');
+    await p.evaluate(async (id) => { const { store } = await import('/js/store.js'); store.mutate('suara', () => { store.clip(id).voice = null; }); }, clip.clip_id || clip.id);
+
+    step('L. Hasilkan keterangan otomatis dari video (Whisper di server)');
+    const st = await p.evaluate(async () => (await import('/js/captions.js')).transcribeStatus());
+    if (!st.ok || !process.env.NAJJA_AI_MODELS) console.log(`SKIP  transkripsi: ${st.reason || 'NAJJA_AI_MODELS tidak diset (model Whisper)'}`);
+    else {
+      await p.evaluate(() => window.najja.openSheet('caption'));
+      await p.waitForSelector('.sheet.in .autocap');
+      const rows = await p.evaluate(() => [...document.querySelectorAll('.sheet.in .ac-row span')].map((x) => x.textContent));
+      check(rows.includes('Hasilkan dari') && rows.includes('Bahasa sumber') && rows.includes('Opsi lanjutan'), `tampilan: ${rows.join(' · ')}`);
+      await p.click('.sheet.in [data-capopen="lang"]');
+      await p.fill('.sheet.in .ac-q', 'indo');
+      await p.click('.sheet.in .ac-lang[data-caplang="id"]');
+      await p.click('.sheet.in [data-do="autoCaptions"]');
+      let subs = [];
+      for (let t = Date.now(); Date.now() - t < 180000; await wait(1000)) {
+        subs = await p.evaluate(async () => { const { store } = await import('/js/store.js'); const tr = store.P.tracks.find((x) => x.subtitle); return tr ? store.P.clips.filter((c) => c.trackId === tr.id).sort((a, b) => a.start - b.start).map((c) => ({ t: c.text.content, s: c.start, e: c.start + c.duration })) : []; });
+        if (subs.length) break;
+      }
+      const text = subs.map((x) => x.t).join(' ').toLowerCase();
+      check(subs.length >= 2 && /selamat|datang|diskon|produk|halo/.test(text), `${subs.length} baris: "${subs.map((x) => x.t).join(' | ')}"`);
+      check(subs.every((x) => x.e > x.s) && subs.every((x, i) => !i || x.s >= subs[i - 1].e - 1e-3), 'baris berurutan tanpa tumpang tindih');
+      check(subs.some((x) => x.s >= pause[1] - 0.5), `kalimat kedua mulai setelah jeda (${subs.map((x) => x.s.toFixed(1)).join(', ')} dtk)`);
+      await p.evaluate(() => window.najja.sheet?.close?.());
+    }
+  }
 
   check(!errors.length, `tidak ada error halaman${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } finally {

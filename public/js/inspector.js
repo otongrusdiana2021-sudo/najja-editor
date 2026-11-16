@@ -182,11 +182,13 @@ export class Inspector {
   }
 
   volumePanel(c) {
-    return sec('', `
+    return `${sec('', `
       ${slider('Volume', 'volume', 0, 200, 1, { scale: 100, unit: '%' })}
       ${slider('Fade in', 'fadeIn', 0, Math.min(10, c.duration / 2), 0.1, { unit: 's', decimals: 1 })}
       ${slider('Fade out', 'fadeOut', 0, Math.min(10, c.duration / 2), 0.1, { unit: 's', decimals: 1 })}
-      ${toggle('Bisukan klip ini', 'muted')}`);
+      ${toggle('Bisukan klip ini', 'muted')}`)}
+      ${sec('Suara', `${toggle('Kurangi kebisingan', 'voice.denoise')}<p class="hint">Menghilangkan desis, dengung, kipas/AC, dan bising jalan yang terus-menerus; suara orang tetap.</p>
+        ${toggle('Sempurnakan suara', 'voice.enhance')}<p class="hint">Suara lebih jelas dan rata: dengung rendah dipotong, kejernihan dinaikkan, volume diratakan.</p>`)}`;
   }
 
   textPanel(c) {

@@ -51,6 +51,8 @@ const P = {
   chevronUp: '<path d="m6 15 6-6 6 6"/>',
   chevronLeft: '<path d="m15 18-6-6 6-6"/>',
   chevronRight: '<path d="m9 18 6-6-6-6"/>',
+  sparkle: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="m12 8 1.2 2.8L16 12l-2.8 1.2L12 16l-1.2-2.8L8 12l2.8-1.2z"/>',
+  translate: '<path d="M4 5h8M8 3v2M6 5c0 4 3 7 6 8M10 5c-1 4-3 7-6 8"/><path d="m13 21 4-10 4 10M14.5 17.5h5"/>',
   skipBack: '<path d="M19 20 9 12l10-8z" fill="currentColor"/><path d="M5 19V5"/>',
   skipForward: '<path d="m5 4 10 8-10 8z" fill="currentColor"/><path d="M19 5v14"/>',
   stepBack: '<path d="M14 6l-6 6 6 6"/>',

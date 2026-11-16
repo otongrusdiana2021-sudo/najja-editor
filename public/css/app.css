@@ -753,3 +753,35 @@ canvas.anim-prev { width: 100%; max-width: 96px; height: auto; aspect-ratio: 16 
 .cover-toggle { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; cursor: pointer; }
 .cover-toggle small { display: block; color: var(--text-3); font-size: 11.5px; margin-top: 2px; }
 .cover-actions .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Hasilkan keterangan otomatis (v1.9) */
+.autocap { display: flex; flex-direction: column; gap: 10px; }
+.ac-title { margin: 0 0 4px; text-align: center; font-size: 17px; font-weight: 700; }
+.ac-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 16px 16px; border-radius: 14px; background: var(--panel-2); font-size: 15px; text-align: left; color: var(--text); }
+.ac-row span { flex: 1; }
+.ac-row em { font-style: normal; color: var(--text-3); font-weight: 600; }
+.ac-row.open { outline: 1.5px solid var(--border-2); }
+.ac-pick { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 4px 6px; }
+.ac-langs { flex-direction: column; flex-wrap: nowrap; }
+.ac-q { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border-2); background: var(--panel-3); color: var(--text); font: inherit; }
+.ac-lang-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; max-height: 240px; overflow-y: auto; }
+.ac-lang { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-radius: 10px; background: var(--panel-3); font-size: 13.5px; text-align: left; }
+.ac-lang small { color: var(--text-3); font-size: 11px; }
+.ac-lang.on { background: var(--accent); color: #062b30; }
+.ac-lang.on small { color: #0a4a52; }
+.ac-lang[hidden] { display: none; }
+.ac-card { border-radius: 14px; background: var(--panel-2); padding: 14px 16px 16px; }
+.ac-card-h { display: flex; align-items: center; gap: 12px; font-size: 15px; margin-bottom: 12px; }
+.ac-tpls { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.ac-tpl { flex: none; width: 130px; height: 120px; display: grid; place-items: center; border-radius: 14px; background: #1b1c20; border: 2px solid transparent; overflow: hidden; }
+.ac-tpl.on { border-color: #fff; }
+.ac-tpl .tp-prev { font-size: 18px; max-width: 118px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ac-advbody { display: flex; flex-direction: column; gap: 10px; padding: 4px 6px; }
+.ac-check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.ac-go { width: 100%; padding: 16px; border-radius: 12px; background: #00c8e0; color: #031b20; font-size: 17px; font-weight: 700; }
+.ac-go:disabled { opacity: 0.4; }
+.ac-prog { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-2); }
+.ac-manual { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.ac-manual summary { cursor: pointer; font-size: 13px; color: var(--text-2); margin-bottom: 10px; }
+.ac-manual[open] summary { margin-bottom: 12px; }
+.ac-manual .seg, .ac-manual .cap-input { margin-bottom: 10px; }

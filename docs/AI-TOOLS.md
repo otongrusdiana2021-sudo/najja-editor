@@ -72,11 +72,22 @@ Installer (`deploy/install.sh`) memasang container AI otomatis dan memilih batas
   - Model diunduh saat alat pertama kali dipakai.
   - `NAJJA_AI=off` mematikannya; `NAJJA_AI_MODELS=<folder>` memakai folder model yang sudah ada.
 
+### Transkripsi suara (v1.9)
+
+Dipakai oleh **Hasilkan keterangan otomatis**.
+- Editor mengirim suara klip yang dipilih (WAV 16 kHz mono, ±1,9 MB per menit). Server menjalankan **Whisper** lewat faster-whisper (int8 di CPU) dengan waktu per kata.
+- Model **small** (±480 MB unduhan, ±0,7–0,9 GB saat berjalan) dipakai kalau batas memori container AI ≥ 1,1 GB. Kalau kurang, model **base** (±150 MB). Pilihannya bisa dipaksa dengan `NAJJA_AI_WHISPER=small|base`.
+- Model diunduh sekali saat pertama dipakai, dikunci ke revisi Hugging Face dan sha256 per file (`ai/models.json`).
+- Model gambar dan Whisper tidak dimuat bersamaan di memori.
+- Lab (1 core, model base): 8,7 dtk ucapan selesai dalam 1,6 dtk.
+- Tanpa Docker (PC): `pip install faster-whisper==1.2.1`.
+
 ### Lisensi model
 
 - BiRefNet (Zheng Peng dkk.), konversi ONNX `studioludens/birefnet-lite-512`: MIT.
 - IS-Net / DIS (Xuebin Qin dkk.), konversi ONNX `imgly/isnet-general-onnx`: MIT.
 - Real-ESRGAN (Xintao Wang dkk.), ekspor ONNX resmi Qualcomm AI Hub `real_esrgan_general_x4v3` v0.66.0: BSD-3-Clause.
+- Whisper small/base (OpenAI), konversi CTranslate2 `Systran/faster-whisper-small` dan `-base`: MIT. faster-whisper dan CTranslate2: MIT.
 
 Model berlisensi non-komersial (misalnya RMBG dari BRIA) sengaja tidak dipakai.
 

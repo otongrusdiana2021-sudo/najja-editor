@@ -7,11 +7,13 @@ and writes files under <data>/ai, and only fetches the pinned model files listed
 
   GET  /health                         versions, memory, which models are ready
   POST /models/ensure {"names": [...]} download missing models in the background
-  POST /run {"task": "cutout"|"upscale", "input": path, "output": path without extension, "scale": 2|4}
+  POST /run {"task": "cutout"|"upscale"|"transcribe", "input": path, "output": path without extension, "scale": 2|4,
+             "language": "id"|"auto"|…}
        → NDJSON lines {"progress": 0..1, "stage": ...}; the last line is {"done": {...}} or {"error": "..."}
 
 Models (licenses in models.json): BiRefNet lite 512 (MIT) cuts out the subject; on servers with little memory IS-Net
-(MIT) does instead; Real-ESRGAN General x4v3 (BSD-3) upscales, tile by tile.
+(MIT) does instead; Real-ESRGAN General x4v3 (BSD-3) upscales, tile by tile; Whisper small (or base on small servers;
+MIT, run by faster-whisper/CTranslate2) turns speech into subtitles with word times, in any of its 99 languages (v1.9).
 """
 import argparse
 import gc
@@ -119,8 +121,24 @@ def cutout_model():
     return 'cutout-lite'
 
 
+def whisper_model():
+    """Whisper small (better, ~1 GB while running) when this container may use enough memory, else base."""
+    want = os.environ.get('NAJJA_AI_WHISPER', 'auto')
+    if want in ('small', 'base'):
+        return 'whisper-' + want
+    m = memory()
+    cap = m['limitMB'] or m['totalMB']
+    return 'whisper-small' if cap >= MODELS['whisper-small']['memMB'] else 'whisper-base'
+
+
 def deps():
     out = {'python': sys.version.split()[0]}
+    try:
+        import faster_whisper
+        out['faster_whisper'] = faster_whisper.__version__
+    except Exception as e:  # noqa: BLE001  (optional: only transcription needs it)
+        out['faster_whisper'] = None
+        out['whisper_error'] = str(e)[:200]
     try:
         import numpy
         out['numpy'] = numpy.__version__
@@ -146,11 +164,21 @@ def deps():
 # Models: downloaded once into <data>/models, checked against the pinned sha256.
 def model_files(name):
     m = MODELS[name]
+    if 'files' in m:  # a model made of several files, in its own folder (Whisper)
+        return [os.path.join(MODELS_DIR, m['dir'], f['name']) for f in m['files']]
     return [os.path.join(MODELS_DIR, f) for f in (m.get('extract') or [m['file']])]
 
 
+def model_key(name):
+    m = MODELS[name]
+    return m['sha256'] if 'sha256' in m else '+'.join(f['sha256'] for f in m['files'])
+
+
 def _ok_marker(name):
-    return os.path.join(MODELS_DIR, MODELS[name]['file'] + '.ok')
+    m = MODELS[name]
+    if 'files' in m:
+        return os.path.join(MODELS_DIR, m['dir'], '.ok')
+    return os.path.join(MODELS_DIR, m['file'] + '.ok')
 
 
 def is_ready(name):
@@ -158,9 +186,15 @@ def is_ready(name):
         return False
     try:
         with open(_ok_marker(name)) as f:
-            return f.read().strip() == MODELS[name]['sha256']
+            return f.read().strip() == model_key(name)
     except OSError:
         pass
+    if 'files' in MODELS[name]:
+        if all(_sha256(p) == f['sha256'] for p, f in zip(model_files(name), MODELS[name]['files'])):
+            with open(_ok_marker(name), 'w') as f:
+                f.write(model_key(name))
+            return True
+        return False
     # files copied in by hand: check once, then remember
     if 'zip' not in MODELS[name] and _sha256(model_files(name)[0]) == MODELS[name]['sha256']:
         with open(_ok_marker(name), 'w') as f:
@@ -188,8 +222,62 @@ def refresh_states():
             _set(name, state='ready' if is_ready(name) else ('error' if STATE[name]['error'] else 'missing'))
 
 
+def _fetch(url, dest, sha, size, on_bytes):
+    """One file, verified, into place (a .part file meanwhile)."""
+    part = dest + '.part'
+    req = urllib.request.Request(url, headers={'User-Agent': 'najja-ai/' + VERSION})
+    h = hashlib.sha256()
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r, open(part, 'wb') as f:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                h.update(chunk)
+                on_bytes(len(chunk))
+        if h.hexdigest() != sha:
+            raise ValueError(f'sha256 mismatch ({h.hexdigest()[:12]}…), file discarded')
+        os.replace(part, dest)
+    finally:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+
+
+def download_files(name):
+    m = MODELS[name]
+    folder = os.path.join(MODELS_DIR, m['dir'])
+    os.makedirs(folder, exist_ok=True)
+    total = sum(f['size'] for f in m['files'])
+    got = {'n': 0}
+    _set(name, state='downloading', progress=0.0, error=None)
+    log('downloading', name)
+
+    def on_bytes(n):
+        got['n'] += n
+        _set(name, progress=min(0.99, got['n'] / total))
+    try:
+        for f in m['files']:
+            dest = os.path.join(folder, f['name'])
+            if os.path.exists(dest) and os.path.getsize(dest) == f['size'] and _sha256(dest) == f['sha256']:
+                on_bytes(f['size'])
+                continue
+            _fetch(f['url'], dest, f['sha256'], f['size'], on_bytes)
+        with open(_ok_marker(name), 'w') as fh:
+            fh.write(model_key(name))
+        _set(name, state='ready', progress=1.0, error=None)
+        log('ready', name)
+    except Exception as e:  # noqa: BLE001
+        _set(name, state='error', error=str(e)[:200])
+        log('download failed', name, e)
+
+
 def download(name):
     m = MODELS[name]
+    if 'files' in m:
+        return download_files(name)
     url = m.get('zip') or m['url']
     os.makedirs(MODELS_DIR, exist_ok=True)
     part = os.path.join(MODELS_DIR, m['file'] + '.part')
@@ -266,6 +354,10 @@ def session(name):
         return s[0]
     if not is_ready(name):
         raise RuntimeError('model belum siap (sedang diunduh?)')
+    # (one big model in memory at a time: a Whisper model still loaded goes first)
+    for k in [k for k in SESSIONS if k.startswith('whisper')]:
+        del SESSIONS[k]
+    gc.collect()
     so = ort.SessionOptions()
     # as many threads as CPUs this container may use: more only wait for each other under a CPU quota
     threads = int(os.environ.get('NAJJA_AI_THREADS') or 0) or min(4, cpu_quota())
@@ -415,6 +507,72 @@ def upscale(inp, out_base, scale, report, cancelled):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# Speech to text (v1.9): Whisper through faster-whisper, int8 on the CPU, word times for the subtitle timing.
+def _read_wav(path):
+    """16-bit PCM WAV (the editor sends 16 kHz mono) as float32 samples at 16 kHz."""
+    import wave
+    import numpy as np
+    with wave.open(path, 'rb') as w:
+        if w.getsampwidth() != 2:
+            raise ValueError('format audio tidak dikenal (WAV 16-bit)')
+        ch, rate, n = w.getnchannels(), w.getframerate(), w.getnframes()
+        data = np.frombuffer(w.readframes(n), dtype='<i2').astype(np.float32) / 32768.0
+    if ch > 1:
+        data = data.reshape(-1, ch).mean(axis=1)
+    if rate != 16000:
+        # (linear resampling is enough for speech recognition)
+        t = np.arange(0, len(data) / rate, 1 / 16000)
+        data = np.interp(t, np.arange(len(data)) / rate, data).astype(np.float32)
+    return data
+
+
+def whisper_session(name):
+    s = SESSIONS.get(name)
+    if s:
+        s[1] = time.time()
+        return s[0]
+    if not is_ready(name):
+        raise RuntimeError('model belum siap (sedang diunduh?)')
+    from faster_whisper import WhisperModel
+    # (one big model in memory at a time: the image models still loaded go first)
+    for k in [k for k in SESSIONS if not k.startswith('whisper')]:
+        del SESSIONS[k]
+    gc.collect()
+    threads = int(os.environ.get('NAJJA_AI_THREADS') or 0) or min(4, cpu_quota())
+    model = WhisperModel(os.path.join(MODELS_DIR, MODELS[name]['dir']), device='cpu', compute_type='int8', cpu_threads=threads, num_workers=1)
+    SESSIONS[name] = [model, time.time()]
+    return model
+
+
+def transcribe(inp, out_base, language, report, cancelled):
+    name = whisper_model()
+    report(0.02, 'load')
+    audio = _read_wav(inp)
+    duration = len(audio) / 16000
+    if duration < 0.3:
+        raise ValueError('audio terlalu pendek')
+    model = whisper_session(name)
+    report(0.08, 'transcribe')
+    lang = None if not language or language == 'auto' else str(language)[:8]
+    segments, info = model.transcribe(
+        audio, language=lang, task='transcribe', beam_size=3, word_timestamps=True,
+        vad_filter=True, vad_parameters={'min_silence_duration_ms': 400}, condition_on_previous_text=False)
+    out = []
+    for seg in segments:
+        if cancelled():
+            raise Cancelled()
+        words = [{'start': round(w.start, 3), 'end': round(w.end, 3), 'word': w.word, 'p': round(w.probability, 3)} for w in (seg.words or [])]
+        out.append({'start': round(seg.start, 3), 'end': round(seg.end, 3), 'text': seg.text.strip(), 'words': words})
+        report(0.08 + 0.9 * min(1.0, seg.end / duration), 'transcribe')
+    result = {'language': info.language, 'languageProbability': round(info.language_probability, 3), 'duration': round(duration, 3), 'model': name, 'segments': out}
+    path = out_base + '.json'
+    with open(path + '.tmp', 'w', encoding='utf-8') as f:
+        json.dump(result, f, ensure_ascii=False)
+    os.replace(path + '.tmp', path)
+    return {'file': os.path.basename(path), 'model': name, 'language': info.language, 'duration': round(duration, 3), 'segments': len(out)}
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # HTTP
 def _resolve(path):
     """A path inside <data>/ai (relative to it, as the editor sends them), or None."""
@@ -459,7 +617,8 @@ class Handler(BaseHTTPRequestHandler):
                 models = {k: {**v, 'title': MODELS[k]['title'], 'size': MODELS[k]['size'], 'license': MODELS[k]['license']} for k, v in STATE.items()}
             d = deps()
             return self._json(200, {'ok': not d.get('error'), 'version': VERSION, 'deps': d, 'memory': memory(), 'cpus': cpu_quota(),
-                                    'cutoutModel': cutout_model(), 'models': models, 'busy': RUN_LOCK.locked()})
+                                    'cutoutModel': cutout_model(), 'whisperModel': whisper_model(), 'transcribe': bool(d.get('faster_whisper')),
+                                    'models': models, 'busy': RUN_LOCK.locked()})
         self._json(404, {'error': 'not found'})
 
     def do_POST(self):
@@ -481,7 +640,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run(self, body):
         task, inp, out = body.get('task'), _resolve(body.get('input')), _resolve(body.get('output'))
-        if task not in ('cutout', 'upscale') or not inp or not out:
+        if task not in ('cutout', 'upscale', 'transcribe') or not inp or not out:
             return self._json(400, {'error': 'bad task or path'})
         if not os.path.exists(inp):
             return self._json(400, {'error': 'input missing'})
@@ -511,6 +670,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if task == 'cutout':
                     res = cutout(inp, out, report, lambda: gone['v'])
+                elif task == 'transcribe':
+                    res = transcribe(inp, out, body.get('language') or 'auto', report, lambda: gone['v'])
                 else:
                     res = upscale(inp, out, body.get('scale') or 2, report, lambda: gone['v'])
                 res['ms'] = round((time.time() - t0) * 1000)
