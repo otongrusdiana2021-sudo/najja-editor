@@ -196,7 +196,8 @@ export class Library {
       <div class="seg wide"><button class="${(this.capMode || 'script') === 'script' ? 'on' : ''}" data-capmode="script">Naskah</button><button class="${this.capMode === 'srt' ? 'on' : ''}" data-capmode="srt">SRT</button></div>
       <textarea class="cap-input" rows="6" placeholder="${this.capMode === 'srt' ? '1\n00:00:00,000 --> 00:00:02,500\nHalo semuanya!' : 'Tempel naskah di sini. Kalimat akan dibagi rata sepanjang video.'}">${escapeHtml(this.capText || '')}</textarea>
       <div class="btn-row"><button class="btn btn-primary" data-do="makeCaptions">${icon('subtitle', 15)} Buat subtitle</button><button class="btn ghost" data-do="srtFile">${icon('file', 15)} Buka .srt</button></div></details>
-      ${store.P.tracks.some((t) => t.subtitle) ? `<button class="btn sm ghost danger" data-do="clearCaptions">${icon('trash', 14)} Hapus semua subtitle</button>` : ''}`;
+      ${store.P.tracks.some((t) => t.subtitle) ? `<label class="ac-check ac-link"><input type="checkbox" data-caplink ${store.P.tracks.some((t) => t.subtitle && t.linked !== false) ? 'checked' : ''}> Ubah satu subtitle, semua ikut <small>(skala, posisi, ukuran, font, warna, animasi)</small></label>
+      <button class="btn sm ghost danger" data-do="clearCaptions">${icon('trash', 14)} Hapus semua subtitle</button>` : ''}`;
   }
 
   /** Caption tab controls that are not buttons; and whether the server can transcribe (checked once a minute). */
@@ -214,6 +215,8 @@ export class Library {
     if (up) up.onchange = () => { C.upper = up.checked; };
     const rp = this.panel.querySelector('[data-capreplace]');
     if (rp) rp.onchange = () => { C.replace = rp.checked; };
+    const lk = this.panel.querySelector('[data-caplink]');
+    if (lk) lk.onchange = () => actions.setSubtitleLink(lk.checked);
     const man = this.panel.querySelector('.ac-manual');
     if (man) man.ontoggle = () => { this.capManual = man.open; };
     if (!this.capStatusAt || Date.now() - this.capStatusAt > 60000) {

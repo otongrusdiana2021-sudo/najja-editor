@@ -8,6 +8,7 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 **Baru di v1.9** (lihat [docs/NAJJA-V1.9-FITUR.md](docs/NAJJA-V1.9-FITUR.md))
 - **Subtitle otomatis** dari video atau pengisi suara, 99 bahasa (Whisper di server sendiri), tampilan seperti editor ponsel.
+- **Subtitle tertaut** (v1.9.1): ubah skala, posisi, ukuran, font, atau warna satu subtitle, semua subtitle ikut. Bisa dimatikan.
 - **Kurangi kebisingan** dan **Sempurnakan suara** di panel Volume, sama di pratinjau dan ekspor.
 - Filter **Crystal Clear** & **4K**, font Scholar/Abrason/Starry (font terbuka bergaya serupa).
 - **Sampul HD** dari frame video atau dari galeri, sekaligus frame pertama video ekspor.

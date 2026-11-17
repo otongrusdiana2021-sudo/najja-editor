@@ -778,6 +778,16 @@ canvas.anim-prev { width: 100%; max-width: 96px; height: auto; aspect-ratio: 16 
 .ac-tpl .tp-prev { font-size: 18px; max-width: 118px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ac-advbody { display: flex; flex-direction: column; gap: 10px; padding: 4px 6px; }
 .ac-check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.ac-link { margin: 14px 0 8px; flex-wrap: wrap; }
+.ac-link small { color: var(--text-3, var(--text-2)); font-size: 11.5px; }
+/* linked subtitles switch (inspector) */
+.sub-link { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin-bottom: 10px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); }
+.sub-link.on { border-color: var(--accent-soft); background: linear-gradient(0deg, var(--accent-soft), var(--accent-soft)), var(--panel-2); }
+.sub-link .switch-row { font-size: 13px; color: var(--text); }
+.sub-link .switch-row span { display: inline-flex; align-items: center; gap: 6px; }
+.sub-link .switch-row em { font-style: normal; font-size: 11.5px; color: var(--text-2); }
+.sub-link .hint { margin: 0; }
+.sub-link .btn { align-self: flex-start; }
 .ac-go { width: 100%; padding: 16px; border-radius: 12px; background: #00c8e0; color: #031b20; font-size: 17px; font-weight: 700; }
 .ac-go:disabled { opacity: 0.4; }
 .ac-prog { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-2); }

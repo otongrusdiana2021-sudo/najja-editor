@@ -1,7 +1,7 @@
 // Editing actions shared by the UI (toolbar, shortcuts, menus, panels) and the MCP API.
 import {
   store, makeClip, placeClip, splitClip, sortedClips, insertIntoMain, findFreeStart, MIN_CLIP, TRACK_KIND_FOR, clipEnd, packMain,
-  upsertKeyframe, removeKeyframe,
+  upsertKeyframe, removeKeyframe, spreadLook, subtitleTrackOf,
 } from './store.js';
 import { mediaRT, importCanvasAsImage } from './media.js';
 import { TEXT_PRESETS, TEXT_TEMPLATES, DEFAULT_TEXT, FILTERS, TRANSITIONS, EFFECTS, BADGES, ADJUSTMENTS } from './presets.js';
@@ -367,6 +367,19 @@ export function addSubtitles(items, { preset = 'subtitle', y = 0.36, size, font,
     }
     return ids;
   });
+}
+
+/** Linked subtitles (store.js): one line's look is every line's (default), or each line its own. */
+export function setSubtitleLink(on, trackId = null) {
+  store.mutate(on ? 'Subtitle ditautkan' : 'Tautan subtitle dilepas', (P) => {
+    for (const t of P.tracks) if (t.subtitle && (!trackId || t.id === trackId)) t.linked = !!on;
+  });
+}
+/** Every line of the clip's subtitle track gets this line's look (size, scale, position, font, colours, animation). */
+export function matchSubtitles(clipId = store.selection) {
+  const c = store.clip(clipId);
+  if (!subtitleTrackOf(store.P, c)) return 0;
+  return store.mutate('Samakan subtitle', (P) => spreadLook(P, c));
 }
 
 // ---------------------------------------------------------------------------------------------

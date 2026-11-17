@@ -72,6 +72,20 @@ Cara kerjanya:
 
 Tidak ada layanan berbayar atau pihak ketiga. Naskah atau file SRT masih bisa dipakai di bagian "Buat dari naskah atau file SRT".
 
+### Subtitle tertaut (v1.9.1)
+
+Semua baris di track Subtitle punya satu tampilan. Mengubah satu subtitle mengubah semuanya. Fitur ini menyala secara default, juga untuk proyek lama.
+
+- **Yang ikut berubah:** skala (seret sudut atau cubit dua jari di pratinjau), posisi, rotasi, cermin, opasitas, ukuran huruf, font, tebal/miring, rata, warna, garis tepi, latar, bayangan, gradien, spasi, gaya, dan animasi masuk/keluar/loop.
+- **Yang tetap milik tiap baris:** teks dan waktunya.
+- **Hanya yang diubah yang disalin.** Kalau satu baris punya warna sendiri lalu ukurannya diubah, hanya ukurannya yang menyebar dan warnanya tetap.
+- **Undo:** satu kali urung mengembalikan semua baris.
+- **Sakelar "Terapkan ke semua subtitle"** ada di lembar Teks, Transformasi, Animasi, dan Campuran saat sebuah subtitle dipilih. Kotak yang sama ada di panel Keterangan. Kalau dimatikan, setiap subtitle diatur sendiri-sendiri.
+- **"Samakan semua dengan subtitle ini"** muncul saat sakelar menyala tapi tampilan baris-barisnya berbeda.
+- Teks biasa di luar track Subtitle tidak terpengaruh.
+
+Cara kerjanya (`store.js`): setiap perubahan pada subtitle yang dipilih, baik saat menyeret (`store.live`) maupun saat disimpan (`store.mutate`), dibandingkan sebelum dan sesudahnya per properti. Properti yang berubah lalu disalin ke baris lain di track yang sama. Keyframe tiap baris tidak ikut disalin.
+
 ## 9. Klik klip → playhead pindah ke klip
 
 Mengetuk atau mengklik klip memindahkan playhead dan timeline ke awal klip itu, kecuali playhead sudah berada di dalam klip tersebut.

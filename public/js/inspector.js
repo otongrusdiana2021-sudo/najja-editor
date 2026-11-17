@@ -1,10 +1,11 @@
 // Clip properties, shown one section at a time inside a bottom sheet (Volume, Animasi, Kecepatan, Pangkas,
 // Transformasi, Campuran, Sesuaikan, Teks…). Edits the selected clip, or the project for the 'project' section.
-import { store, setSpeed, KF_PROPS, kfValue, upsertKeyframe, keyframeAt } from './store.js';
+import { store, setSpeed, KF_PROPS, kfValue, upsertKeyframe, keyframeAt, subtitleTrackOf, subtitlesMatch } from './store.js';
 import {
   ADJUSTMENTS, BLEND_MODES, ANIM_IN, ANIM_OUT, ANIM_LOOP, FONTS, TEXT_PRESETS, EFFECTS, FPS_OPTIONS,
 } from './presets.js';
 import { icon } from './icons.js';
+import { toast } from './ui.js';
 import { escapeHtml, getPath, setPath, clamp, fmtSec, normHex, deepMerge, clone } from './util.js';
 import { presetStyle } from './actions.js';
 import { favs, star, onStar } from './favs.js';
@@ -101,9 +102,25 @@ export class Inspector {
       case 'solid': body = sec('', `${color('Warna', 'solid.color')}${toggle('Gradien', 'solid.gradient')}${c.solid?.color2 ? `${color('Warna 2', 'solid.color2')}${slider('Sudut', 'solid.angle', 0, 360, 1, { unit: '°' })}` : ''}`); break;
       default: break;
     }
+    if (['text', 'transform', 'anim', 'blend'].includes(this.section)) body = this.linkRow(c) + body;
     this.root.innerHTML = `<div class="insp-body sec-${this.section}" data-type="${c.type}">${body}</div>`;
     this.syncValues(true);
     startPreviews(this.root); // live previews of the animations, where the section has them (previews.js)
+  }
+
+  /** On a subtitle line: the switch that makes a change to one line a change to all of them (store.js, linked subtitles). */
+  linkRow(c) {
+    const tr = subtitleTrackOf(store.P, c);
+    if (!tr) return '';
+    const n = store.P.clips.filter((x) => x.trackId === tr.id && x.type === 'text').length;
+    if (n < 2) return '';
+    const on = tr.linked !== false;
+    const same = on ? subtitlesMatch(store.P, c) : true;
+    return `<div class="sub-link ${on ? 'on' : ''}">
+      <label class="switch-row"><span>${icon('subtitle', 15)} Terapkan ke semua subtitle <em>${n} baris</em></span><input type="checkbox" class="switch" data-do="subLink" ${on ? 'checked' : ''}></label>
+      <p class="hint">${on ? 'Skala, posisi, ukuran, font, warna, dan animasi satu subtitle berlaku untuk semua subtitle. Teks dan waktunya tetap masing-masing.' : 'Mati: setiap subtitle diatur sendiri-sendiri.'}</p>
+      ${same ? '' : `<button class="btn sm" data-do="subMatch">Samakan semua dengan subtitle ini</button>`}
+    </div>`;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -334,6 +351,8 @@ export class Inspector {
     if (d.bgmode) { store.mutate('Latar', (P) => { P.background.mode = d.bgmode; }); return; }
     if (d.do === 'magnet') { actions.setMagnet(t.checked); return; }
     if (!c) return;
+    if (d.do === 'subLink') { actions.setSubtitleLink(t.checked, c.trackId); return; }
+    if (d.do === 'subMatch') { const n = actions.matchSubtitles(c.id); toast(`${n} subtitle disamakan`, { type: 'ok' }); return; }
     const mut = (label, fn) => store.mutate(label, () => fn(store.clip(c.id)));
     if (d.anim) {
       mut('Animasi', (x) => { x[d.key] = { ...(x[d.key] || {}), type: d.anim, ...(d.key !== 'animLoop' && !x[d.key]?.duration ? { duration: 0.5 } : {}) }; });

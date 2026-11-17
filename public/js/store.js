@@ -1,5 +1,5 @@
 // Project model, editing operations, undo/redo and autosave.
-import { uid, clone, deepMerge, clamp, debounce } from './util.js';
+import { uid, clone, deepMerge, clamp, debounce, setPath } from './util.js';
 import { ASPECTS, DEFAULT_TEXT, ADJUSTMENTS } from './presets.js';
 import { prefs, db } from './db.js';
 import { storage } from './storage.js';
@@ -259,6 +259,73 @@ export function removeKeyframe(clip, local) {
   return !!k;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Linked subtitles (v1.9.1). The lines of a subtitle track share one look, like a phone editor's auto captions:
+// scale one line — or move it, turn it, change its size, font, colours, outline, background, shadow or animation —
+// and every line of the track follows. Each line keeps its own words and times. On by default; the switch
+// "Terapkan ke semua subtitle" (track.linked = false) lets the lines be styled one by one.
+const LINK_KEYS = ['x', 'y', 'scale', 'rotation', 'flipH', 'flipV', 'opacity', 'blend', 'animIn', 'animOut', 'animLoop', 'text'];
+const LINK_SKIP = new Set(['text.content']);
+export const subtitleTrackOf = (P, c) => (c?.type === 'text' ? P.tracks.find((t) => t.id === c.trackId && t.subtitle) || null : null);
+export const isLinkedSubtitle = (P, c) => { const t = subtitleTrackOf(P, c); return !!t && t.linked !== false; };
+/** The shared look of a line: path → JSON of each leaf value (its words excluded). */
+export function linkedLook(c) {
+  const out = new Map();
+  const walk = (v, path) => {
+    if (LINK_SKIP.has(path)) return;
+    if (v && typeof v === 'object' && !Array.isArray(v)) { for (const k of Object.keys(v)) walk(v[k], `${path}.${k}`); return; }
+    out.set(path, JSON.stringify(v ?? null));
+  };
+  for (const k of LINK_KEYS) if (k in c) walk(c[k], k);
+  return out;
+}
+const getPathIn = (obj, keys) => keys.reduce((o, k) => (o == null ? undefined : o[k]), obj);
+function delPath(obj, path) {
+  const keys = path.split('.');
+  let o = obj;
+  for (let i = 0; i < keys.length - 1; i++) { o = o?.[keys[i]]; if (!o || typeof o !== 'object') return; }
+  delete o[keys[keys.length - 1]];
+}
+/**
+ * Give the other lines of c's track the parts of c's look that differ from `before` (all of it when `before` is
+ * empty). Only what changed is copied: a line's own tweaks to other things stay. Returns how many lines changed.
+ */
+export function spreadLook(P, c, before = new Map()) {
+  const after = linkedLook(c);
+  const set = [];
+  const del = [];
+  for (const [p, v] of after) if (before.get(p) !== v) set.push([p, v]);
+  for (const p of before.keys()) {
+    if (after.has(p)) continue;
+    // (a whole part gone, e.g. text.shadow: remove it, not just its leaves)
+    const keys = p.split('.');
+    let k = 1;
+    while (k < keys.length && getPathIn(c, keys.slice(0, k)) !== undefined) k++;
+    const q = keys.slice(0, k).join('.');
+    if (!del.includes(q)) del.push(q);
+  }
+  if (!set.length && !del.length) return 0;
+  let n = 0;
+  for (const o of P.clips) {
+    if (o === c || o.trackId !== c.trackId || o.type !== 'text') continue;
+    for (const p of del) delPath(o, p);
+    for (const [p, v] of set) setPath(o, p, JSON.parse(v));
+    n++;
+  }
+  return n;
+}
+/** Whether every line of c's subtitle track already looks like c. */
+export function subtitlesMatch(P, c) {
+  const look = linkedLook(c);
+  return P.clips.every((o) => {
+    if (o === c || o.trackId !== c.trackId || o.type !== 'text') return true;
+    const l = linkedLook(o);
+    if (l.size !== look.size) return false;
+    for (const [p, v] of look) if (l.get(p) !== v) return false;
+    return true;
+  });
+}
+
 export function setSpeed(P, clip, speed) {
   speed = clamp(Number(speed) || 1, 0.1, 10);
   const src = clip.duration * (clip.speed || 1);
@@ -352,10 +419,22 @@ class Store {
     if (this.past.length > 150) this.past.shift();
     this.future = [];
   }
+  /** The selected line of a linked subtitle track and its look before a change (linked subtitles, above). */
+  lookBefore() {
+    const c = this.selected();
+    return c && isLinkedSubtitle(this.project, c) ? { c, trackId: c.trackId, look: linkedLook(c) } : null;
+  }
+  /** After the change: the other lines of the track get what changed in the selected line's look. */
+  lookAfter(b) {
+    if (!b || this.clip(b.c.id) !== b.c || b.c.trackId !== b.trackId) return;
+    spreadLook(this.project, b.c, b.look);
+  }
   mutate(label, fn) {
     const snap = this._live || this.snapshot();
     this._live = null;
+    const look = this.lookBefore();
     const result = fn(this.project);
+    this.lookAfter(look);
     if (this.snapshot() !== snap) this.pushHistory(snap);
     this.normalize();
     this.touch(label);
@@ -364,7 +443,9 @@ class Store {
   /** Mutate without recording history yet (drag, slider...). Call commitLive() when done. */
   live(fn, kind = 'live') {
     if (!this._live) this._live = this.snapshot();
+    const look = this.lookBefore();
     fn(this.project);
+    this.lookAfter(look);
     this.rev++;
     this.emit(kind);
   }

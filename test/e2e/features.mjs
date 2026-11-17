@@ -5,6 +5,7 @@
 //   D. built-in sounds: louder (peak −1 dBFS), new basic sounds, remade for projects with the old ones
 //   E. favourites: a star on effects, transitions, filters, fonts, animations…; favourites listed first
 //   F–I. Crystal Clear / 4K filters, the Scholar/Abrason/Starry fonts, live transition previews, layer order
+//   J–L. cover, voice clean-up, auto subtitles; M. linked subtitles (scale one line, every line follows)
 // Needs Playwright (with Chromium) and ffmpeg. Run: npm run test:e2e
 import { createRequire } from 'node:module';
 import { spawn, execFileSync } from 'node:child_process';
@@ -428,6 +429,86 @@ try {
       await p.evaluate(() => window.najja.sheet?.close?.());
     }
   }
+
+  step('M. Subtitle tertaut: skala/posisi/ukuran satu subtitle → semua ikut; bisa dimatikan; satu langkah urung');
+  await p.evaluate(() => window.najja.sheet?.close?.());
+  const subIds = await p.evaluate(async () => {
+    const a = await import('/js/actions.js');
+    const { store } = await import('/js/store.js');
+    const ids = a.addSubtitles([{ start: 0.2, end: 1.2, text: 'Satu' }, { start: 1.3, end: 2.3, text: 'Dua dua' }, { start: 2.4, end: 3.4, text: 'Tiga' }, { start: 3.5, end: 4.5, text: 'Empat empat' }], { replace: true });
+    store.select(ids[1]);
+    window.najja.engine.pause();
+    window.najja.engine.seek(1.8);
+    return ids;
+  });
+  const subs = () => p.evaluate(async (ids) => { const { store } = await import('/js/store.js'); return ids.map((id) => { const c = store.clip(id); return { scale: c.scale, x: c.x, y: c.y, size: c.text.size, font: c.text.font, t: c.text.content }; }); }, subIds);
+  const allSame = (a, k) => a.every((x) => Math.abs(x[k] - a[0][k]) < 1e-9);
+  await p.waitForFunction(() => getComputedStyle(document.querySelector('.sel-box')).display !== 'none');
+  await wait(300);
+  // drag a corner handle of the selected line (the second) outward: it gets bigger, and so do the others
+  const s0 = await subs();
+  const h = await p.locator('.sel-box .h.br').boundingBox();
+  await p.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  await p.mouse.down();
+  for (let i = 1; i <= 8; i++) await p.mouse.move(h.x + h.width / 2 + i * 9, h.y + h.height / 2 + i * 5);
+  await p.mouse.up();
+  let s1 = await subs();
+  check(s1[1].scale > s0[1].scale * 1.1 && allSame(s1, 'scale'), `skala satu subtitle → semua (${s1.map((x) => x.scale.toFixed(2)).join(', ')})`);
+  check(s1.map((x) => x.t).join('|') === 'Satu|Dua dua|Tiga|Empat empat', 'teks tiap baris tetap miliknya');
+  // move it (drag the line itself)
+  const sb = await p.locator('.sel-box').boundingBox();
+  await p.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2);
+  await p.mouse.down();
+  for (let i = 1; i <= 6; i++) await p.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2 - i * 8);
+  await p.mouse.up();
+  const s2 = await subs();
+  check(s2[1].y < s1[1].y - 0.01 && allSame(s2, 'y') && allSame(s2, 'x'), `posisi satu subtitle → semua (y ${s2.map((x) => x.y.toFixed(3)).join(', ')})`);
+  // one undo takes back the move of every line
+  await p.evaluate(async () => { const { store } = await import('/js/store.js'); store.undo(); });
+  const s3 = await subs();
+  check(s3.every((x, i) => Math.abs(x.y - s1[i].y) < 1e-9), 'satu kali urung mengembalikan semua baris');
+  // the inspector: the switch is there and on; the size slider changes every line
+  await p.evaluate(() => window.najja.openSheet('text', { tab: 'font' }));
+  await p.waitForSelector('.sheet.in .sub-link');
+  const sw = await p.evaluate(() => { const el = document.querySelector('.sheet.in .sub-link'); return { on: el.querySelector('[data-do="subLink"]').checked, text: el.textContent.replace(/\s+/g, ' ').trim() }; });
+  check(sw.on && /4 baris/.test(sw.text), `sakelar "Terapkan ke semua subtitle" tampil & menyala (${sw.text.slice(0, 60)}…)`);
+  const num = p.locator('.sheet.in input[type=number][data-path="text.size"]');
+  await num.fill('90');
+  await num.dispatchEvent('change');
+  await p.click('.sheet.in .font-item[data-font="Bangers"]');
+  const s4 = await subs();
+  check(s4.every((x) => x.size === 90 && x.font === 'Bangers'), `ukuran & font satu subtitle → semua (${s4.map((x) => `${x.size}/${x.font}`).join(', ')})`);
+  // switched off: a change stays on its own line; "Samakan semua" brings the others along again
+  await p.click('.sheet.in .sub-link .switch-row');
+  await p.waitForFunction(() => document.querySelector('.sheet.in [data-do="subLink"]')?.checked === false);
+  await num.fill('120');
+  await num.dispatchEvent('change');
+  const s5 = await subs();
+  check(s5[1].size === 120 && s5.filter((_, i) => i !== 1).every((x) => x.size === 90), `dimatikan: hanya subtitle itu yang berubah (${s5.map((x) => x.size).join(', ')})`);
+  await p.click('.sheet.in .sub-link .switch-row');
+  await p.waitForSelector('.sheet.in [data-do="subMatch"]');
+  await p.click('.sheet.in [data-do="subMatch"]');
+  const s6 = await subs();
+  check(s6.every((x) => x.size === 120 && Math.abs(x.scale - s6[1].scale) < 1e-9), `"Samakan semua" menyamakan semua baris (${s6.map((x) => x.size).join(', ')})`);
+  check(!(await p.locator('.sheet.in [data-do="subMatch"]').count()), 'tombol "Samakan" hilang setelah semua sama');
+  // a plain text clip (not a subtitle) has no switch and changes alone
+  const plain = await p.evaluate(async () => {
+    const a = await import('/js/actions.js');
+    const { store } = await import('/js/store.js');
+    const c = a.addText({ text: 'Judul', start: 0.5 });
+    const id = c?.id || c;
+    if (!id) return null;
+    store.select(id);
+    store.mutate('t', () => { store.clip(id).scale = 2.5; });
+    const tr = store.P.tracks.find((t) => t.subtitle);
+    return { others: store.P.clips.filter((x) => x.trackId === tr.id).map((x) => x.scale), own: store.clip(id).scale };
+  });
+  if (plain) check(plain.own === 2.5 && plain.others.every((s) => s !== 2.5), 'teks biasa (bukan subtitle) tidak ikut menaut');
+  await p.evaluate(() => window.najja.sheet?.close?.());
+  await p.evaluate(() => window.najja.openSheet('caption'));
+  await p.waitForSelector('.sheet.in [data-caplink]');
+  check(await p.locator('.sheet.in [data-caplink]').isChecked(), 'panel Keterangan: kotak "Ubah satu subtitle, semua ikut" tampil');
+  await p.evaluate(() => window.najja.sheet?.close?.());
 
   check(!errors.length, `tidak ada error halaman${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } finally {
