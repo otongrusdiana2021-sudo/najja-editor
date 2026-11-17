@@ -36,7 +36,9 @@ if (PERSON) {
 }
 const port = await freePort();
 const BASE = `http://localhost:${port}`;
-const server = spawn(process.execPath, ['server.js', '--no-open'], { cwd: ROOT, env: { ...process.env, NAJJA_TOKEN: TOKEN, NAJJA_DATA_DIR: dir, PORT: String(port) }, stdio: 'ignore' });
+// (the on-device "Orang saja" path: the server's AI service is off, the switch falls back to it; "Orang + objek" with
+// the AI service is test/e2e/cutout-objects.mjs)
+const server = spawn(process.execPath, ['server.js', '--no-open'], { cwd: ROOT, env: { ...process.env, NAJJA_TOKEN: TOKEN, NAJJA_DATA_DIR: dir, PORT: String(port), NAJJA_AI: 'off', NAJJA_AI_URL: '' }, stdio: 'ignore' });
 let cleaned = false;
 const cleanup = () => { if (cleaned) return; cleaned = true; try { server.kill(); } catch { /* ignore */ } fs.rmSync(dir, { recursive: true, force: true }); };
 process.on('exit', cleanup);

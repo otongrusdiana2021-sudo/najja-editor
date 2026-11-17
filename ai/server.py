@@ -7,7 +7,7 @@ and writes files under <data>/ai, and only fetches the pinned model files listed
 
   GET  /health                         versions, memory, which models are ready
   POST /models/ensure {"names": [...]} download missing models in the background
-  POST /run {"task": "cutout"|"upscale"|"transcribe", "input": path, "output": path without extension, "scale": 2|4,
+  POST /run {"task": "cutout"|"cutoutvideo"|"upscale"|"transcribe", "input": path, "output": path without extension, "scale": 2|4,
              "language": "id"|"auto"|…}
        → NDJSON lines {"progress": 0..1, "stage": ...}; the last line is {"done": {...}} or {"error": "..."}
 
@@ -445,6 +445,51 @@ def cutout(inp, out_base, report, cancelled):
     return {'file': os.path.basename(path), 'width': W, 'height': H, 'model': name, 'subject': list(box) if box else None}
 
 
+def cutout_video(frames_dir, out_base, report, cancelled, mask_long=320):
+    """(v1.10.4) The subject of every frame of a video (person AND objects: BiRefNet; IS-Net on small servers).
+    frames_dir: the frames as JPEG (extracted by the editor with ffmpeg, in order). Writes <out>.bin.gz: one 8-bit
+    mask per frame (mask_long px on the long side), frame after frame, gzip; returns its size."""
+    import gzip
+    import numpy as np
+    from PIL import Image
+    files = sorted(f for f in os.listdir(frames_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png')))
+    if not files:
+        raise RuntimeError('tidak ada frame untuk diproses')
+    name = cutout_model()
+    if memory()['availableMB'] < MODELS[name]['memMB'] * 0.6 and name not in SESSIONS:
+        if name == 'cutout' and is_ready('cutout-lite'):
+            name = 'cutout-lite'
+        else:
+            raise RuntimeError('memori server sedang tidak cukup, coba lagi sebentar lagi')
+    report(0.02, 'model')
+    s = session(name)
+    inp_meta = s.get_inputs()[0]
+    n = inp_meta.shape[2] if isinstance(inp_meta.shape[2], int) else 1024
+    W, H = Image.open(os.path.join(frames_dir, files[0])).size
+    k = mask_long / max(W, H)
+    mw, mh = max(1, round(W * k)), max(1, round(H * k))
+    mean = np.array([0.485, 0.456, 0.406], np.float32)
+    std = np.array([0.229, 0.224, 0.225], np.float32)
+    path = out_base + '.bin.gz'
+    t0 = time.time()
+    with gzip.open(path, 'wb', compresslevel=6) as out:
+        for i, f in enumerate(files):
+            if cancelled():
+                raise Cancelled()
+            rgb = Image.open(os.path.join(frames_dir, f)).convert('RGB')
+            x = np.asarray(rgb.resize((n, n), Image.BILINEAR), dtype=np.float32) / 255.0
+            x = (x - mean) / std if name == 'cutout' else x - 0.5
+            x = np.ascontiguousarray(x.transpose(2, 0, 1)[None], dtype=np.float32)
+            y = s.run(None, {inp_meta.name: x})[0][0, 0]
+            m = 1.0 / (1.0 + np.exp(-y)) if name == 'cutout' else (y - y.min()) / max(1e-6, float(y.max() - y.min()))
+            mask = Image.fromarray((np.clip(m, 0, 1) * 255 + 0.5).astype(np.uint8)).resize((mw, mh), Image.BILINEAR)
+            out.write(mask.tobytes())
+            done = i + 1
+            left = (time.time() - t0) / done * (len(files) - done)
+            report(0.03 + 0.96 * done / len(files), f'frame {done}/{len(files)} · {round(left)}')
+    return {'file': os.path.basename(path), 'width': mw, 'height': mh, 'frames': len(files), 'model': name}
+
+
 def _positions(length, tile, step):
     if length <= tile:
         return [0]
@@ -640,7 +685,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run(self, body):
         task, inp, out = body.get('task'), _resolve(body.get('input')), _resolve(body.get('output'))
-        if task not in ('cutout', 'upscale', 'transcribe') or not inp or not out:
+        if task not in ('cutout', 'cutoutvideo', 'upscale', 'transcribe') or not inp or not out:
             return self._json(400, {'error': 'bad task or path'})
         if not os.path.exists(inp):
             return self._json(400, {'error': 'input missing'})
@@ -670,6 +715,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if task == 'cutout':
                     res = cutout(inp, out, report, lambda: gone['v'])
+                elif task == 'cutoutvideo':
+                    res = cutout_video(inp, out, report, lambda: gone['v'])
                 elif task == 'transcribe':
                     res = transcribe(inp, out, body.get('language') or 'auto', report, lambda: gone['v'])
                 else:

@@ -4,7 +4,7 @@ import { clamp, ease, hash, rand2, rgba, hexToRgb } from './util.js';
 import { drawFiltered } from './gpufx.js';
 import { kfValue } from './store.js';
 import { compilePlan, clipsAt, mainStateAt } from './plan.js';
-import { personMask } from './segment.js';
+import { cutoutMask } from './segment.js';
 
 const FILTER_MAP = Object.fromEntries(FILTERS.map((f) => [f.id, f]));
 const NEUTRAL = { brightness: 1, contrast: 1, saturate: 1, sepia: 0, grayscale: 0, invert: 0, 'hue-rotate': 0, sharpen: 0 };
@@ -564,7 +564,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
       lc.clearRect(0, 0, lw, lh);
       drawFiltered(lc, filter, src.el, sx, sy, sw, sh, 0, 0, lw, lh);
       // the person mask of this frame (from the picture before the colour overlays), applied last
-      const mask = cutout ? personMask(clip.id, L, clip.type === 'video' ? Math.round(((clip.in || 0) + local * (clip.speed || 1)) * 1000) / 1000 : 0, clip.cutout) : null;
+      const mask = cutout ? cutoutMask(clip, L, clip.type === 'video' ? Math.round(((clip.in || 0) + local * (clip.speed || 1)) * 1000) / 1000 : 0) : null;
       if (chroma && !chromaKeyGPU(L, lc, lw, lh, clip.chroma)) chromaKey(lc, lw, lh, clip.chroma);
       for (const ov of overlays) {
         lc.globalAlpha = clamp(ov.alpha, 0, 1);

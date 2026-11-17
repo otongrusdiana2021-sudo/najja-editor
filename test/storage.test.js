@@ -60,3 +60,14 @@ test('export upload lands in the exports folder with a safe name', async () => {
   assert.equal(path.dirname(done.path), exportDir);
   assert.equal(done.file, 'hasil_video.webm');
 });
+
+test('mediaFile never returns an upload still being written (source.*.tmp)', async () => {
+  const s = st;
+  const id = 'm_tmpcheck01';
+  const d = s.mediaDir(id);
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, 'source.mp4.ab12cd34.tmp'), 'half a file');
+  await assert.rejects(s.mediaFile(id), /not found/i);
+  fs.writeFileSync(path.join(d, 'source.mp4'), 'the whole file');
+  assert.equal(path.basename(await s.mediaFile(id)), 'source.mp4');
+});

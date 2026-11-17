@@ -813,6 +813,24 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       const rec = await ai.create({ owner: who.id, tool: m[1], image, mime: req.headers['content-type'], scale: url.searchParams.get('scale'), name: url.searchParams.get('name') || '', language: url.searchParams.get('lang') || 'auto' });
       return sendJson(res, 200, rec);
     }
+    // (v1.10.4) background removal of a video part ("Orang + objek"): the server reads the media file itself
+    if (p === '/api/ai/cutoutvideo' && req.method === 'POST') {
+      const body = await readJson(req);
+      const mediaId = String(body.mediaId || '');
+      await ownMedia(mediaId);
+      const st = await ai.status();
+      if (!st.available) return sendJson(res, 503, { error: st.reason || 'Layanan AI di server belum siap.' });
+      // (the editor uses a video at once while it is still being uploaded: the server waits for the whole file)
+      if (!(await storage.getMeta(mediaId).catch(() => null))?.file) return sendJson(res, 409, { error: 'Video masih diunggah ke server', code: 'uploading' });
+      const rec = await ai.createVideo({ owner: who.id, file: await storage.mediaFile(mediaId), mediaId, start: body.start, end: body.end, fps: body.fps, name: body.name || '' });
+      return sendJson(res, 200, rec);
+    }
+    if ((m = /^\/api\/masks\/(ai_[0-9a-f]{16})$/.exec(p)) && req.method === 'GET') {
+      const mk = await ai.mask(m[1], ownAi);
+      if (!mk) return sendJson(res, 404, { error: 'Not found' });
+      // (stored gzipped: the browser unpacks it)
+      return sendFile(req, res, mk.path, { 'Content-Type': 'application/octet-stream', 'Content-Encoding': 'gzip', 'Cache-Control': 'private, max-age=31536000, immutable' });
+    }
     if ((m = /^\/api\/ai\/(ai_[0-9a-f]{16})$/.exec(p))) {
       if (req.method === 'GET') { const r = await ai.get(m[1], ownAi); return r ? sendJson(res, 200, r) : sendJson(res, 404, { error: 'Not found' }); }
       if (req.method === 'DELETE') return (await ai.remove(m[1], ownAi)) ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'Not found' });

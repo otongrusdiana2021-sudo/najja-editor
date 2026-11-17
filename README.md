@@ -6,6 +6,8 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.10.4:** Hapus latar **Orang + objek**. Orang beserta tas, koper, dan produk di depannya tetap, latar saja yang hilang. Diproses sekali di server (BiRefNet) dengan progres. Mode **Orang saja** yang cepat tetap ada.
+
 **Baru di v1.10.3:** **Hapus latar otomatis** untuk video orang, tanpa layar hijau. Diproses di perangkat (MediaPipe), dan modelnya disajikan dari server Najja sendiri.
 
 **Baru di v1.10.2:** **Efek langsung ke footage**. Pilih klip, ketuk Efek, lalu pilih Terapkan ke: Klip ini. Efek menempel di klip itu saja dan ikut saat klip digeser, dipotong, atau diduplikat.

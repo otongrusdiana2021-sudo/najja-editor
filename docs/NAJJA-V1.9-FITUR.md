@@ -147,6 +147,39 @@ Pilih klip video atau foto, ketuk **Hapus Latar Belakang**, lalu nyalakan **Hapu
 
 **Asal file:** pustaka dan modelnya tidak dimuat dari CDN. Server Najja mengunduhnya sekali dari versi yang dikunci (paket npm `@mediapipe/tasks-vision` 0.10.35 dan model `selfie_segmenter.tflite`), mencocokkan sha256-nya, menyimpannya di folder data, lalu menyajikannya di `/vendor/` (`lib/vendor.js`). Unduhan pertama sekitar 10 MB.
 
+### Hapus latar "Orang + objek" (v1.10.4)
+
+Sekarang **Hapus otomatis** punya dua mode di "Yang disimpan":
+
+- **Orang + objek** (default): orang beserta barang di depannya (tas, koper, produk) tetap, latar saja yang hilang.
+  - Diproses sekali per klip di server Najja dengan **BiRefNet** (MIT). BiRefNet adalah model hapus latar yang juga dipakai alat hapus latar foto di beranda.
+  - Progres per frame dan perkiraan sisa waktu tampil di lembar. Lembar boleh ditutup atau ditinggal untuk mengedit.
+  - Selama proses berjalan, pratinjau sementara memakai Orang saja.
+  - Pilihan **Kualitas** = frame per detik yang dicek di server:
+    - **Cepat** 8 fps;
+    - **Halus** 15 fps (default);
+    - **Penuh** 30 fps.
+  - Di antara frame itu, masker dicampur halus. Pada mode Cepat dan Halus, masker orang dari perangkat ditambahkan di setiap frame, supaya tangan dan kepala yang bergerak tetap tajam.
+  - Klip duplikat atau klip lain dari video yang sama memakai masker yang sudah ada, tanpa proses baru.
+  - Kalau klip dipotong atau diperpanjang ke bagian video yang belum diproses, muncul tombol **Proses ulang**.
+  - Ekspor menunggu sampai masker siap.
+- **Orang saja (cepat)**: mode v1.10.3, langsung di perangkat (MediaPipe), khusus orang.
+
+Kalau layanan AI server tidak berjalan, sakelarnya otomatis memakai Orang saja dan memberi tahu.
+
+**Waktu proses:** sekitar 5 detik per frame di 1 CPU, lebih cepat kalau AI mendapat lebih banyak CPU (`NAJJA_AI_CPUS`). Contoh untuk klip 10 detik:
+
+| Kualitas | Jumlah frame | Perkiraan waktu (1 CPU) |
+|---|---|---|
+| Halus | ±160 | ±13 menit |
+| Cepat | ±90 | ±7 menit |
+
+**Server dengan RAM AI kecil:** di bawah ±2,5 GB, server memakai IS-Net yang lebih ringan. IS-Net lebih sering hanya menyimpan orang, jadi barang di samping orang bisa ikut terhapus. Untuk mode Orang + objek, BiRefNet disarankan.
+
+**Penyimpanan:** masker disimpan di `<data>/masks/` (milik akun pembuatnya) dan disajikan di `/api/masks/<id>`. Alurnya: `lib/ai.js` mengekstrak frame dengan ffmpeg, `ai/server.py` menjalankan tugas `cutoutvideo`, lalu `public/js/cutoutjob.js` dan `segment.js` memakainya di editor.
+
+**MCP:** `update_clip` dengan `remove_background: true | "all" | "person" | false` dan `remove_background_quality: fast | smooth | full`. Untuk mode `all`, `get_project` menampilkan `processing`/`ready`.
+
 Cara kerja lapisan efek: render menggambar lapisan dari bawah ke atas (`plan.layers`). Saat bertemu efek, efek itu diterapkan ke gambar yang sudah tersusun sejauh itu. Lapisan sesudahnya digambar di atas hasilnya, sama di pratinjau maupun ekspor.
 
 ## 13. Efek suara

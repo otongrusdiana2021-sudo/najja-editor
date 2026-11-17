@@ -352,7 +352,7 @@ export function summarizeClip(P, c) {
   if (c.solid) o.solid = c.solid;
   if (c.effect) o.effect = c.effect;
   if (c.filter && c.filter.name !== 'none') o.filter = c.filter;
-  if (c.cutout?.enabled) o.remove_background = { threshold: c.cutout.threshold ?? 0.5, edge: c.cutout.edge ?? 0.2 };
+  if (c.cutout?.enabled) o.remove_background = { mode: c.cutout.mode === 'person' ? 'person' : 'all', threshold: c.cutout.threshold ?? 0.5, edge: c.cutout.edge ?? 0.2, ...(c.cutout.mode !== 'person' ? { processing: !c.cutout.masks || !!c.cutout.job, ready: !!c.cutout.masks && !c.cutout.job, fps: c.cutout.masks?.fps ?? c.cutout.fps ?? 15 } : {}) };
   if (c.fx?.length) o.clip_effects = c.fx.map((f) => ({ effect: f.type, intensity: f.intensity }));
   if (c.transition && c.transition.type !== 'none') o.transition = c.transition;
   const anim = {};
