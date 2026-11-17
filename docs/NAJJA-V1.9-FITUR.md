@@ -101,6 +101,17 @@ Sebelumnya duplikat sering jatuh di akhir track.
 
 Untuk klip overlay, teks, dan stiker: **Paling depan**, **Maju**, **Mundur**, **Paling belakang**, dihitung di antara klip yang tumpang tindih. Klip tidak pernah turun ke bawah track utama.
 
+### Lapisan untuk efek (v1.10.1)
+
+Efek video, lapisan Filter, dan lapisan Sesuaikan sekarang juga punya tombol **Lapisan**.
+
+- Sebuah efek hanya mengenai **lapisan di bawahnya**. Lapisan di atasnya tetap seperti aslinya. Contoh: efek Hitam Putih atau Kabur ditaruh di bawah teks, maka videonya kena efek tapi teks, stiker, atau logonya tetap berwarna dan tajam.
+- Efek yang baru ditambahkan tetap masuk di lapisan **paling atas**, jadi mengenai semuanya seperti sebelumnya.
+- Proyek lama tampil dan diekspor persis sama, karena efeknya memang selalu di lapisan paling atas.
+- Efek tidak pernah turun ke bawah track utama.
+
+Cara kerjanya: render menggambar lapisan dari bawah ke atas (`plan.layers`). Saat bertemu efek, efek itu diterapkan ke gambar yang sudah tersusun sejauh itu. Lapisan sesudahnya digambar di atas hasilnya, sama di pratinjau maupun ekspor.
+
 ## 13. Efek suara
 
 - Semua suara bawaan dinormalisasi ke puncak **−1 dBFS**. Sebelumnya −6 sampai −10 dB di bawah kompresor.

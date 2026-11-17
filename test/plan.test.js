@@ -105,3 +105,28 @@ test('planFor caches per project object and revision', () => {
   assert.notEqual(planFor(P, 2), a);
   assert.notEqual(planFor({ ...P }, 2), a);
 });
+
+// v1.10.1: effects take part in the layer order ("Lapisan"): an effect changes the layers under it only.
+test('layers: effects among the pictures, bottom to top; an old project keeps its effects on top', async () => {
+  const { findOrCreateTrack } = await import('../public/js/store.js');
+  const old = randomProject(12); // (the effect track is under the main track here: still applied over everything)
+  const plan = compilePlan(old);
+  const want = [...old.tracks.filter((tr) => tr.kind !== 'audio' && tr.kind !== 'effect' && !tr.hidden).reverse().map((t) => t.id), 'fx'];
+  assert.deepEqual(plan.layers.map((l) => l.tr.id), want);
+  assert.deepEqual(plan.layers.filter((l) => l.effect).map((l) => l.tr.id), ['fx']);
+  assert.equal(plan.layers.at(-1).tr.id, 'fx', 'an old project: the effect is still the last layer (over everything)');
+  // a saved project before v1.10.1: effects first in P.tracks (normalize put them there) → still the last layer
+  const saved = { ...old, tracks: [{ id: 'fx', kind: 'effect' }, { id: 'tx', kind: 'text' }, { id: 'ov2', kind: 'overlay' }, { id: 'main', kind: 'main' }, { id: 'au', kind: 'audio' }] };
+  assert.deepEqual(compilePlan(saved).layers.map((l) => l.tr.id), ['main', 'ov2', 'tx', 'fx']);
+  // an effect moved under the text: the text is drawn after it
+  const P = { ...old, tracks: [{ id: 'tx', kind: 'text' }, { id: 'fx', kind: 'effect' }, { id: 'ov2', kind: 'overlay' }, { id: 'main', kind: 'main' }, { id: 'au', kind: 'audio' }] };
+  const L = compilePlan(P).layers.map((l) => l.tr.id);
+  assert.deepEqual(L, ['main', 'ov2', 'fx', 'tx']);
+  // a new effect is not put on that lowered effect track: it goes over everything
+  const Q = { tracks: [{ id: 'tx', kind: 'text', name: 'Teks' }, { id: 'fxLow', kind: 'effect' }, { id: 'main', kind: 'main' }], clips: [] };
+  const tr = findOrCreateTrack(Q, 'effect', 0, 3);
+  assert.notEqual(tr.id, 'fxLow');
+  assert.equal(Q.tracks.indexOf(tr), 0, 'on top');
+  const R = { tracks: [{ id: 'fxTop', kind: 'effect' }, { id: 'tx', kind: 'text' }, { id: 'main', kind: 'main' }], clips: [] };
+  assert.equal(findOrCreateTrack(R, 'effect', 0, 3).id, 'fxTop', 'the effect track on top is used as before');
+});

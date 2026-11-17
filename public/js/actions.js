@@ -1,7 +1,7 @@
 // Editing actions shared by the UI (toolbar, shortcuts, menus, panels) and the MCP API.
 import {
   store, makeClip, placeClip, splitClip, sortedClips, insertIntoMain, findFreeStart, MIN_CLIP, TRACK_KIND_FOR, clipEnd, packMain,
-  upsertKeyframe, removeKeyframe, spreadLook, subtitleTrackOf,
+  upsertKeyframe, removeKeyframe, spreadLook, subtitleTrackOf, TRACK_NAMES,
 } from './store.js';
 import { mediaRT, importCanvasAsImage } from './media.js';
 import { TEXT_PRESETS, TEXT_TEMPLATES, DEFAULT_TEXT, FILTERS, TRANSITIONS, EFFECTS, BADGES, ADJUSTMENTS } from './presets.js';
@@ -474,7 +474,8 @@ export function addAudioFromMedia(mediaId, start = now()) {
 // Layer order (v1.9, "Lapisan"): which picture is on top where clips overlap. A track's place in P.tracks is its
 // layer (the first visual track is drawn last, on top); a clip changes layer by moving to a track of its own at the
 // right place (empty tracks are removed by normalize()).
-const VISUAL_KINDS = new Set(['overlay', 'text']);
+// (v1.10.1) effects too: an effect changes the layers under it only, so its place in the order matters
+const VISUAL_KINDS = new Set(['overlay', 'text', 'effect']);
 const overlapsClip = (a, b) => a.start < b.start + b.duration - 1e-4 && b.start < a.start + a.duration - 1e-4;
 /** The clip's layer among the clips it overlaps: { index (1 = bottom), count }. */
 export function layerInfo(id) {
@@ -482,7 +483,7 @@ export function layerInfo(id) {
   const c = store.clip(id);
   if (!c || c.trackId === 'main') return null;
   const order = P.tracks.filter((t) => VISUAL_KINDS.has(t.kind)).map((t) => t.id); // top first
-  const peers = P.clips.filter((x) => (x.id === c.id || (overlapsClip(x, c) && order.includes(x.trackId))) && x.type !== 'audio' && x.type !== 'effect');
+  const peers = P.clips.filter((x) => (x.id === c.id || (overlapsClip(x, c) && order.includes(x.trackId))) && x.type !== 'audio');
   peers.sort((a, b) => order.indexOf(b.trackId) - order.indexOf(a.trackId)); // bottom first
   return { index: peers.findIndex((x) => x.id === c.id) + 1, count: peers.length, peers: peers.map((x) => x.id) };
 }
@@ -496,11 +497,11 @@ export function moveLayer(id, where) {
   store.mutate('Lapisan', (P) => {
     const c = P.clips.find((x) => x.id === id);
     const other = P.clips.find((x) => x.id === peers[target - 1]); // the clip whose place it takes
-    const kind = TRACK_KIND_FOR[c.type] === 'text' ? 'text' : 'overlay';
+    const kind = c.type === 'effect' ? 'effect' : TRACK_KIND_FOR[c.type] === 'text' ? 'text' : 'overlay';
     const oi = P.tracks.findIndex((t) => t.id === other.trackId);
     // up: just above the other clip's track (a smaller index); down: just below it
     const at = target > index ? oi : oi + 1;
-    const tr = { id: uid('t'), kind, name: kind === 'text' ? 'Teks' : 'Overlay', muted: false, hidden: false, locked: false };
+    const tr = { id: uid('t'), kind, name: TRACK_NAMES[kind] || kind, muted: false, hidden: false, locked: false };
     P.tracks.splice(at, 0, tr);
     c.trackId = tr.id;
   });

@@ -1081,21 +1081,21 @@ export function renderFrame(ctx, t, env) {
     }
   }
 
-  for (const { tr, idx } of plan.visual) {
-    if (tr.kind === 'main') {
+  // Layers bottom to top. An effect (or a filter/adjust layer) changes what is drawn so far — the layers under it;
+  // the layers above it stay as they are (v1.10.1 "Lapisan" for effects; effects on top change everything, as before).
+  for (const { tr, idx, effect } of plan.layers || [...plan.visual, ...plan.effects.map((e) => ({ ...e, effect: true }))]) {
+    if (effect) {
+      for (const c of clipsAt(idx, t)) {
+        if (c.effect?.type === 'adjust') applyAdjustLayer(ctx, c, env.s);
+        else applyEffect(ctx, c.effect, t, t - c.start, c.duration);
+      }
+    } else if (tr.kind === 'main') {
       const st = mainStateAt(plan, t);
       if (!st) continue;
       if (st.clip) drawVisualClip(ctx, st.clip, t, env);
       else drawTransition(ctx, st.A, st.B, t, clamp(st.p, 0, 1), st.type, env);
     } else {
       for (const c of clipsAt(idx, t)) drawVisualClip(ctx, c, t, env);
-    }
-  }
-
-  for (const { idx } of plan.effects) {
-    for (const c of clipsAt(idx, t)) {
-      if (c.effect?.type === 'adjust') applyAdjustLayer(ctx, c, env.s);
-      else applyEffect(ctx, c.effect, t, t - c.start, c.duration);
     }
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);

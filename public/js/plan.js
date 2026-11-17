@@ -70,10 +70,23 @@ export function compilePlan(P) {
     maxHalf: maxHalf + 0.02,
     visual: P.tracks.filter((tr) => tr.kind !== 'audio' && tr.kind !== 'effect' && !tr.hidden).reverse().map((tr) => ({ tr, idx: track(tr.id) })),
     effects: P.tracks.filter((tr) => tr.kind === 'effect' && !tr.hidden).reverse().map((tr) => ({ tr, idx: track(tr.id) })),
+    layers: layersOf(P, track),
     mainHidden: !!P.tracks.find((tr) => tr.kind === 'main')?.hidden,
     chainKeys,
     groups,
   };
+}
+
+/**
+ * (v1.10.1) Every layer bottom to top, effects among the pictures: an effect changes what is drawn under it only.
+ * An effect track under the main track (never after normalize; old data) acts as it always did: over everything.
+ */
+function layersOf(P, track) {
+  const mainAt = P.tracks.findIndex((tr) => tr.kind === 'main');
+  const list = P.tracks.map((tr, i) => ({ tr, i })).filter(({ tr }) => tr.kind !== 'audio' && !tr.hidden);
+  const low = list.filter(({ tr, i }) => tr.kind === 'effect' && mainAt >= 0 && i > mainAt);
+  const rest = list.filter((x) => !low.includes(x));
+  return [...rest.reverse(), ...low.reverse()].map(({ tr }) => ({ tr, idx: track(tr.id), effect: tr.kind === 'effect' }));
 }
 
 /** First index whose start is > t (upper bound). */

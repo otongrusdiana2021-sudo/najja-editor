@@ -5,6 +5,7 @@
 //   D. built-in sounds: louder (peak −1 dBFS), new basic sounds, remade for projects with the old ones
 //   E. favourites: a star on effects, transitions, filters, fonts, animations…; favourites listed first
 //   F–I. Crystal Clear / 4K filters, the Scholar/Abrason/Starry fonts, live transition previews, layer order
+//   I2. effects in the layer order (an effect under a text leaves the text as it is)
 //   J–L. cover, voice clean-up, auto subtitles; M. linked subtitles (scale one line, every line follows)
 // Needs Playwright (with Chromium) and ffmpeg. Run: npm run test:e2e
 import { createRequire } from 'node:module';
@@ -316,6 +317,47 @@ try {
   });
   check(lay.front.index === lay.front.count && lay.aboveB, `Paling depan: lapisan ${lay.front.index}/${lay.front.count}, digambar di atas klip lain`);
   check(lay.back.index === 1 && lay.belowB && lay.aboveMain, `Paling belakang: lapisan 1/${lay.back.count}, tetap di atas track utama`);
+
+  step('I2. Lapisan untuk efek: efek hanya mengenai lapisan di bawahnya');
+  const fxl = await p.evaluate(async () => {
+    const { store } = await import('/js/store.js');
+    const actions = await import('/js/actions.js');
+    // red text over the video, and Black & White over both (a new effect goes over everything, as before)
+    const tx = actions.addText({ text: 'MERAH', start: 5, duration: 2, style: { size: 260, color: '#ff0000', weight: 900 } });
+    const fx = actions.addEffect({ effect: 'bw', start: 5, duration: 2, intensity: 1 });
+    const txId = tx.id || tx;
+    const fxId = fx.id || fx;
+    const look = async () => {
+      const c = await window.najja.engine.capture(6, 360);
+      const x = c.getContext('2d', { willReadFrequently: true });
+      const d = x.getImageData(0, 0, c.width, c.height).data;
+      let red = 0;
+      let sat = 0;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] > 180 && d[i + 1] < 90 && d[i + 2] < 90) red++;
+        const y = Math.floor(i / 4 / c.width);
+        if (y > c.height * 0.75) { sat += Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]); n++; }
+      }
+      return { red, sat: sat / Math.max(1, n) };
+    };
+    const onTop = await look();
+    const before = actions.layerInfo(fxId);
+    actions.moveLayer(fxId, 'back');
+    const after = actions.layerInfo(fxId);
+    const under = await look();
+    const idx = (id) => store.P.tracks.findIndex((t) => t.id === store.clip(id).trackId);
+    const order = { fxBelowText: idx(fxId) > idx(txId), fxAboveMain: idx(fxId) < store.P.tracks.findIndex((t) => t.id === 'main') };
+    // a new effect still goes over everything
+    const fx2 = actions.addEffect({ effect: 'vignette', start: 5, duration: 1 });
+    const top2 = idx(fx2.id || fx2) < idx(txId);
+    actions.deleteClips([txId, fxId, fx2.id || fx2]);
+    return { onTop, under, before, after, order, top2 };
+  });
+  check(fxl.onTop.red < 50 && fxl.onTop.sat < 12, `efek di atas: teks merah ikut hitam putih (${fxl.onTop.red} px merah), video abu-abu (saturasi ${fxl.onTop.sat.toFixed(1)})`);
+  check(fxl.before.index === fxl.before.count && fxl.after.index === 1 && fxl.order.fxBelowText && fxl.order.fxAboveMain, `Lapisan efek: ${fxl.before.index}/${fxl.before.count} → ${fxl.after.index}/${fxl.after.count}, di bawah teks dan di atas track utama`);
+  check(fxl.under.red > 500 && fxl.under.sat < 12, `efek di bawah teks: teks tetap merah (${fxl.under.red} px), video tetap hitam putih (saturasi ${fxl.under.sat.toFixed(1)})`);
+  check(fxl.top2, 'efek baru tetap masuk di lapisan paling atas');
 
   step('J. Sampul: dari frame video (HD) dan dari galeri, jadi frame pertama video ekspor');
   const cov = await p.evaluate(async () => {

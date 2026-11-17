@@ -146,8 +146,8 @@ export class Toolbar {
         split, tool('volume', 'Volume', 'volume', () => this.open('volume')), tool('speed', 'Kecepatan', 'speed', () => this.open('speed')), del, dup, SEP, ...audioSoon,
       ];
       case 'effect':
-        if (c.effect?.type === 'adjust') return [filter, adjust, split, dup, del];
-        return [tool('fx-edit', 'Ganti efek', 'replace', () => this.open('effect-edit')), split, dup, del];
+        if (c.effect?.type === 'adjust') return [filter, adjust, layer, split, dup, del];
+        return [tool('fx-edit', 'Ganti efek', 'replace', () => this.open('effect-edit')), layer, split, dup, del];
       default: return [split, dup, del];
     }
   }

@@ -159,7 +159,10 @@ export class Inspector {
     const top = info.index === info.count;
     const bottom = info.index === 1;
     const b = (doId, ic, label, off) => `<button class="layer-btn" data-do="${doId}" ${off ? 'disabled' : ''}>${icon(ic, 18)}<span>${label}</span></button>`;
-    return `${sec('', `<p class="layer-pos">${info.count > 1 ? `Lapisan <b>${info.index}</b> dari ${info.count} <span class="hint">(1 = paling belakang)</span>` : '<span class="hint">Tidak ada klip lain yang tumpang tindih di waktu ini.</span>'}</p>
+    const fx = c.type === 'effect';
+    const what = fx ? (c.effect?.type === 'adjust' ? 'Lapisan ini' : 'Efek ini') : '';
+    const fxNote = fx ? `<p class="hint">${what} hanya mengenai lapisan <b>di bawahnya</b>${info.count > 1 ? (top ? ' — sekarang semua lapisan kena.' : '. Lapisan di atasnya (misalnya teks atau stiker) tetap seperti aslinya.') : '.'}</p>` : '';
+    return `${sec('', `${fxNote}<p class="layer-pos">${info.count > 1 ? `Lapisan <b>${info.index}</b> dari ${info.count} <span class="hint">(1 = paling belakang)</span>` : '<span class="hint">Tidak ada klip lain yang tumpang tindih di waktu ini.</span>'}</p>
       <div class="layer-grid">${b('layerFront', 'layers', 'Paling depan', top)}${b('layerUp', 'chevronUp', 'Maju', top)}${b('layerDown', 'chevronDown', 'Mundur', bottom)}${b('layerBack', 'layers', 'Paling belakang', bottom)}</div>`)}`;
   }
 
@@ -251,7 +254,7 @@ export class Inspector {
 
   effectPanel(c) {
     return `${sec('', `<div class="fx-grid">${EFFECTS.map((f) => `<button class="fx-chip ${c.effect.type === f.id ? 'on' : ''}" data-effect="${f.id}" style="--a:${f.colors[0]};--b:${f.colors[1]}"><span>${f.icon}</span>${f.name}</button>`).join('')}</div>`)}
-      ${sec('', `${slider('Intensitas', 'effect.intensity', 0, 100, 1, { scale: 100, unit: '%' })}<p class="hint">Efek berlaku untuk semua lapisan selama ${fmtSec(c.duration)}.</p>`)}`;
+      ${sec('', `${slider('Intensitas', 'effect.intensity', 0, 100, 1, { scale: 100, unit: '%' })}<p class="hint">Efek berlaku untuk lapisan di bawahnya selama ${fmtSec(c.duration)} (atur di Lapisan: taruh di bawah teks supaya teksnya tidak kena).</p>`)}`;
   }
 
   projectPanel() {

@@ -119,8 +119,13 @@ export function createTrack(P, kind, index) {
 }
 /** First unlocked track of `kind` that is free in [start,end); creates one if needed. Searches bottom-up for visual tracks (closest to main). */
 export function findOrCreateTrack(P, kind, start, end, excludeId) {
-  const candidates = P.tracks.filter((t) => t.kind === kind && !t.locked);
+  let candidates = P.tracks.filter((t) => t.kind === kind && !t.locked);
   if (kind === 'overlay' || kind === 'text') candidates.reverse();
+  // a new effect goes over every picture, as always: not onto an effect track moved under a layer ("Lapisan")
+  if (kind === 'effect') {
+    const firstPicture = P.tracks.findIndex((t) => t.kind === 'overlay' || t.kind === 'text');
+    if (firstPicture >= 0) candidates = candidates.filter((t) => P.tracks.indexOf(t) < firstPicture);
+  }
   for (const tr of candidates) if (!overlaps(P, tr.id, start, end, excludeId)) return tr;
   return createTrack(P, kind);
 }
@@ -535,10 +540,11 @@ class Store {
       }
     }
     packMain(P);
-    // Drop empty non-main tracks, keep display order: effects, visual overlays, main, audio
+    // Drop empty non-main tracks, keep display order: visual layers (overlays, text and effects, in their layer order:
+    // an effect can sit under a text since v1.10.1), main, audio
     const used = new Set(P.clips.map((c) => c.trackId));
     const keep = P.tracks.filter((t) => t.kind === 'main' || used.has(t.id));
-    const order = { effect: 0, overlay: 1, text: 1, main: 2, audio: 3 };
+    const order = { effect: 1, overlay: 1, text: 1, main: 2, audio: 3 };
     P.tracks = keep.map((t, i) => [t, i]).sort((a, b) => order[a[0].kind] - order[b[0].kind] || a[1] - b[1]).map(([t]) => t);
     if (this.selection && !this.clip(this.selection)) {
       this.selection = null;
