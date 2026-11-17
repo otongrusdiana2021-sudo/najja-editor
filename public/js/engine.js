@@ -6,6 +6,7 @@ import { PreviewAudio } from './audio.js';
 import { renderFrame, preloadFonts, onFontsLoaded } from './render.js';
 import { clamp } from './util.js';
 import { metrics } from './metrics.js';
+import { ensureCutout, onSegmenterReady } from './segment.js';
 
 const AC = window.AudioContext || window.webkitAudioContext;
 // A main video reporting "not enough data" for less than this is ridden out (the clock keeps going): a clip that
@@ -27,6 +28,7 @@ export class Engine {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
+    this.watchSegmenter();
     this.time = 0;
     this.playing = false;
     this.loop = false;
@@ -222,6 +224,8 @@ export class Engine {
     this.seek(Math.round((this.time + frames / fps) * fps) / fps);
   }
   requestRender() { this.needsRender = true; }
+  /** (v1.10.3) redraw once the background remover is ready (clips with "Hapus otomatis" were drawn whole until then) */
+  watchSegmenter() { if (!this.segWatch) this.segWatch = onSegmenterReady(() => this.requestRender()); }
 
   tick(now) {
     if (this.session) { if (this.session.lastTick && now - this.session.lastTick > 50) this.session.gaps++; this.session.lastTick = now; }
@@ -777,6 +781,7 @@ export class Engine {
     try {
       if (t != null) this.seek(t);
       await preloadFonts(P);
+      await ensureCutout(P);
       const stale = await this.settle(timeout);
       const w = Math.max(16, Math.min(maxW, P.width));
       const c = document.createElement('canvas');

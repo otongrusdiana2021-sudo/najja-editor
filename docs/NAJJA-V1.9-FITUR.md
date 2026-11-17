@@ -126,6 +126,27 @@ Lewat MCP: `add_effect` dengan `clip_id` menempelkan efek ke klip itu, dan `upda
 
 Cara kerjanya: klip digambar sendirian di lapisan seukuran frame, lalu efeknya diterapkan di lapisan itu. Hasilnya dipotong sesuai bentuk klip, jadi kilat atau salju tidak meluber ke luar klip. Setelah itu lapisan ditempel ke frame dengan mode campuran klip. Prosesnya sama di pratinjau dan ekspor.
 
+### Hapus latar otomatis untuk orang (v1.10.3)
+
+Pilih klip video atau foto, ketuk **Hapus Latar Belakang**, lalu nyalakan **Hapus otomatis**. Orangnya tetap, latarnya hilang, tanpa layar hijau.
+
+- **Pengaturan:**
+  - **Ketelitian**: makin tinggi, potongan makin ketat.
+  - **Tepi halus**: mengatur lebar tepi yang memudar.
+- **Klip di track utama:** latarnya diganti warna latar proyek. Tombol **Pindah ke Overlay** memindahkan klip supaya orangnya bisa ditaruh di atas video atau foto lain.
+- **Khusus untuk orang:** barang yang dipegang ikut tersimpan. Barang yang berdiri sendiri, misalnya koper di samping, ikut terhapus.
+- **Badge:** klip yang aktif diberi badge di timeline.
+- **MCP:** `update_clip` dengan `remove_background: true/false` dan `remove_background_threshold`.
+
+**Cara kerjanya:** MediaPipe Selfie Segmentation (Google, Apache-2.0) berjalan di perangkat. Prosesnya memakai GPU kalau ada, dan videonya tidak dikirim ke mana pun.
+
+- Setiap frame klip mendapat masker orang.
+- Masker dari frame yang berurutan dicampur sedikit, supaya tepinya tidak berkedip.
+- Pratinjau dan ekspor memakai proses yang sama.
+- Ekspor menunggu model siap. Kalau model tidak bisa dimuat, ekspor berhenti dengan pesan, jadi latar tidak muncul diam-diam di video hasil.
+
+**Asal file:** pustaka dan modelnya tidak dimuat dari CDN. Server Najja mengunduhnya sekali dari versi yang dikunci (paket npm `@mediapipe/tasks-vision` 0.10.35 dan model `selfie_segmenter.tflite`), mencocokkan sha256-nya, menyimpannya di folder data, lalu menyajikannya di `/vendor/` (`lib/vendor.js`). Unduhan pertama sekitar 10 MB.
+
 Cara kerja lapisan efek: render menggambar lapisan dari bawah ke atas (`plan.layers`). Saat bertemu efek, efek itu diterapkan ke gambar yang sudah tersusun sejauh itu. Lapisan sesudahnya digambar di atas hasilnya, sama di pratinjau maupun ekspor.
 
 ## 13. Efek suara

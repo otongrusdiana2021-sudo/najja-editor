@@ -226,6 +226,8 @@ export const TOOLS = [
       transition_duration: num('Transition length (s).'),
       effect: enm(ids(EFFECTS), 'Effect clips: change the effect type.'),
       intensity: num('Effect clips: strength 0-1.'),
+      remove_background: bool('Video/photo clips: cut the person out of the background ("Hapus otomatis", no green screen; best for 1-2 clearly visible people). Put the clip on an overlay track over a new background. false brings the background back.'),
+      remove_background_threshold: num('How sure the model must be that a pixel is the person, 0.1-0.9 (default 0.5; higher cuts tighter).'),
       clip_effects: { type: 'array', description: 'Video/photo/solid clips: the effects on the clip itself, replacing the current ones ([] removes them). Up to 4.', items: obj({ effect: enm(ids(EFFECTS), 'Effect id.'), intensity: num('Strength 0-1 (default 0.8).') }, ['effect']) },
       color: str('Solid clips: color. Sticker badges: background color.'),
       color2: str('Solid clips: second gradient color ("none" for a plain color).'),

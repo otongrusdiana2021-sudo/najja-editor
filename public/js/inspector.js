@@ -10,6 +10,7 @@ import { escapeHtml, getPath, setPath, clamp, fmtSec, normHex, deepMerge, clone 
 import { presetStyle } from './actions.js';
 import { favs, star, onStar } from './favs.js';
 import { startPreviews } from './previews.js';
+import { loadSegmenter, segmenterReady, segmenterError } from './segment.js';
 import * as actions from './actions.js';
 
 const sec = (title, body, extra = '') => `<section class="isec">${title ? `<div class="isec-head"><span>${title}</span>${extra}</div>` : ''}<div class="isec-body">${body}</div></section>`;
@@ -168,8 +169,19 @@ export class Inspector {
   }
 
   chromaPanel(c) {
-    return `<div class="soon-card">${icon('bgRemove', 22)}<div><b>Hapus otomatis</b><span>Memisahkan orang dari latar tanpa layar hijau. Segera hadir.</span></div></div>
-      ${sec('Kunci kroma (layar hijau/biru)', `${toggle('Hapus warna latar', 'chroma.enabled')}${c.chroma?.enabled ? `${color('Warna kunci', 'chroma.color')}${slider('Kemiripan', 'chroma.similarity', 0, 100, 1, { scale: 100, unit: '%' })}${slider('Kehalusan', 'chroma.smoothness', 0, 100, 1, { scale: 100, unit: '%' })}` : ''}`)}`;
+    // (v1.10.3) "Hapus otomatis": people cut out of their background, on this device (segment.js)
+    const on = !!c.cutout?.enabled;
+    const busy = this.cutoutBusy;
+    const err = !on && !busy && segmenterError();
+    const state = busy ? '<p class="hint">Memuat model AI ke perangkat ini (sekali saja)…</p>'
+      : err ? `<p class="hint warn">${escapeHtml(err)}</p>`
+        : on && !segmenterReady() ? '<p class="hint">Model AI sedang dimuat…</p>' : '';
+    const auto = sec('', `<label class="switch-row cut-row"><span class="cut-title">${icon('bgRemove', 20)}<span><b>Hapus otomatis</b><em>Memisahkan orang dari latar tanpa layar hijau</em></span></span><input type="checkbox" class="switch" data-do="cutout" ${on ? 'checked' : ''} ${busy ? 'disabled' : ''}></label>
+      ${state}
+      ${on ? `${slider('Ketelitian', 'cutout.threshold', 10, 90, 1, { scale: 100, unit: '%' })}${slider('Tepi halus', 'cutout.edge', 0, 60, 1, { scale: 100, unit: '%' })}
+        ${c.trackId === 'main' ? `<p class="hint">Klip ini di track utama, jadi latarnya diganti warna latar proyek. Pindahkan ke Overlay supaya orangnya bisa ditaruh di atas video atau foto lain.</p><button class="btn sm" data-do="cutToOverlay">${icon('toOverlay', 14)} Pindah ke Overlay</button>` : ''}` : ''}
+      <p class="hint">Khusus untuk <b>orang</b>: barang yang dipegang ikut tersimpan, barang yang berdiri sendiri (misalnya koper di samping) ikut terhapus. Diproses di perangkat ini, videonya tidak dikirim ke mana pun.</p>`);
+    return `${auto}${sec('Kunci kroma (layar hijau/biru)', `${toggle('Hapus warna latar', 'chroma.enabled')}${c.chroma?.enabled ? `${color('Warna kunci', 'chroma.color')}${slider('Kemiripan', 'chroma.similarity', 0, 100, 1, { scale: 100, unit: '%' })}${slider('Kehalusan', 'chroma.smoothness', 0, 100, 1, { scale: 100, unit: '%' })}` : ''}`)}`;
   }
 
   animPanel(c) {
@@ -387,6 +399,23 @@ export class Inspector {
       } catch (err) { toast(err.message, { type: 'warn' }); }
       return;
     }
+    if (d.do === 'cutout' && c) {
+      if (!t.checked) { store.mutate('Hapus latar otomatis mati', () => { const x = store.clip(c.id); x.cutout = { ...(x.cutout || {}), enabled: false }; }); return; }
+      t.checked = false;
+      this.cutoutBusy = true;
+      this.render(true);
+      loadSegmenter().then(() => {
+        this.cutoutBusy = false;
+        store.mutate('Hapus latar otomatis', () => { const x = store.clip(c.id); if (x) x.cutout = { threshold: 0.5, edge: 0.2, ...(x.cutout || {}), enabled: true }; });
+        this.engine.requestRender();
+      }).catch((err) => {
+        this.cutoutBusy = false;
+        this.render(true);
+        toast(`Hapus latar otomatis belum bisa: ${err.message}`, { type: 'error', timeout: 6000 });
+      });
+      return;
+    }
+    if (d.do === 'cutToOverlay' && c) { actions.moveToOverlay(c.id); toast('Klip dipindah ke Overlay', { type: 'ok' }); return; }
     if (d.do === 'cfxDel' && c) { actions.removeClipEffect(c.id, Number(d.i)); return; }
     if (d.do === 'cfxMain' && c) { const n = actions.clipEffectsToMain(c.id); toast(`Efek diterapkan ke ${n} klip lain di track utama`, { type: 'ok' }); return; }
     if (d.bgmode) { store.mutate('Latar', (P) => { P.background.mode = d.bgmode; }); return; }

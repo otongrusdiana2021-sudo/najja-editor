@@ -347,6 +347,17 @@ Dengan `NAJJA_URL` terisi, `mcp-stdio.js` hanya meneruskan perintah ke VPS dan t
 - Proyek, media, dan hasil ekspor tersimpan di server kamu sendiri (volume `najja-data`), tidak di layanan luar.
 - Tombol **Keluar** ada di menu akun (bulatan inisial di kanan atas), atau buka `/logout`.
 
+## Hapus latar otomatis (v1.10.3)
+
+Saat **Hapus otomatis** dipakai pertama kali, server mengunduh pustaka dan modelnya sekali (±10 MB). Sumbernya:
+
+- `registry.npmjs.org`: paket `@mediapipe/tasks-vision` 0.10.35;
+- `storage.googleapis.com`: model `selfie_segmenter.tflite`.
+
+Versinya dikunci dan sha256-nya dicek. File disimpan di `<folder data>/vendor/` dan disajikan oleh server Najja sendiri. Browser tidak memuat apa pun dari CDN.
+
+Kalau VPS memblokir akses keluar ke dua alamat itu, sakelarnya akan menampilkan pesan error. Fitur editor lain tidak terpengaruh.
+
 ## Masalah umum
 
 | Gejala | Penyebab / solusi |

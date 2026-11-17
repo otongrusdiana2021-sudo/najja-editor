@@ -4,6 +4,7 @@ import { clamp, ease, hash, rand2, rgba, hexToRgb } from './util.js';
 import { drawFiltered } from './gpufx.js';
 import { kfValue } from './store.js';
 import { compilePlan, clipsAt, mainStateAt } from './plan.js';
+import { personMask } from './segment.js';
 
 const FILTER_MAP = Object.fromEntries(FILTERS.map((f) => [f.id, f]));
 const NEUTRAL = { brightness: 1, contrast: 1, saturate: 1, sepia: 0, grayscale: 0, invert: 0, 'hue-rotate': 0, sharpen: 0 };
@@ -532,9 +533,11 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
     const filter = cssFilterFor(clip, blurUnits, pxPerUnit);
     const overlays = overlaysFor(clip);
     const chroma = clip.chroma?.enabled;
+    // (v1.10.3) "Hapus otomatis": the person stays, the background goes (segment.js)
+    const cutout = clip.cutout?.enabled && typeof document !== 'undefined';
     // An opaque video drawn normally covers its whole rectangle, so colour overlays and the vignette can go
     // straight onto the frame — same result as the separate layer, without a full-size extra copy.
-    const direct = overlays.length && !chroma && clip.type === 'video' && alpha >= 0.999
+    const direct = overlays.length && !chroma && !cutout && clip.type === 'video' && alpha >= 0.999
       && (clip.blend || 'source-over') === 'source-over' && !/blur\(/.test(filter);
     if (direct) {
       drawFiltered(ctx, filter, src.el, sx, sy, sw, sh, -size.w / 2, -size.h / 2, size.w, size.h);
@@ -549,7 +552,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
           ctx.fillRect(-size.w / 2, -size.h / 2, size.w, size.h);
         }
       }
-    } else if (overlays.length || chroma) {
+    } else if (overlays.length || chroma || cutout) {
       let lw = clamp(Math.round(size.w * pxPerUnit), 2, 4096);
       let lh = clamp(Math.round(size.h * pxPerUnit), 2, 4096);
       if (chroma && lw * lh > 1920 * 1080 && !(gpuChroma && chromaContext())) { const r = Math.sqrt((1920 * 1080) / (lw * lh)); lw = Math.round(lw * r); lh = Math.round(lh * r); }
@@ -560,6 +563,8 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
       lc.globalCompositeOperation = 'source-over';
       lc.clearRect(0, 0, lw, lh);
       drawFiltered(lc, filter, src.el, sx, sy, sw, sh, 0, 0, lw, lh);
+      // the person mask of this frame (from the picture before the colour overlays), applied last
+      const mask = cutout ? personMask(clip.id, L, clip.type === 'video' ? Math.round(((clip.in || 0) + local * (clip.speed || 1)) * 1000) / 1000 : 0, clip.cutout) : null;
       if (chroma && !chromaKeyGPU(L, lc, lw, lh, clip.chroma)) chromaKey(lc, lw, lh, clip.chroma);
       for (const ov of overlays) {
         lc.globalAlpha = clamp(ov.alpha, 0, 1);
@@ -576,6 +581,13 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
         lc.globalAlpha = 1;
         lc.globalCompositeOperation = 'destination-in';
         lc.drawImage(src.el, sx, sy, sw, sh, 0, 0, lw, lh);
+      }
+      if (mask) {
+        lc.globalAlpha = 1;
+        lc.globalCompositeOperation = 'destination-in';
+        lc.imageSmoothingEnabled = true;
+        lc.imageSmoothingQuality = 'high';
+        lc.drawImage(mask, 0, 0, lw, lh);
       }
       ctx.drawImage(L, -size.w / 2, -size.h / 2, size.w, size.h);
     } else {

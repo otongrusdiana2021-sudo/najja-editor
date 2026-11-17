@@ -12,6 +12,7 @@ import { exportState } from './exporter.js';
 import { clamp, normHex, deepMerge } from './util.js';
 import { STYLES, checkMaterial } from './styles.js';
 import { generateStyle, getTranscript } from './stylerun.js';
+import { loadSegmenter } from './segment.js';
 
 const ids = (a) => a.map((x) => x.id);
 const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -289,6 +290,17 @@ export const tools = {
       }
       if (a.name) c.name = String(a.name).slice(0, 60);
     });
+    if (a.remove_background != null) {
+      need(c.type === 'video' || c.type === 'image', 'remove_background is for video and photo clips');
+      if (a.remove_background) {
+        try { await loadSegmenter(); } catch (err) { throw new Error(`Background removal cannot run in this browser: ${err.message}`); }
+      }
+      store.mutate(a.remove_background ? 'AI: hapus latar' : 'AI: latar kembali', () => {
+        const x = store.clip(c.id);
+        x.cutout = { threshold: 0.5, edge: 0.2, ...(x.cutout || {}), enabled: !!a.remove_background };
+        if (a.remove_background_threshold != null) x.cutout.threshold = clamp(Number(a.remove_background_threshold), 0.1, 0.9);
+      });
+    }
     if (Array.isArray(a.clip_effects)) actions.setClipEffects(c.id, a.clip_effects.map((f) => ({ type: f.effect || f.type, intensity: f.intensity })));
     focus(c.id);
     return { data: summarizeClip(store.P, store.clip(c.id)) };

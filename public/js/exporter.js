@@ -5,6 +5,7 @@ import { preloadFonts } from './render.js';
 import { cacheProjectMedia, mediaRT } from './media.js';
 import { fastExport, fastExportAvailable, guard } from './fastexport.js';
 import { metrics } from './metrics.js';
+import { ensureCutout, segmenterError } from './segment.js';
 import { storage } from './storage.js';
 
 const MP4_TYPES = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4'];
@@ -103,6 +104,8 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
   const P = store.P;
   const duration = store.duration();
   if (duration <= 0) throw new Error('Timeline masih kosong');
+  // (v1.10.3) clips with "Hapus otomatis" need the segmenter; without it the export would show their background
+  if (!(await ensureCutout(P))) throw new Error(`Hapus latar otomatis belum bisa dipakai di perangkat ini: ${segmenterError() || 'model tidak termuat'}`);
   const fmts = supportedFormats();
   const wantMp4 = opts.format !== 'webm';
   const fps = Number(opts.fps) || P.fps || 30;

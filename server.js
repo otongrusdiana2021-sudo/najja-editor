@@ -21,6 +21,7 @@ import { createTenancy, LOCAL_OWNER } from './lib/tenancy.js';
 import { createProxyManager, capabilities as mediaTools } from './lib/media-proxy.js';
 import { createJobs } from './lib/jobs.js';
 import { createAi } from './lib/ai.js';
+import { createVendor } from './lib/vendor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -49,6 +50,7 @@ const MIME = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif',
   '.ico': 'image/x-icon', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac',
+  '.wasm': 'application/wasm', '.tflite': 'application/octet-stream',
   '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8', '.srt': 'text/plain; charset=utf-8',
 };
 const EXT_FROM_MIME = Object.fromEntries(Object.entries(MIME).map(([ext, mime]) => [mime.split(';')[0], ext]));
@@ -76,6 +78,8 @@ const proxies = createProxyManager({
 
 // AI tools of the home screen (background removal, upscaling): a separate Python service, jobs in the shared queue.
 const ai = createAi({ dataDir: DATA_DIR, jobs, log: (...a) => log(...a) });
+// browser libraries fetched once from a pinned version (v1.10.3: MediaPipe for background removal of people)
+const vendor = createVendor({ dir: path.join(DATA_DIR, 'vendor'), log: (...a) => log(...a) });
 process.on('exit', () => ai.stop());
 for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { ai.stop(); process.exit(0); });
 
@@ -931,6 +935,15 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       const f = localFiles.get(p.split('/')[3]);
       if (!f || f.owner !== who.id) return sendJson(res, 404, { error: 'Unknown file token' });
       return sendFile(req, res, f.abs);
+    }
+    if (p.startsWith('/vendor/')) {
+      const v = vendor.resolve(p);
+      if (!v) return sendJson(res, 404, { error: 'Not found' });
+      let base;
+      try { base = await vendor.ensure(v.name); } catch (err) {
+        return sendJson(res, 503, { error: `Server belum bisa mengunduh ${v.name}: ${err.message}` });
+      }
+      return sendFile(req, res, path.join(base, v.file), { 'Cache-Control': 'public, max-age=31536000, immutable' });
     }
     if (p.startsWith('/media-cache/')) {
       const file = path.basename(p);
