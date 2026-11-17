@@ -12,6 +12,7 @@ const fmtTime = (t) => `${fmtDur(Math.floor(Math.max(0, t)))}.${Math.floor((Math
 import { toast, confirmDialog } from './ui.js';
 import * as actions from './actions.js';
 import { Library } from './library.js';
+import { styleSheet } from './stylepanel.js';
 
 export class Sheet {
   constructor(el) {
@@ -24,7 +25,7 @@ export class Sheet {
   get id() { return this.cur?.id || null; }
 
   /** size: 'dock' covers the timeline + toolbar; 'tall' covers most of the screen. */
-  open({ id, title, size = 'dock', bound = null, render, onClose }) {
+  open({ id, title, size = 'dock', bound = null, render, onClose, keepOnLoad = null }) {
     this.close(true);
     const seq = ++this.seq;
     this.el.className = `sheet size-${size} sheet-${id}`;
@@ -33,7 +34,7 @@ export class Sheet {
     document.body.classList.add('sheet-open');
     requestAnimationFrame(() => { if (seq === this.seq) this.el.classList.add('in'); });
     const body = this.el.querySelector('.sh-body');
-    this.cur = { id, bound, dispose: null, onClose };
+    this.cur = { id, bound, dispose: null, onClose, keepOnLoad };
     this.cur.dispose = render(body) || null;
     actions.app.toolbar?.render();
   }
@@ -105,6 +106,7 @@ export function openSheet(id, opts = {}) {
   }
   if (id === 'media') { mediaSheet(sheet, opts.mode || 'append'); return; }
   if (id === 'cover') { coverSheet(sheet); return; }
+  if (id === 'style') { styleSheet(sheet); return; }
   console.warn('[najja] sheet tidak dikenal:', id);
 }
 

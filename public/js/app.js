@@ -71,7 +71,7 @@ store.on('selection', (id) => {
   document.body.classList.toggle('has-selection', !!id);
   if (sheet.cur?.bound && sheet.cur.bound !== id) sheet.close();
 });
-store.on('project', (label) => { if (label === 'load') sheet.close(); });
+store.on('project', (label) => { if (label === 'load' && !sheet.cur?.keepOnLoad?.()) sheet.close(); }); // (a sheet at work across projects stays: Style)
 
 const nameInput = topbar.querySelector('.proj-name');
 const saveState = topbar.querySelector('.save-state');
@@ -866,7 +866,7 @@ async function runExport(opts, { download = true, saveToServer = false, fromAI =
 // ---------------------------------------------------------------------------------------------
 // MCP bridge feedback
 const AI_LABEL = {
-  add_media_clip: 'menambah klip', add_text: 'menambah teks', add_subtitles: 'membuat subtitle', add_sticker: 'menambah stiker', add_solid: 'menambah latar',
+  add_media_clip: 'menambah klip', add_text: 'menambah teks', add_subtitles: 'membuat subtitle', list_styles: 'melihat style', get_transcript: 'mendengarkan video', apply_style: 'mengedit dengan style', add_sticker: 'menambah stiker', add_solid: 'menambah latar',
   add_effect: 'menambah efek', update_clip: 'mengubah klip', apply_filter: 'memasang filter', apply_transition: 'memasang transisi', split_clip: 'memisah klip',
   delete_clip: 'menghapus klip', move_clip: 'memindah klip', duplicate_clip: 'menduplikat klip', import_media: 'mengimpor media', new_project: 'membuat proyek baru',
   set_project: 'mengubah pengaturan proyek', history: 'urungkan/ulangi', export_video: 'mulai ekspor',

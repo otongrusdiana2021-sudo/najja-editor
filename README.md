@@ -6,6 +6,11 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.10: Style Konsep** (lihat [docs/STYLE-KONSEP.md](docs/STYLE-KONSEP.md))
+- Tiga konsep edit siap pakai dari 3 video sampel: **Showcase Clean**, **Editorial Review**, **Story Pop**. Pilih di tombol **Style**, isi info produk, lalu Generate. Hasilnya proyek baru, dan proyek asli tidak diubah. Bisa juga membuat ketiganya sekaligus.
+- Terhubung ke AI lewat MCP: `list_styles`, `get_transcript`, `apply_style`, serta prompt `/najja-editorial` dan sejenisnya. AI memilih kata kunci, potongan, harga, dan B-roll; mesin style mengerjakan tampilannya.
+- Elemen baru: transisi Zoom Punch, Cahaya Bocor, Piksel; animasi teks Merapat; teks coret; filter Cerah Hangat, Matte Hangat, Natural Bersih.
+
 **Baru di v1.9** (lihat [docs/NAJJA-V1.9-FITUR.md](docs/NAJJA-V1.9-FITUR.md))
 - **Subtitle otomatis** dari video atau pengisi suara, 99 bahasa (Whisper di server sendiri), tampilan seperti editor ponsel.
 - **Subtitle tertaut** (v1.9.1): ubah skala, posisi, ukuran, font, atau warna satu subtitle, semua subtitle ikut. Bisa dimatikan.

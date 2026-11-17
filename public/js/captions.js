@@ -79,9 +79,13 @@ export async function transcribeProject({ from = 'video', lang = 'id', onProgres
   await cacheProjectMedia({ ...P, clips }, (p) => onProgress(0.02 + p * 0.1, 'Menyiapkan suara…'));
   const buf = await mixForSpeech(P, clips);
   if (!buf) throw new Error('Klip yang dipilih tidak punya suara.');
-  const body = wav16(buf);
+  return transcribeWav(wav16(buf), { lang, name: P.name || 'subtitle', onProgress, signal });
+}
+
+/** A WAV (16 kHz mono) → Whisper on the server → { language, segments }. Shared by auto subtitles and Style Konsep. */
+export async function transcribeWav(body, { lang = 'id', name = 'suara', onProgress = () => {}, signal } = {}) {
   onProgress(0.15, 'Mengirim suara ke server…');
-  const r = await fetch(`/api/ai/transcribe?${new URLSearchParams({ lang, name: (P.name || 'subtitle').slice(0, 60) })}`, { method: 'POST', body, headers: { 'content-type': 'audio/wav' }, credentials: 'same-origin', signal });
+  const r = await fetch(`/api/ai/transcribe?${new URLSearchParams({ lang, name: String(name).slice(0, 60) })}`, { method: 'POST', body, headers: { 'content-type': 'audio/wav' }, credentials: 'same-origin', signal });
   let x = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(x.error || `HTTP ${r.status}`);
   const id = x.id;

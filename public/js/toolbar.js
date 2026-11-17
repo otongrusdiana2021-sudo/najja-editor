@@ -54,6 +54,7 @@ export class Toolbar {
   rootTools() {
     return [
       tool('edit', 'Edit', 'scissors', () => this.editAtPlayhead()),
+      tool('style', 'Style', 'wand', () => this.open('style')),
       tool('cat-audio', 'Audio', 'audio', () => this.openCategory('audio')),
       tool('cat-text', 'Teks', 'text', () => this.openCategory('text')),
       tool('cat-effect', 'Efek', 'effects', () => this.openCategory('effect')),
@@ -172,7 +173,7 @@ export class Toolbar {
     }
     this.items = items.filter((x) => x !== SEP);
     const active = this.app.sheet?.id;
-    const sheetFor = { volume: 'volume', anim: 'anim', 'text-anim': 'text', speed: 'speed', crop: 'crop', adjust: 'adjust', filter: 'filter', transform: 'transform', blend: 'blend', bgremove: 'bgremove', music: 'music', sfx: 'sfx', record: 'record', templates: 'templates', captions: 'caption', 'auto-text': 'caption', 'video-fx': 'effect', fx: 'effect', 'fx-edit': 'effect-edit', solid: 'solid', label: 'sticker' };
+    const sheetFor = { style: 'style', volume: 'volume', anim: 'anim', 'text-anim': 'text', speed: 'speed', crop: 'crop', adjust: 'adjust', filter: 'filter', transform: 'transform', blend: 'blend', bgremove: 'bgremove', music: 'music', sfx: 'sfx', record: 'record', templates: 'templates', captions: 'caption', 'auto-text': 'caption', 'video-fx': 'effect', fx: 'effect', 'fx-edit': 'effect-edit', solid: 'solid', label: 'sticker' };
     const html = items.map((it) => {
       if (it === SEP) return '<i class="tool-sep"></i>';
       const on = it.on || (active && sheetFor[it.id] === active);

@@ -81,7 +81,7 @@ try {
 
   // --- Layout ------------------------------------------------------------------------------
   const labels = await p.$$eval('.toolbar .tool .tool-lb', (els) => els.map((e) => e.textContent.trim()));
-  check(labels.join(',') === 'Edit,Audio,Teks,Efek,Overlay,Keterangan,Filter,Sesuaikan', `toolbar utama: ${labels.join(' · ')}`);
+  check(labels.join(',') === 'Edit,Style,Audio,Teks,Efek,Overlay,Keterangan,Filter,Sesuaikan', `toolbar utama: ${labels.join(' · ')}`);
   const geo = await p.evaluate(() => {
     const ph = document.querySelector('.tl-playhead').getBoundingClientRect();
     const sc = document.querySelector('.tl-scroll').getBoundingClientRect();

@@ -39,7 +39,7 @@ export async function preloadFonts(P) {
 // ---------------------------------------------------------------------------------------------
 // Animations
 export function computeAnim(clip, local) {
-  const r = { dx: 0, dy: 0, scale: 1, rot: 0, alpha: 1, blur: 0, reveal: 1 };
+  const r = { dx: 0, dy: 0, scale: 1, rot: 0, alpha: 1, blur: 0, reveal: 1, spread: 0 };
   const D = clip.duration;
   const ai = clip.animIn;
   const ao = clip.animOut;
@@ -71,6 +71,7 @@ function applyIn(type, p, r) {
     case 'blur': r.blur += (1 - e) * 30; r.alpha *= p; break;
     case 'rise': r.dy += (1 - e) * 0.06; r.alpha *= p; break;
     case 'typewriter': r.reveal = p; break;
+    case 'converge': r.spread = (1 - e) * 0.9; r.alpha *= Math.min(1, p * 2.5); break; // (extra letter spacing, em)
     default: break;
   }
 }
@@ -334,8 +335,8 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawText(ctx, clip, reveal, pxScale) {
-  const tx = clip.text;
+function drawText(ctx, clip, reveal, pxScale, spread = 0) {
+  const tx = spread ? { ...clip.text, letterSpacing: (clip.text.letterSpacing || 0) + spread * clip.text.size } : clip.text;
   const L = layoutText(ctx, tx);
   if (tx.bg?.enabled) {
     ctx.save();
@@ -379,6 +380,14 @@ function drawText(ctx, clip, reveal, pxScale) {
     }
     ctx.fillStyle = fill;
     ctx.fillText(shown, x, y);
+    if (tx.strike && shown) {
+      // (v1.10) struck-through text, e.g. the old price on a price label
+      const w = ctx.measureText(shown).width;
+      const x0 = tx.align === 'left' ? x : tx.align === 'right' ? x - w : x - w / 2;
+      const th = Math.max(2, tx.size * 0.075);
+      ctx.fillStyle = tx.strikeColor || fill;
+      ctx.fillRect(x0 - tx.size * 0.06, y - th / 2 + tx.size * 0.03, w + tx.size * 0.12, th);
+    }
     ctx.restore();
   });
 }
@@ -578,7 +587,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
       ctx.fillStyle = solidFill(ctx, clip.solid, size.w, size.h);
       ctx.fillRect(-size.w / 2, -size.h / 2, size.w, size.h);
     } else if (clip.type === 'text') {
-      drawText(ctx, clip, an.reveal, pxPerUnit);
+      drawText(ctx, clip, an.reveal, pxPerUnit, an.spread);
     } else if (clip.type === 'sticker') {
       drawSticker(ctx, clip);
     }
@@ -655,6 +664,57 @@ function drawTransition(ctx, A, B, t, p, type, env) {
       const pick = hash(Math.floor(t * 30)) > p ? A : B;
       const off = (hash(Math.floor(t * 30) + 7) - 0.5) * 0.08 * Math.sin(p * Math.PI);
       drawVisualClip(ctx, pick, t, env, { dx: off });
+      break;
+    }
+    // v1.10 (Style Konsep)
+    case 'punch': {
+      // zoom punch: the shot rushes in, blurred by the motion, and the next one lands from the same zoom
+      if (p < 0.5) { const q = p * 2; drawVisualClip(ctx, A, t, env, { scale: 1 + 0.35 * q * q, blur: 16 * q, noBox: true }); }
+      else { const q = (p - 0.5) * 2; drawVisualClip(ctx, B, t, env, { scale: 1.35 - 0.35 * (1 - (1 - q) ** 2), blur: 16 * (1 - q) }); }
+      break;
+    }
+    case 'leak': {
+      // light leak: a warm glow sweeps over the cut
+      drawVisualClip(ctx, p < 0.5 ? A : B, t, env, p < 0.5 ? { noBox: true } : {});
+      const k = Math.sin(Math.PI * p);
+      const R = Math.max(W, H);
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      const x1 = W * (0.1 + 0.8 * p);
+      const y1 = H * (0.3 + 0.12 * Math.sin(p * 3));
+      let g = ctx.createRadialGradient(x1, y1, 0, x1, y1, R * 0.75);
+      g.addColorStop(0, `rgba(255,178,92,${(0.95 * k).toFixed(3)})`);
+      g.addColorStop(0.45, `rgba(255,96,58,${(0.5 * k).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(255,70,40,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+      const x2 = W * (0.95 - 0.7 * p);
+      g = ctx.createRadialGradient(x2, H * 0.78, 0, x2, H * 0.78, R * 0.5);
+      g.addColorStop(0, `rgba(255,128,170,${(0.6 * k).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(255,128,170,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+      break;
+    }
+    case 'pixelate': {
+      drawVisualClip(ctx, p < 0.5 ? A : B, t, env, p < 0.5 ? { noBox: true } : {});
+      const cw = ctx.canvas.width;
+      const ch = ctx.canvas.height;
+      const block = Math.round(Math.sin(Math.PI * p) * (Math.min(cw, ch) / 16));
+      if (block > 1) {
+        const sw = Math.max(1, Math.round(cw / block));
+        const sh = Math.max(1, Math.round(ch / block));
+        const s = scratch('pixelate', sw, sh);
+        const sc = s.getContext('2d');
+        sc.imageSmoothingEnabled = true;
+        sc.drawImage(ctx.canvas, 0, 0, sw, sh);
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(s, 0, 0, cw, ch);
+        ctx.restore();
+      }
       break;
     }
     default:

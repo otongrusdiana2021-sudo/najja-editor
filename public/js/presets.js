@@ -64,6 +64,10 @@ export const FILTERS = [
   { id: 'pink', name: 'Pink', css: [['saturate', 1.1]], overlay: { color: '#ff5fa8', mode: 'soft-light', alpha: 0.34 }, cat: 'Suasana' },
   { id: 'mint', name: 'Mint', css: [['hue-rotate', 8], ['saturate', 1.08]], overlay: { color: '#3dffc2', mode: 'soft-light', alpha: 0.22 }, cat: 'Suasana' },
   { id: 'dream', name: 'Mimpi', css: [['brightness', 1.12], ['contrast', 0.9], ['saturate', 1.2]], overlay: { color: '#c79bff', mode: 'soft-light', alpha: 0.3 }, cat: 'Suasana' },
+  // v1.10: the colours of the three Style Konsep looks (styles.js), measured on the sample videos
+  { id: 'vividWarm', name: 'Cerah Hangat', css: [['brightness', 1.05], ['contrast', 1.06], ['saturate', 1.32]], overlay: { color: '#ffb347', mode: 'soft-light', alpha: 0.2 }, cat: 'Style' },
+  { id: 'warmMatte', name: 'Matte Hangat', css: [['brightness', 0.97], ['contrast', 0.88], ['saturate', 0.86]], overlay: { color: '#ffb59a', mode: 'soft-light', alpha: 0.3 }, cat: 'Style' },
+  { id: 'cleanNatural', name: 'Natural Bersih', css: [['brightness', 1.04], ['contrast', 1.04], ['saturate', 1.06]], overlay: { color: '#fff1d6', mode: 'soft-light', alpha: 0.16 }, cat: 'Style' },
 ];
 
 export const ADJUSTMENTS = [
@@ -134,6 +138,10 @@ export const TRANSITIONS = [
   { id: 'blur', name: 'Kabur', icon: '◌' },
   { id: 'spin', name: 'Putar', icon: '↻' },
   { id: 'glitch', name: 'Glitch', icon: '▚' },
+  // v1.10 (Style Konsep)
+  { id: 'punch', name: 'Zoom Punch', icon: '⊛' },
+  { id: 'leak', name: 'Cahaya Bocor', icon: '☀' },
+  { id: 'pixelate', name: 'Piksel', icon: '▦' },
 ];
 
 export const ANIM_IN = [
@@ -151,6 +159,7 @@ export const ANIM_IN = [
   { id: 'blur', name: 'Kabur' },
   { id: 'rise', name: 'Naik' },
   { id: 'typewriter', name: 'Mesin Ketik' },
+  { id: 'converge', name: 'Merapat' }, // v1.10: the letters come together (Story Pop hook)
 ];
 
 export const ANIM_OUT = [

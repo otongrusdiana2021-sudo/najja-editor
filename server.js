@@ -84,7 +84,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { ai.stop(); pr
 let primaryOwnerId = LOCAL_OWNER;
 const tenancy = createTenancy({ dataDir: DATA_DIR, exportDir: EXPORT_DIR, primaryOwner: () => primaryOwnerId, log: (...a) => log(...a) });
 
-const TOOL_TIMEOUTS = { import_media: 180_000, get_frame: 45_000, export_video: 20_000, new_project: 20_000 };
+const TOOL_TIMEOUTS = { import_media: 180_000, get_frame: 45_000, export_video: 20_000, new_project: 20_000, get_transcript: 50 * 60_000, apply_style: 50 * 60_000 };
 
 function openBrowser(url) {
   if (process.env.NAJJA_NO_OPEN === '1') return false;

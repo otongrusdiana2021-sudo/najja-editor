@@ -10,6 +10,8 @@ import * as actions from './actions.js';
 import { setAspect } from './player.js';
 import { exportState } from './exporter.js';
 import { clamp, normHex, deepMerge } from './util.js';
+import { STYLES, checkMaterial } from './styles.js';
+import { generateStyle, getTranscript } from './stylerun.js';
 
 const ids = (a) => a.map((x) => x.id);
 const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -385,6 +387,43 @@ export const tools = {
         result: s.result ? { file: s.result.filename, path: s.result.serverPath, url: s.result.serverUrl, size_bytes: s.result.size, width: s.result.width, height: s.result.height, fps: s.result.fps, duration: r3(s.result.duration || 0), mime: s.result.mime, render_seconds: s.result.seconds != null ? r3(s.result.seconds) : undefined } : undefined,
       },
     };
+  },
+
+  // ---- Style Konsep (v1.10) -------------------------------------------------------------------
+  async list_styles() {
+    const c = checkMaterial(store.P);
+    return {
+      data: {
+        styles: STYLES.map((st) => ({ id: st.id, name: st.name, about: st.about, needs: st.needs, needs_speech: st.speech, fits_material: c.styles[st.id].ok, note: c.styles[st.id].note, color_filter: st.filter, default_music: st.music })),
+        recommended: c.recommended,
+        material: { talking_videos: c.talks, other_clips: c.shots, talking_seconds: r3(c.talkSec), transcript_pending: c.pending },
+        how: 'Call get_transcript for the words and times (speech styles), write a plan, then apply_style. apply_style also works without a plan (automatic choices).',
+      },
+    };
+  },
+
+  async get_transcript(a) {
+    const sp = await getTranscript({ lang: a.language || 'id', force: !!a.refresh });
+    need(sp.words.length, 'No speech found in the project videos (no one talks, or there is no video yet). Showcase Clean needs no speech.');
+    return {
+      data: {
+        language: sp.language, duration: sp.duration, sources: sp.sources,
+        sentences: sp.sentences,
+        words: sp.words.map((w) => ({ i: w.i, w: w.w, s: w.s, e: w.e })),
+        note: 'Times are speech times: the talking videos back to back in project order, before cuts. Use them in the plan of apply_style (cuts, keywords, price, hook, broll, stickers).',
+      },
+    };
+  },
+
+  async apply_style(a) {
+    oneOf(a.style, STYLES.map((x) => x.id), 'style');
+    const p = a.product || {};
+    const product = {
+      name: p.name, variant: p.variant ?? p.variants, size: p.size ?? p.sizes, note: p.note ?? p.notes, price: p.price, price_discount: p.price_discount, brand: p.brand,
+    };
+    for (const k of Object.keys(product)) if (product[k] == null) delete product[k];
+    const res = await generateStyle(a.style, { product, plan: a.plan || null, target: a.target === 'current' ? 'current' : 'new', lang: a.language || 'id' });
+    return { data: { ...res, next: 'The edit is in the editor now. Check it with get_frame at a few times (title, a keyword, the price, the end) and adjust with update_clip or another apply_style.' } };
   },
 };
 
