@@ -437,6 +437,61 @@ export function moveToMain(clipId) {
 }
 
 /** A filter / adjustment layer: colours everything under it for its duration (purple lane). */
+// ---------------------------------------------------------------------------------------------
+// Effects on a clip itself (v1.10.2, "langsung ke footage"): clip.fx = [{ type, intensity }]. Only that clip gets
+// them, and they go wherever the clip goes (moved, trimmed, split, duplicated). At most 4 per clip.
+export const CLIP_FX_TYPES = ['video', 'image', 'solid'];
+export const CLIP_FX_MAX = 4;
+function fxClip(clipId) {
+  const c = store.clip(clipId);
+  if (!c) throw new Error(`Klip tidak ditemukan: ${clipId}`);
+  if (!CLIP_FX_TYPES.includes(c.type)) throw new Error('Efek klip hanya untuk video, foto, atau warna solid');
+  return c;
+}
+/** Put an effect on the clip, or take it off when it is there already. Returns whether it is on now. */
+export function toggleClipEffect(clipId, type, intensity = 0.8) {
+  const c = fxClip(clipId);
+  const def = EFFECTS.find((e) => e.id === type);
+  if (!def) throw new Error(`Efek tidak dikenal: ${type}`);
+  const has = (c.fx || []).some((f) => f.type === type);
+  if (!has && (c.fx || []).length >= CLIP_FX_MAX) throw new Error(`Paling banyak ${CLIP_FX_MAX} efek per klip`);
+  store.mutate(has ? `Lepas efek ${def.name}` : `Efek ${def.name} di klip`, () => {
+    if (has) c.fx = c.fx.filter((f) => f.type !== type);
+    else c.fx = [...(c.fx || []), { type, intensity }];
+    if (!c.fx.length) delete c.fx;
+  });
+  return !has;
+}
+export function removeClipEffect(clipId, index) {
+  const c = fxClip(clipId);
+  store.mutate('Hapus efek klip', () => { c.fx = (c.fx || []).filter((_, i) => i !== index); if (!c.fx.length) delete c.fx; });
+}
+/** Replace the clip's effects: [{ type, intensity }] (empty: none). */
+export function setClipEffects(clipId, list = []) {
+  const c = fxClip(clipId);
+  const fx = list.slice(0, CLIP_FX_MAX).map((f) => {
+    const type = f.type || f.effect;
+    if (!EFFECTS.some((e) => e.id === type)) throw new Error(`Efek tidak dikenal: ${type}`);
+    return { type, intensity: Math.max(0, Math.min(1, Number(f.intensity ?? 0.8))) };
+  });
+  store.mutate('Efek klip', () => { if (fx.length) c.fx = fx; else delete c.fx; });
+  return fx;
+}
+/** The clip's effects on every clip of the main track (video, photo, solid). Returns how many clips got them. */
+export function clipEffectsToMain(clipId) {
+  const c = fxClip(clipId);
+  const fx = c.fx || [];
+  let n = 0;
+  store.mutate('Efek klip ke semua', (P) => {
+    for (const x of P.clips) {
+      if (x.trackId !== 'main' || x === c || !CLIP_FX_TYPES.includes(x.type)) continue;
+      if (fx.length) x.fx = clone(fx); else delete x.fx;
+      n++;
+    }
+  });
+  return n;
+}
+
 export function addAdjustLayer({ kind = 'adjust', start, duration } = {}) {
   const t = start ?? now();
   const main = mainClipAt(t);

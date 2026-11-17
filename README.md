@@ -6,6 +6,8 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.10.2:** **Efek langsung ke footage**. Pilih klip, ketuk Efek, lalu pilih Terapkan ke: Klip ini. Efek menempel di klip itu saja dan ikut saat klip digeser, dipotong, atau diduplikat.
+
 **Baru di v1.10.1:** **Lapisan untuk efek**. Efek, Filter, dan Sesuaikan bisa diatur lapisannya. Efek hanya mengenai lapisan di bawahnya, jadi teks di atas efek tetap utuh.
 
 **Baru di v1.10: Style Konsep** (lihat [docs/STYLE-KONSEP.md](docs/STYLE-KONSEP.md))

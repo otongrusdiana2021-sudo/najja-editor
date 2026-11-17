@@ -110,7 +110,23 @@ Efek video, lapisan Filter, dan lapisan Sesuaikan sekarang juga punya tombol **L
 - Proyek lama tampil dan diekspor persis sama, karena efeknya memang selalu di lapisan paling atas.
 - Efek tidak pernah turun ke bawah track utama.
 
-Cara kerjanya: render menggambar lapisan dari bawah ke atas (`plan.layers`). Saat bertemu efek, efek itu diterapkan ke gambar yang sudah tersusun sejauh itu. Lapisan sesudahnya digambar di atas hasilnya, sama di pratinjau maupun ekspor.
+### Efek langsung ke footage (v1.10.2)
+
+Pilih klip video, foto, atau warna solid, lalu ketuk **Efek** di toolbar. Tersedia dua pilihan di **Terapkan ke**:
+
+- **Klip ini** (default): efek menempel di footage itu.
+  - Hanya klip itu yang kena. Teks, stiker, dan overlay lain tidak kena.
+  - Efek ikut saat klip digeser, dipotong, dibagi, atau diduplikat.
+  - Satu klip bisa punya sampai 4 efek, masing-masing dengan intensitas sendiri dan tombol hapus.
+  - Klip di track utama punya tombol **Terapkan efek ini ke semua klip utama**.
+  - Klip yang punya efek diberi badge ✦ di timeline.
+- **Semua lapisan**: perilaku lama. Efek ditaruh di track efek selama klip itu dan mengenai semua lapisan di bawahnya.
+
+Lewat MCP: `add_effect` dengan `clip_id` menempelkan efek ke klip itu, dan `update_clip` dengan `clip_effects` mengganti daftar efek klip (`[]` menghapus semuanya). `get_project` menampilkan `clip_effects` tiap klip.
+
+Cara kerjanya: klip digambar sendirian di lapisan seukuran frame, lalu efeknya diterapkan di lapisan itu. Hasilnya dipotong sesuai bentuk klip, jadi kilat atau salju tidak meluber ke luar klip. Setelah itu lapisan ditempel ke frame dengan mode campuran klip. Prosesnya sama di pratinjau dan ekspor.
+
+Cara kerja lapisan efek: render menggambar lapisan dari bawah ke atas (`plan.layers`). Saat bertemu efek, efek itu diterapkan ke gambar yang sudah tersusun sejauh itu. Lapisan sesudahnya digambar di atas hasilnya, sama di pratinjau maupun ekspor.
 
 ## 13. Efek suara
 

@@ -491,6 +491,8 @@ function scratch(name, w, h) {
  * extra: { dx, dy, scale, rot, alpha, blur, clip(ctx) }
  */
 export function drawVisualClip(ctx, clip, t, env, extra = {}) {
+  // (v1.10.2) effects on the clip itself: only this clip gets them, and they move with it
+  if (clip.fx?.length && !extra.noFx && typeof document !== 'undefined') { drawWithClipFx(ctx, clip, t, env, extra); return; }
   const P = env.project;
   const local = clamp(t - clip.start, 0, clip.duration);
   const an = computeAnim(clip, local);
@@ -514,7 +516,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
   ctx.save();
   if (extra.clip) extra.clip(ctx);
   ctx.globalAlpha = alpha;
-  ctx.globalCompositeOperation = clip.blend || 'source-over';
+  ctx.globalCompositeOperation = extra.plainBlend ? 'source-over' : clip.blend || 'source-over';
   ctx.translate(cx, cy);
   ctx.rotate(rot);
   ctx.scale(sc * (clip.flipH ? -1 : 1), sc * (clip.flipV ? -1 : 1));
@@ -593,6 +595,44 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
     }
     ctx.filter = 'none';
   }
+  ctx.restore();
+}
+
+/**
+ * A clip with its own effects (clip.fx, v1.10.2): the clip is drawn alone on a layer as big as the frame, its effects
+ * are applied to that layer, the result is kept inside the clip's shape (a flash or snow does not spill over the
+ * rest of the frame), and the layer goes onto the frame with the clip's blend mode.
+ */
+function drawWithClipFx(ctx, clip, t, env, extra) {
+  const cw = ctx.canvas.width;
+  const ch = ctx.canvas.height;
+  const L = scratch('clipfx', cw, ch);
+  const lc = L.getContext('2d');
+  lc.setTransform(1, 0, 0, 1, 0, 0);
+  lc.globalAlpha = 1;
+  lc.globalCompositeOperation = 'source-over';
+  lc.filter = 'none';
+  lc.clearRect(0, 0, cw, ch);
+  lc.setTransform(ctx.getTransform());
+  drawVisualClip(lc, clip, t, env, { ...extra, noFx: true, plainBlend: true });
+  const M = scratch('clipfxshape', cw, ch);
+  const mc = M.getContext('2d');
+  mc.setTransform(1, 0, 0, 1, 0, 0);
+  mc.globalCompositeOperation = 'copy';
+  mc.drawImage(L, 0, 0);
+  const local = clamp(t - clip.start, 0, clip.duration);
+  for (const fx of clip.fx.slice(0, 4)) if (fx?.type) applyEffect(lc, fx, t, local, clip.duration);
+  lc.setTransform(1, 0, 0, 1, 0, 0);
+  lc.globalAlpha = 1;
+  lc.globalCompositeOperation = 'destination-in';
+  lc.drawImage(M, 0, 0);
+  lc.globalCompositeOperation = 'source-over';
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = clip.blend || 'source-over';
+  ctx.filter = 'none';
+  ctx.drawImage(L, 0, 0);
   ctx.restore();
 }
 

@@ -352,6 +352,7 @@ export function summarizeClip(P, c) {
   if (c.solid) o.solid = c.solid;
   if (c.effect) o.effect = c.effect;
   if (c.filter && c.filter.name !== 'none') o.filter = c.filter;
+  if (c.fx?.length) o.clip_effects = c.fx.map((f) => ({ effect: f.type, intensity: f.intensity }));
   if (c.transition && c.transition.type !== 'none') o.transition = c.transition;
   const anim = {};
   if (c.animIn && c.animIn.type !== 'none') anim.in = c.animIn.type;

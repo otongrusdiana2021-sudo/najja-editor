@@ -67,6 +67,7 @@ const CLIP_SECTIONS = {
   text: ['text', 'Teks'],
   sticker: ['sticker', 'Label'],
   'effect-edit': ['effect', 'Efek'],
+  clipfx: ['clipfx', 'Efek'],
   solid: ['solid', 'Warna'],
   project: ['project', 'Pengaturan proyek'],
 };

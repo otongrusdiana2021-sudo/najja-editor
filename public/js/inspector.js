@@ -99,6 +99,7 @@ export class Inspector {
       case 'text': body = this.textPanel(c); break;
       case 'sticker': body = this.stickerPanel(c); break;
       case 'effect': body = this.effectPanel(c); break;
+      case 'clipfx': body = this.clipFxPanel(c); break;
       case 'solid': body = sec('', `${color('Warna', 'solid.color')}${toggle('Gradien', 'solid.gradient')}${c.solid?.color2 ? `${color('Warna 2', 'solid.color2')}${slider('Sudut', 'solid.angle', 0, 360, 1, { unit: '°' })}` : ''}`); break;
       default: break;
     }
@@ -252,6 +253,28 @@ export class Inspector {
       : '<p class="hint pad">Stiker emoji tidak punya pengaturan teks. Atur posisi dan ukuran lewat Transformasi.</p>';
   }
 
+  /** Effects on the footage itself (v1.10.2), or — "Semua lapisan" — on an effect track over the clip's time. */
+  clipFxPanel(c) {
+    if (!actions.CLIP_FX_TYPES.includes(c.type)) return '<p class="hint pad">Efek klip untuk video, foto, atau warna solid.</p>';
+    const toClip = (this.fxTarget || 'clip') === 'clip';
+    const applied = c.fx || [];
+    const fav = favs.pick('effect', EFFECTS);
+    const cats = [...(fav.length ? ['★ Favorit'] : []), 'Semua', ...new Set(EFFECTS.map((e) => e.cat))];
+    if (!cats.includes(this.cfxCat)) this.cfxCat = 'Semua';
+    const list = this.cfxCat === '★ Favorit' ? fav : EFFECTS.filter((e) => this.cfxCat === 'Semua' || e.cat === this.cfxCat);
+    const on = new Set(applied.map((f) => f.type));
+    const rows = applied.map((f, i) => {
+      const def = EFFECTS.find((e) => e.id === f.type);
+      return `<div class="cfx-row"><span class="cfx-name"><i style="--a:${def?.colors[0]};--b:${def?.colors[1]}">${def?.icon || '✦'}</i>${escapeHtml(def?.name || f.type)}</span>
+        ${slider('', `fx.${i}.intensity`, 0, 100, 1, { scale: 100, unit: '%' })}<button class="btn sm icon-only ghost" data-do="cfxDel" data-i="${i}" title="Hapus efek ini">${icon('trash', 15)}</button></div>`;
+    }).join('');
+    return `${sec('', `<div class="ctl ctl-inline"><label>Terapkan ke</label><div class="seg"><button class="${toClip ? 'on' : ''}" data-fxtarget="clip">Klip ini</button><button class="${toClip ? '' : 'on'}" data-fxtarget="all">Semua lapisan</button></div></div>
+      <p class="hint">${toClip ? 'Efek menempel di footage ini: hanya klip ini yang kena, dan efeknya ikut saat klip digeser, dipotong, atau diduplikat.' : `Efek ditaruh di track efek selama klip ini (${fmtSec(c.duration)}) dan mengenai semua lapisan di bawahnya.`}</p>
+      ${toClip && applied.length ? `<div class="cfx-list">${rows}</div>${c.trackId === 'main' ? '<button class="btn sm" data-do="cfxMain">Terapkan efek ini ke semua klip utama</button>' : ''}` : ''}`)}
+      <div class="chip-row">${cats.map((x) => `<button class="chip ${this.cfxCat === x ? 'on' : ''}" data-cfxcat="${x}">${x}</button>`).join('')}</div>
+      <div class="tile-grid cfx-grid">${list.map((f) => `<button class="tile fx-tile ${toClip && on.has(f.id) ? 'on' : ''}" data-cfx="${f.id}" style="--a:${f.colors[0]};--b:${f.colors[1]}"><span class="tile-art fx-${f.id}"><b>${f.icon}</b></span><em>${f.name}</em>${toClip && on.has(f.id) ? '<i class="cfx-on">✓</i>' : ''}${star('effect', f.id)}</button>`).join('')}</div>`;
+  }
+
   effectPanel(c) {
     return `${sec('', `<div class="fx-grid">${EFFECTS.map((f) => `<button class="fx-chip ${c.effect.type === f.id ? 'on' : ''}" data-effect="${f.id}" style="--a:${f.colors[0]};--b:${f.colors[1]}"><span>${f.icon}</span>${f.name}</button>`).join('')}</div>`)}
       ${sec('', `${slider('Intensitas', 'effect.intensity', 0, 100, 1, { scale: 100, unit: '%' })}<p class="hint">Efek berlaku untuk lapisan di bawahnya selama ${fmtSec(c.duration)} (atur di Lapisan: taruh di bawah teks supaya teksnya tidak kena).</p>`)}`;
@@ -351,6 +374,21 @@ export class Inspector {
       return;
     }
     if (d.fps) { store.mutate('FPS', (P) => { P.fps = Number(d.fps); }); return; }
+    if (d.fxtarget) { this.fxTarget = d.fxtarget; this.render(true); return; }
+    if (d.cfxcat) { this.cfxCat = d.cfxcat; this.render(true); return; }
+    if (d.cfx && c) {
+      try {
+        if ((this.fxTarget || 'clip') === 'clip') actions.toggleClipEffect(c.id, d.cfx);
+        else {
+          actions.addEffect({ effect: d.cfx, start: c.start, duration: c.duration });
+          store.select(c.id);
+          toast('Efek ditaruh di track efek selama klip ini', { type: 'ok' });
+        }
+      } catch (err) { toast(err.message, { type: 'warn' }); }
+      return;
+    }
+    if (d.do === 'cfxDel' && c) { actions.removeClipEffect(c.id, Number(d.i)); return; }
+    if (d.do === 'cfxMain' && c) { const n = actions.clipEffectsToMain(c.id); toast(`Efek diterapkan ke ${n} klip lain di track utama`, { type: 'ok' }); return; }
     if (d.bgmode) { store.mutate('Latar', (P) => { P.background.mode = d.bgmode; }); return; }
     if (d.do === 'magnet') { actions.setMagnet(t.checked); return; }
     if (!c) return;

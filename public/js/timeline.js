@@ -304,6 +304,7 @@ export class Timeline {
     const badges = [];
     if (c.speed && c.speed !== 1) badges.push(`<span class="cb">${c.speed}x</span>`);
     if (c.filter && c.filter.name !== 'none') badges.push(`<span class="cb">${icon('filter', 10)}</span>`);
+    if (c.fx?.length) badges.push(`<span class="cb cb-fx" title="Efek di klip: ${c.fx.map((f) => EFFECTS.find((e) => e.id === f.type)?.name || f.type).join(', ')}">${icon('effects', 10)}</span>`);
     if ((c.animIn?.type && c.animIn.type !== 'none') || (c.animOut?.type && c.animOut.type !== 'none') || (c.animLoop?.type && c.animLoop.type !== 'none')) badges.push(`<span class="cb">${icon('wand', 10)}</span>`);
     if (c.muted || (tr.kind === 'main' && tr.muted && c.type === 'video')) badges.push(`<span class="cb">${icon('mute', 10)}</span>`);
     const nameLine = tr.kind === 'main'

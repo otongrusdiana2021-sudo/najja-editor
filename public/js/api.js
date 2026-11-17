@@ -238,6 +238,14 @@ export const tools = {
 
   async add_effect(a) {
     oneOf(a.effect, ids(EFFECTS), 'effect');
+    if (a.clip_id) {
+      // (v1.10.2) on the footage itself: only that clip, and it moves with the clip
+      const target = getClip(a.clip_id);
+      const list = (target.fx || []).filter((f) => f.type !== a.effect);
+      actions.setClipEffects(target.id, [...list, { type: a.effect, intensity: a.intensity ?? 0.8 }]);
+      focus(target.id);
+      return { data: summarizeClip(store.P, store.clip(target.id)) };
+    }
     const c = actions.addEffect({ effect: a.effect, start: a.start, duration: a.duration || 3, intensity: a.intensity ?? 0.7 });
     focus(c.id);
     return { data: summarizeClip(store.P, c) };
@@ -281,6 +289,7 @@ export const tools = {
       }
       if (a.name) c.name = String(a.name).slice(0, 60);
     });
+    if (Array.isArray(a.clip_effects)) actions.setClipEffects(c.id, a.clip_effects.map((f) => ({ type: f.effect || f.type, intensity: f.intensity })));
     focus(c.id);
     return { data: summarizeClip(store.P, store.clip(c.id)) };
   },

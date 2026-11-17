@@ -100,7 +100,8 @@ export class Toolbar {
     const del = tool('delete', 'Hapus', 'trash', () => actions.deleteClips([id]));
     const dup = tool('dup', 'Duplikat', 'copy', () => actions.duplicateClip(id));
     const anim = tool('anim', 'Animasi', 'anim', () => this.open('anim'));
-    const fx = tool('fx', 'Efek', 'effects', () => this.open('effect', { range: { start: c.start, duration: c.duration } }));
+    // (v1.10.2) effects straight onto the footage; "Semua lapisan" in the panel puts them on an effect track instead
+    const fx = tool('fx', 'Efek', 'effects', () => this.open('clipfx'), { on: !!c.fx?.length });
     const adjust = tool('adjust', 'Sesuaikan', 'adjust', () => this.open('adjust'));
     const filter = tool('filter', 'Filter', 'filter', () => this.open('filter'));
     const transform = tool('transform', 'Transformasi', 'transform', () => this.open('transform'));
@@ -173,7 +174,7 @@ export class Toolbar {
     }
     this.items = items.filter((x) => x !== SEP);
     const active = this.app.sheet?.id;
-    const sheetFor = { style: 'style', volume: 'volume', anim: 'anim', 'text-anim': 'text', speed: 'speed', crop: 'crop', adjust: 'adjust', filter: 'filter', transform: 'transform', blend: 'blend', bgremove: 'bgremove', music: 'music', sfx: 'sfx', record: 'record', templates: 'templates', captions: 'caption', 'auto-text': 'caption', 'video-fx': 'effect', fx: 'effect', 'fx-edit': 'effect-edit', solid: 'solid', label: 'sticker' };
+    const sheetFor = { style: 'style', volume: 'volume', anim: 'anim', 'text-anim': 'text', speed: 'speed', crop: 'crop', adjust: 'adjust', filter: 'filter', transform: 'transform', blend: 'blend', bgremove: 'bgremove', music: 'music', sfx: 'sfx', record: 'record', templates: 'templates', captions: 'caption', 'auto-text': 'caption', 'video-fx': 'effect', fx: 'clipfx', 'fx-edit': 'effect-edit', solid: 'solid', label: 'sticker' };
     const html = items.map((it) => {
       if (it === SEP) return '<i class="tool-sep"></i>';
       const on = it.on || (active && sheetFor[it.id] === active);

@@ -5,7 +5,7 @@
 //   D. built-in sounds: louder (peak −1 dBFS), new basic sounds, remade for projects with the old ones
 //   E. favourites: a star on effects, transitions, filters, fonts, animations…; favourites listed first
 //   F–I. Crystal Clear / 4K filters, the Scholar/Abrason/Starry fonts, live transition previews, layer order
-//   I2. effects in the layer order (an effect under a text leaves the text as it is)
+//   I2. effects in the layer order (an effect under a text leaves the text as it is); I3. effects on a clip itself
 //   J–L. cover, voice clean-up, auto subtitles; M. linked subtitles (scale one line, every line follows)
 // Needs Playwright (with Chromium) and ffmpeg. Run: npm run test:e2e
 import { createRequire } from 'node:module';
@@ -358,6 +358,70 @@ try {
   check(fxl.before.index === fxl.before.count && fxl.after.index === 1 && fxl.order.fxBelowText && fxl.order.fxAboveMain, `Lapisan efek: ${fxl.before.index}/${fxl.before.count} → ${fxl.after.index}/${fxl.after.count}, di bawah teks dan di atas track utama`);
   check(fxl.under.red > 500 && fxl.under.sat < 12, `efek di bawah teks: teks tetap merah (${fxl.under.red} px), video tetap hitam putih (saturasi ${fxl.under.sat.toFixed(1)})`);
   check(fxl.top2, 'efek baru tetap masuk di lapisan paling atas');
+
+  step('I3. Efek langsung ke footage: hanya klip itu yang kena, ikut saat dibagi/diduplikat');
+  const cfx = await p.evaluate(async () => {
+    const { store } = await import('/js/store.js');
+    const actions = await import('/js/actions.js');
+    const at = 6;
+    const main = store.P.clips.find((c) => c.trackId === 'main' && c.start <= at && c.start + c.duration > at);
+    const tx = actions.addText({ text: 'MERAH', start: 5, duration: 2, style: { size: 260, color: '#ff0000', weight: 900 } });
+    const txId = tx.id || tx;
+    const look = async (boxes) => {
+      const c = await window.najja.engine.capture(at, 360);
+      const x = c.getContext('2d', { willReadFrequently: true });
+      const d = x.getImageData(0, 0, c.width, c.height).data;
+      let red = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 180 && d[i + 1] < 90 && d[i + 2] < 90) red++;
+      const sat = boxes.map(([x0, y0, x1, y1]) => {
+        let s = 0; let n = 0;
+        for (let y = Math.floor(y0 * c.height); y < y1 * c.height; y++) for (let xx = Math.floor(x0 * c.width); xx < x1 * c.width; xx++) {
+          const i = (y * c.width + xx) * 4; s += Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]); n++;
+        }
+        return s / Math.max(1, n);
+      });
+      return { red, sat };
+    };
+    const bottom = [0, 0.78, 1, 1];
+    const plain = await look([bottom]);
+    actions.toggleClipEffect(main.id, 'bw', 1);
+    const onMain = await look([bottom]);
+    const fxMain = store.clip(main.id).fx?.map((f) => f.type).join(',');
+    actions.toggleClipEffect(main.id, 'bw');
+    // an overlay (top left quarter) with the effect: only the overlay is grey
+    const ov = actions.addMediaClip(main.mediaId, { track: 'overlay', start: 5, duration: 2 });
+    const ovId = ov.id || ov;
+    store.mutate('t', () => Object.assign(store.clip(ovId), { scale: 0.4, x: -0.25, y: -0.25 }));
+    actions.toggleClipEffect(ovId, 'bw', 1);
+    const ovBox = [0.15, 0.15, 0.35, 0.35];
+    const onOverlay = await look([ovBox, bottom]);
+    // split and duplicate keep the effect on every piece; the effect type is on the timeline as a badge
+    actions.splitAt(6, ovId);
+    const pieces = store.P.clips.filter((c) => c.mediaId === main.mediaId && c.trackId === store.clip(ovId).trackId && c.start >= 4.9 && c.start < 7);
+    const dup = actions.duplicateClip(ovId);
+    const dupFx = store.clip(dup.id || dup).fx?.[0]?.type;
+    const n = actions.clipEffectsToMain ? 1 : 0;
+    actions.deleteClips([txId, ...pieces.map((c) => c.id), dup.id || dup]);
+    return { plain, onMain, fxMain, onOverlay, splitFx: pieces.map((c) => c.fx?.[0]?.type), dupFx, n, mainLeft: store.clip(main.id).fx };
+  });
+  check(cfx.fxMain === 'bw' && cfx.onMain.sat[0] < 6 && cfx.plain.sat[0] > 20 && cfx.onMain.red > 500, `Hitam Putih di footage utama: video abu-abu (saturasi ${cfx.plain.sat[0].toFixed(0)} → ${cfx.onMain.sat[0].toFixed(1)}), teks di atasnya tetap merah (${cfx.onMain.red} px)`);
+  check(cfx.onOverlay.sat[0] < 6 && cfx.onOverlay.sat[1] > 20, `efek di overlay: overlay abu-abu (saturasi ${cfx.onOverlay.sat[0].toFixed(1)}), video utama tetap berwarna (${cfx.onOverlay.sat[1].toFixed(0)})`);
+  check(cfx.splitFx.length === 2 && cfx.splitFx.every((x) => x === 'bw') && cfx.dupFx === 'bw' && !cfx.mainLeft, `efek ikut saat klip dibagi (${cfx.splitFx.join(', ')}) dan diduplikat (${cfx.dupFx}); dilepas lagi dari footage utama`);
+  // MCP: add_effect with clip_id; update_clip clip_effects [] removes them
+  const mainAt = await p.evaluate(async () => (await import('/js/store.js')).store.P.clips.find((c) => c.trackId === 'main' && c.start <= 6 && c.start + c.duration > 6).id);
+  const r1 = await mcp('add_effect', { effect: 'vhs', clip_id: mainAt, intensity: 0.5 });
+  const r2 = await mcp('update_clip', { clip_id: mainAt, clip_effects: [] });
+  check(r1.clip_effects?.[0]?.effect === 'vhs' && r1.clip_effects[0].intensity === 0.5 && !r2.clip_effects, 'MCP: add_effect dengan clip_id menempel di klip; update_clip clip_effects [] melepasnya');
+  // the UI: select the footage, Efek, tap an effect → on the clip, badge on the timeline
+  await p.evaluate(async (id) => { const { store } = await import('/js/store.js'); store.select(id); window.najja.engine.seek(6); }, mainAt);
+  await p.click('.tool[data-tool="fx"]');
+  await p.waitForSelector('.sheet.in [data-cfx="rgbSplit"]');
+  await p.click('.sheet.in [data-cfx="rgbSplit"]');
+  await p.waitForSelector('.sheet.in .cfx-row');
+  const ui = await p.evaluate(async (id) => ({ fx: (await import('/js/store.js')).store.clip(id).fx?.map((f) => f.type), badge: !!document.querySelector(`.clip[data-id="${id}"] .cb-fx`), row: document.querySelector('.sheet.in .cfx-name')?.textContent.trim(), target: document.querySelector('.sheet.in [data-fxtarget="clip"]')?.classList.contains('on') }), mainAt);
+  check(ui.fx?.join() === 'rgbSplit' && ui.row === '◫Pisah RGB' && ui.target, `lembar Efek klip: "Terapkan ke: Klip ini", ketuk Pisah RGB → menempel di klip (${ui.fx?.join()})${ui.badge ? ', badge di timeline' : ''}`);
+  await p.evaluate(() => window.najja.sheet?.close?.());
+  await p.evaluate(async (id) => { const a = await import('/js/actions.js'); a.setClipEffects(id, []); }, mainAt);
 
   step('J. Sampul: dari frame video (HD) dan dari galeri, jadi frame pertama video ekspor');
   const cov = await p.evaluate(async () => {

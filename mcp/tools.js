@@ -188,9 +188,10 @@ export const TOOLS = [
   {
     name: 'add_effect',
     title: 'Add video effect',
-    description: 'Add a full-frame video effect (glitch, shake, VHS, snow, confetti and more) on an effect track. It applies to everything under it while it is active.',
+    description: 'Add a video effect (glitch, shake, VHS, snow, confetti and more). Without clip_id it goes on an effect track and applies to every layer under it while it is active. With clip_id it goes onto that footage itself (video, photo or solid): only that clip gets it, and it moves, trims and splits with the clip (up to 4 per clip; adding one that is there changes its intensity).',
     inputSchema: obj({
       effect: enm(ids(EFFECTS), 'Effect id.'),
+      clip_id: str('Put the effect on this clip only (a video, photo or solid clip id from get_project).'),
       start: num('Start time in seconds (default: the playhead).'),
       duration: num('Duration in seconds (default 3).'),
       intensity: num('Strength from 0 to 1 (default 0.7).', { minimum: 0, maximum: 1 }),
@@ -225,6 +226,7 @@ export const TOOLS = [
       transition_duration: num('Transition length (s).'),
       effect: enm(ids(EFFECTS), 'Effect clips: change the effect type.'),
       intensity: num('Effect clips: strength 0-1.'),
+      clip_effects: { type: 'array', description: 'Video/photo/solid clips: the effects on the clip itself, replacing the current ones ([] removes them). Up to 4.', items: obj({ effect: enm(ids(EFFECTS), 'Effect id.'), intensity: num('Strength 0-1 (default 0.8).') }, ['effect']) },
       color: str('Solid clips: color. Sticker badges: background color.'),
       color2: str('Solid clips: second gradient color ("none" for a plain color).'),
       name: str('Clip label shown on the timeline.'),
