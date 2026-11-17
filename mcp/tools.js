@@ -2,6 +2,7 @@
 import {
   ASPECTS, FILTERS, EFFECTS, TRANSITIONS, ANIM_IN, ANIM_OUT, ANIM_LOOP, TEXT_PRESETS, TEXT_TEMPLATES, FONTS, BLEND_MODES, RESOLUTIONS,
 } from '../public/js/presets.js';
+import { KINETIC, SPRINGS } from '../public/js/kinetic.js';
 
 const ids = (arr) => arr.map((a) => a.id);
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -45,6 +46,13 @@ const TEXT_STYLE = {
   shadow: bool('Drop shadow on or off.'),
   gradient_from: str('Gradient start color. Set it together with gradient_to to use a gradient fill, or set "none" to turn the gradient off.'),
   gradient_to: str('Gradient end color.'),
+  // (v1.12) kinetic text
+  text_motion: enm(ids(KINETIC), 'Kinetic text: the words / letters / lines move on their own with spring motion, like code-made motion graphics. Entrances (one piece after another): wordPop, wordRise, wordSlam, wordBlur, wordSwing, lineReveal, charSlide, charDrop, charWave, charFlip, typeCursor, scramble. Emphasis through the clip: karaoke (the word being said lights up and grows; on auto subtitles exactly when it is said), highlighter (a marker block sweeps behind each line), counter (numbers count up to their value, e.g. a price). Loops: waveLoop, glitch. "none" turns it off. Works together with animation_in/out/loop.'),
+  text_motion_spring: enm(Object.keys(SPRINGS), 'How pieces move into place: smooth (no overshoot), bouncy (overshoots and settles), snappy (fast, firm), gentle (slow).'),
+  text_motion_stagger: num('Seconds between one piece and the next (default per animation, about 0.03 for letters, 0.1 for words). Shortened automatically when the clip is too short.', { minimum: 0.005, maximum: 1 }),
+  text_motion_speed: num('Faster (>1) or slower (<1) motion, 0.25-3 (default 1).', { minimum: 0.25, maximum: 3 }),
+  text_motion_color: str('Highlight colour (hex) of karaoke and highlighter (default #FFE600).'),
+  text_motion_out: enm(['none', 'reverse'], 'Entrances only: "reverse" makes the pieces leave one after another at the end of the clip.'),
 };
 
 const ADJUST = obj(Object.fromEntries(
@@ -146,7 +154,10 @@ export const TOOLS = [
       items: {
         type: 'array',
         description: 'Caption lines with start and end times in seconds.',
-        items: obj({ start: num('Start time (s).'), end: num('End time (s).'), text: str('Caption text.') }, ['start', 'end', 'text']),
+        items: obj({
+          start: num('Start time (s).'), end: num('End time (s).'), text: str('Caption text.'),
+          words: { type: 'array', description: 'Optional: [start, end] in seconds (timeline) of each word of the text, e.g. from get_transcript. With a kinetic text_motion, each word then moves exactly when it is said.', items: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 } },
+        }, ['start', 'end', 'text']),
       },
       preset: enm(ids(TEXT_PRESETS), 'Style preset (default "subtitle").'),
       y: num('Vertical position as a fraction from center (default 0.36, near the bottom).'),
@@ -154,6 +165,10 @@ export const TOOLS = [
       font: enm([...FONTS.map((f) => f.name), ...FONTS.filter((f) => f.label).map((f) => f.label)], 'Font family (or the name it is shown with, e.g. "Scholar").'),
       color: str('Text color.'),
       animation_in: enm(ids(ANIM_IN), 'Entrance animation applied to every caption.'),
+      text_motion: TEXT_STYLE.text_motion,
+      text_motion_spring: TEXT_STYLE.text_motion_spring,
+      text_motion_speed: TEXT_STYLE.text_motion_speed,
+      text_motion_color: TEXT_STYLE.text_motion_color,
       replace_existing: bool('Delete the existing subtitle track first.'),
     }, ['items']),
   },

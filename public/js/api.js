@@ -13,6 +13,7 @@ import { clamp, normHex, deepMerge } from './util.js';
 import { STYLES, checkMaterial } from './styles.js';
 import { generateStyle, getTranscript } from './stylerun.js';
 import { startBgRemove, cancelBgRemove, bgStatus } from './bgremove.js';
+import { KINETIC, SPRINGS, makeMotion } from './kinetic.js';
 
 const ids = (a) => a.map((x) => x.id);
 const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -42,9 +43,10 @@ function applyTextStyle(tx, a) {
   if (a.preset) {
     oneOf(a.preset, ids(TEXT_PRESETS), 'preset');
     const content = tx.content;
+    const keep = { ...(tx.motion ? { motion: tx.motion } : {}), ...(tx.words ? { words: tx.words } : {}) }; // (the look changes, not the animation or word times)
     const base = actions.presetStyle(a.preset);
     for (const k of Object.keys(tx)) delete tx[k];
-    Object.assign(tx, base, { content });
+    Object.assign(tx, base, { content }, keep);
   }
   if (a.font) { a.font = fontFamily(a.font); oneOf(a.font, FONTS.map((f) => f.name), 'font'); tx.font = a.font; }
   if (a.size != null) tx.size = clamp(Number(a.size), 8, 600);
@@ -62,6 +64,20 @@ function applyTextStyle(tx, a) {
   }
   if (a.background_opacity != null) tx.bg.opacity = clamp(Number(a.background_opacity), 0, 1);
   if (a.shadow != null) tx.shadow.enabled = !!a.shadow;
+  // (v1.12) kinetic text
+  const kOpts = ['text_motion_spring', 'text_motion_stagger', 'text_motion_speed', 'text_motion_color', 'text_motion_out'].some((k) => a[k] != null);
+  if (a.text_motion === 'none') delete tx.motion;
+  else if (a.text_motion != null || kOpts) {
+    const type = oneOf(a.text_motion ?? tx.motion?.type, ids(KINETIC), 'text_motion');
+    need(type, 'text_motion is needed (no kinetic animation on this text yet)');
+    const base = tx.motion?.type === type ? tx.motion : { speed: tx.motion?.speed, color: tx.motion?.color, out: tx.motion?.out };
+    if (a.text_motion_spring != null) oneOf(a.text_motion_spring, Object.keys(SPRINGS), 'text_motion_spring');
+    if (a.text_motion_color != null) color(a.text_motion_color, 'text_motion_color');
+    tx.motion = makeMotion(type, {
+      spring: a.text_motion_spring ?? base.spring, stagger: a.text_motion_stagger ?? base.stagger, speed: a.text_motion_speed ?? base.speed,
+      color: a.text_motion_color != null ? normHex(a.text_motion_color) : base.color, out: a.text_motion_out ?? base.out,
+    });
+  }
   if (a.gradient_from === 'none' || a.gradient_to === 'none') tx.gradient.enabled = false;
   else if (a.gradient_from || a.gradient_to) {
     if (a.gradient_from) tx.gradient.from = color(a.gradient_from, 'gradient_from');
@@ -219,7 +235,13 @@ export const tools = {
       preset: a.preset || 'subtitle', y: a.y ?? 0.36, size: a.size, font: a.font, color: a.color ? color(a.color) : undefined,
       animIn: a.animation_in || 'fade', replace: !!a.replace_existing,
     });
-    return { data: { created: created.length, clip_ids: created, track: store.P.tracks.find((t) => t.subtitle)?.id } };
+    // (v1.12) kinetic captions: every line the same (they are linked)
+    if (a.text_motion && a.text_motion !== 'none') {
+      const k = { text_motion: a.text_motion, text_motion_spring: a.text_motion_spring, text_motion_speed: a.text_motion_speed, text_motion_color: a.text_motion_color };
+      store.mutate('AI: subtitle kinetik', () => { for (const id of created) { const c = store.clip(id); if (c?.text) applyTextStyle(c.text, k); } });
+    }
+    const timed = created.filter((id) => Array.isArray(store.clip(id)?.text?.words)).length;
+    return { data: { created: created.length, clip_ids: created, track: store.P.tracks.find((t) => t.subtitle)?.id, ...(a.text_motion ? { text_motion: a.text_motion, lines_timed_to_speech: timed } : {}) } };
   },
 
   async add_sticker(a) {

@@ -216,6 +216,8 @@ export function splitClip(P, clip, t) {
     b.keyframes = all.filter((k) => k.t >= d).map((k) => ({ ...k, t: k.t - d }));
   }
   if ('fadeOut' in clip) { clip.fadeOut = 0; b.fadeIn = 0; }
+  // (v1.12) a subtitle's word times are from its start: the second part's start later
+  if (Array.isArray(b.text?.words)) b.text.words = b.text.words.map(([s, e]) => [Math.round((s - d) * 1000) / 1000, Math.round((e - d) * 1000) / 1000]);
   P.clips.splice(P.clips.indexOf(clip) + 1, 0, b);
   return b;
 }
@@ -270,7 +272,7 @@ export function removeKeyframe(clip, local) {
 // and every line of the track follows. Each line keeps its own words and times. On by default; the switch
 // "Terapkan ke semua subtitle" (track.linked = false) lets the lines be styled one by one.
 const LINK_KEYS = ['x', 'y', 'scale', 'rotation', 'flipH', 'flipV', 'opacity', 'blend', 'animIn', 'animOut', 'animLoop', 'text'];
-const LINK_SKIP = new Set(['text.content']);
+const LINK_SKIP = new Set(['text.content', 'text.words']); // (each line's own words and their times)
 export const subtitleTrackOf = (P, c) => (c?.type === 'text' ? P.tracks.find((t) => t.id === c.trackId && t.subtitle) || null : null);
 export const isLinkedSubtitle = (P, c) => { const t = subtitleTrackOf(P, c); return !!t && t.linked !== false; };
 /** The shared look of a line: path → JSON of each leaf value (its words excluded). */
@@ -352,6 +354,7 @@ export function summarizeClip(P, c) {
   if ('volume' in c) { o.volume = c.volume; if (c.muted) o.muted = true; }
   if ('x' in c) Object.assign(o, { x: r(c.x), y: r(c.y), scale: r(c.scale), rotation: r(c.rotation), opacity: r(c.opacity) });
   if (c.text) Object.assign(o, { text: c.text.content, font: c.text.font, size: c.text.size, color: c.text.color, preset: c.text.preset });
+  if (c.text?.motion) o.text_motion = { ...c.text.motion, ...(Array.isArray(c.text.words) ? { timed_to_speech: true } : {}) };
   if (c.sticker) o.sticker = c.sticker.badge ? { badge: c.sticker.badge.text } : { emoji: c.sticker.emoji };
   if (c.solid) o.solid = c.solid;
   if (c.effect) o.effect = c.effect;

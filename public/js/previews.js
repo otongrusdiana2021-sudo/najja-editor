@@ -4,10 +4,11 @@
 import { makeClip } from './store.js';
 import { compilePlan } from './plan.js';
 import { renderFrame } from './render.js';
+import { kineticById, makeMotion } from './kinetic.js';
 
 const PW = 320;
 const PH = 200;
-const LOOP = { tr: 2.2, in: 1.8, out: 1.8, loop: 2.4 };
+const LOOP = { tr: 2.2, in: 1.8, out: 1.8, loop: 2.4, kin: 2.6 };
 
 /** Two sample pictures (A before the cut, B after it), made once. */
 let scenes = null;
@@ -56,6 +57,16 @@ function setup(spec, target) {
     const P = project([A, B]);
     // 0.4 s of A, the transition, 0.4 s of B, a short pause on A again
     return { P, plan: compilePlan(P), time: (u) => 0.6 + u * (LOOP.tr - 0.2) * (1.6 / 2.0) };
+  }
+  if (kind === 'kin') {
+    // (v1.12) kinetic text: a short sample text doing it, then a pause
+    const k = kineticById(id);
+    const [content, size] = k?.sample ? [k.sample, 50] : k?.id === 'karaoke' ? ['Kata per kata', 40] : k?.id === 'highlighter' ? ['Stabilo ini', 46]
+      : k?.unit === 'line' ? ['Satu baris\nlagi baris', 40] : k?.unit === 'char' ? ['Halo!', 72] : ['Halo dunia', 48];
+    const T = makeClip('text', { id: 'T', trackId: 'tx', start: 0, duration: 2.4, text: { content, size, font: 'Poppins', weight: 800, color: '#ffffff', align: 'center', lineHeight: 1.15, stroke: { enabled: true, color: '#000000', width: 5 }, ...(makeMotion(id) ? { motion: makeMotion(id) } : {}) } });
+    const bg = makeClip('image', { id: 'B', trackId: 'main', start: 0, duration: 2.4, mediaId: 'B' });
+    const P = project([bg, T]);
+    return { P, plan: compilePlan(P), time: (u) => Math.min(2.39, u * LOOP.kin) };
   }
   const anim = kind === 'in' ? { animIn: { type: id, duration: 0.7 } } : kind === 'out' ? { animOut: { type: id, duration: 0.7 } } : { animLoop: { type: id, speed: 1 } };
   const clip = target === 'text'

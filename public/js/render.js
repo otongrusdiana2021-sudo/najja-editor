@@ -5,6 +5,7 @@ import { drawFiltered } from './gpufx.js';
 import { kfValue } from './store.js';
 import { compilePlan, clipsAt, mainStateAt } from './plan.js';
 import { cutoutMask } from './segment.js';
+import { drawKinetic } from './kinetic.js';
 
 const FILTER_MAP = Object.fromEntries(FILTERS.map((f) => [f.id, f]));
 const NEUTRAL = { brightness: 1, contrast: 1, saturate: 1, sepia: 0, grayscale: 0, invert: 0, 'hue-rotate': 0, sharpen: 0 };
@@ -14,12 +15,13 @@ const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans
 // Fonts: make sure canvas text uses loaded web fonts
 const fontRequests = new Set();
 let fontListener = null;
+let fontEpoch = 0; // (counts finished font loads: measured text layouts made before are stale)
 export function onFontsLoaded(fn) { fontListener = fn; }
 function ensureFont(family, weight, italic) {
   const key = `${italic ? 'italic ' : ''}${weight} ${family}`;
   if (fontRequests.has(key) || typeof document === 'undefined' || !document.fonts) return;
   fontRequests.add(key);
-  document.fonts.load(`${italic ? 'italic ' : ''}${weight} 40px "${family}"`).then(() => fontListener?.()).catch(() => {});
+  document.fonts.load(`${italic ? 'italic ' : ''}${weight} 40px "${family}"`).then(() => { fontEpoch++; fontListener?.(); }).catch(() => {});
 }
 export function fontWeightFor(family, weight) {
   const f = FONTS.find((x) => x.name === family);
@@ -336,7 +338,29 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawText(ctx, clip, reveal, pxScale, spread = 0) {
+/** One run of text in the text's look: shadow, outline, then the fill (ctx.textAlign decides what x is). */
+function paintText(ctx, tx, str, x, y, fill, s) {
+  ctx.save();
+  if (tx.shadow?.enabled) {
+    ctx.shadowColor = rgba(tx.shadow.color, tx.shadow.opacity ?? 0.6);
+    ctx.shadowBlur = (tx.shadow.blur || 0) * s;
+    ctx.shadowOffsetX = (tx.shadow.x || 0) * s;
+    ctx.shadowOffsetY = (tx.shadow.y || 0) * s;
+  }
+  if (tx.stroke?.enabled && tx.stroke.width > 0) {
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.lineWidth = tx.stroke.width * 2;
+    ctx.strokeStyle = tx.stroke.color;
+    ctx.strokeText(str, x, y);
+    ctx.shadowColor = 'transparent';
+  }
+  ctx.fillStyle = fill;
+  ctx.fillText(str, x, y);
+  ctx.restore();
+}
+
+function drawText(ctx, clip, reveal, pxScale, spread = 0, local = 0) {
   const tx = spread ? { ...clip.text, letterSpacing: (clip.text.letterSpacing || 0) + spread * clip.text.size } : clip.text;
   const L = layoutText(ctx, tx);
   if (tx.bg?.enabled) {
@@ -351,41 +375,58 @@ function drawText(ctx, clip, reveal, pxScale, spread = 0) {
   const x = tx.align === 'left' ? -L.w / 2 : tx.align === 'right' ? L.w / 2 : 0;
   const total = L.lines.reduce((a, l) => a + l.length, 0);
   let budget = reveal >= 1 ? Infinity : Math.floor(total * reveal);
-  let fill = tx.color || '#fff';
-  if (tx.gradient?.enabled) {
-    const g = ctx.createLinearGradient(0, -L.h / 2, 0, L.h / 2);
+  // the fill: the text colour, or its gradient from the top of the text to the bottom (fillAt: for a piece of a
+  // kinetic text, whose context may be moved to that piece)
+  const grad = (dy) => {
+    const g = ctx.createLinearGradient(0, -L.h / 2 + dy, 0, L.h / 2 + dy);
     g.addColorStop(0, tx.gradient.from);
     g.addColorStop(1, tx.gradient.to);
-    fill = g;
-  }
+    return g;
+  };
+  const fill = tx.gradient?.enabled ? grad(0) : tx.color || '#fff';
+  const fillAt = (y, moved = false) => (tx.gradient?.enabled ? (moved ? grad(-y) : fill) : fill);
   const s = Math.abs(pxScale) || 1;
+  // (v1.12) Teks kinetik: words / letters that move on their own (kinetic.js)
+  if (tx.motion?.type && tx.motion.type !== 'none') {
+    const o = { local, D: clip.duration, L, tx, reveal, pxScale, epoch: fontEpoch, fillAt, paint: (c, str, px, py, f) => paintText(c, tx, str, px, py, f, s) };
+    if (drawKinetic(ctx, o)) {
+      if (tx.strike) {
+        L.lines.forEach((line, i) => {
+          const a = o.lineAlpha ? (o.lineAlpha.has(i) ? o.lineAlpha.get(i) : 1) : 1;
+          if (!line || a <= 0.01) return;
+          const w = ctx.measureText(line).width;
+          const x0 = tx.align === 'left' ? -L.w / 2 : tx.align === 'right' ? L.w / 2 - w : -w / 2;
+          const y = -L.h / 2 + i * L.lineH + L.lineH / 2;
+          const th = Math.max(2, tx.size * 0.075);
+          ctx.save();
+          ctx.globalAlpha *= a;
+          ctx.fillStyle = tx.strikeColor || (typeof fill === 'string' ? fill : tx.color || '#fff');
+          ctx.fillRect(x0 - tx.size * 0.06, y - th / 2 + tx.size * 0.03, w + tx.size * 0.12, th);
+          ctx.restore();
+        });
+      }
+      return;
+    }
+  }
   L.lines.forEach((line, i) => {
     if (budget <= 0) return;
     const shown = budget === Infinity ? line : line.slice(0, budget);
     if (budget !== Infinity) budget -= line.length;
     const y = -L.h / 2 + i * L.lineH + L.lineH / 2;
     ctx.save();
-    if (tx.shadow?.enabled) {
-      ctx.shadowColor = rgba(tx.shadow.color, tx.shadow.opacity ?? 0.6);
-      ctx.shadowBlur = (tx.shadow.blur || 0) * s;
-      ctx.shadowOffsetX = (tx.shadow.x || 0) * s;
-      ctx.shadowOffsetY = (tx.shadow.y || 0) * s;
-    }
-    if (tx.stroke?.enabled && tx.stroke.width > 0) {
-      ctx.lineJoin = 'round';
-      ctx.miterLimit = 2;
-      ctx.lineWidth = tx.stroke.width * 2;
-      ctx.strokeStyle = tx.stroke.color;
-      ctx.strokeText(shown, x, y);
-      ctx.shadowColor = 'transparent';
-    }
-    ctx.fillStyle = fill;
-    ctx.fillText(shown, x, y);
+    paintText(ctx, tx, shown, x, y, fill, s);
     if (tx.strike && shown) {
       // (v1.10) struck-through text, e.g. the old price on a price label
       const w = ctx.measureText(shown).width;
       const x0 = tx.align === 'left' ? x : tx.align === 'right' ? x - w : x - w / 2;
       const th = Math.max(2, tx.size * 0.075);
+      // (the strike line gets the shadow when the text has no outline, as before)
+      if (tx.shadow?.enabled && !(tx.stroke?.enabled && tx.stroke.width > 0)) {
+        ctx.shadowColor = rgba(tx.shadow.color, tx.shadow.opacity ?? 0.6);
+        ctx.shadowBlur = (tx.shadow.blur || 0) * s;
+        ctx.shadowOffsetX = (tx.shadow.x || 0) * s;
+        ctx.shadowOffsetY = (tx.shadow.y || 0) * s;
+      }
       ctx.fillStyle = tx.strikeColor || fill;
       ctx.fillRect(x0 - tx.size * 0.06, y - th / 2 + tx.size * 0.03, w + tx.size * 0.12, th);
     }
@@ -601,7 +642,7 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
       ctx.fillStyle = solidFill(ctx, clip.solid, size.w, size.h);
       ctx.fillRect(-size.w / 2, -size.h / 2, size.w, size.h);
     } else if (clip.type === 'text') {
-      drawText(ctx, clip, an.reveal, pxPerUnit, an.spread);
+      drawText(ctx, clip, an.reveal, pxPerUnit, an.spread, local);
     } else if (clip.type === 'sticker') {
       drawSticker(ctx, clip);
     }

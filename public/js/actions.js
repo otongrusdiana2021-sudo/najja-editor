@@ -6,6 +6,7 @@ import {
 import { mediaRT, importCanvasAsImage } from './media.js';
 import { TEXT_PRESETS, TEXT_TEMPLATES, DEFAULT_TEXT, FILTERS, TRANSITIONS, EFFECTS, BADGES, ADJUSTMENTS } from './presets.js';
 import { clone, deepMerge, uid } from './util.js';
+import { wordCount } from './kinetic.js';
 import { toast } from './ui.js';
 
 export const app = { engine: null, timeline: null, library: null, inspector: null, player: null, toolbar: null, openSheet: null };
@@ -358,6 +359,9 @@ export function addSubtitles(items, { preset = 'subtitle', y = 0.36, size, font,
       if (size) tx.size = size;
       if (font) tx.font = font;
       if (color) tx.color = color;
+      // (v1.12) the times of its words, from the line's start, when they match the words of the line
+      const said = Array.isArray(it.words) ? it.words.filter((w) => Array.isArray(w) && Number.isFinite(Number(w[0])) && Number.isFinite(Number(w[1]))) : [];
+      if (said.length && said.length === wordCount(tx.content)) tx.words = said.map(([a, b]) => [Math.round((Number(a) - start) * 1000) / 1000, Math.round((Number(b) - start) * 1000) / 1000]);
       const c = makeClip('text', { text: tx, start, duration: end - start, y, name: tx.content.slice(0, 40), trackId: tr.id, animIn: { type: animIn || 'none', duration: 0.25 } });
       // avoid overlaps on the subtitle track
       const prev = P.clips.filter((x) => x.trackId === tr.id && x.start < c.start + c.duration && x.start + x.duration > c.start);

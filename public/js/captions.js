@@ -117,7 +117,9 @@ export function cuesFromSegments(segments, { maxChars = LINE_LENGTH.medium, uppe
   const push = (words, fallback) => {
     const text = (fallback ?? words.map((w) => w.word).join('')).replace(/\s+/g, ' ').trim();
     if (!text) return;
-    cues.push({ start: words[0].start, end: words[words.length - 1].end, text: upper ? text.toUpperCase() : text });
+    // (v1.12) each word's time, for kinetic text that pops or lights up as the word is said
+    const said = fallback == null ? words.filter((w) => w.word.trim()).map((w) => [w.start, w.end]) : null;
+    cues.push({ start: words[0].start, end: words[words.length - 1].end, text: upper ? text.toUpperCase() : text, ...(said ? { words: said } : {}) });
   };
   for (const s of segments || []) {
     const words = (s.words || []).filter((w) => w.word && w.end > w.start - 1e-3);

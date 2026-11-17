@@ -12,6 +12,7 @@ import { favs, star, onStar } from './favs.js';
 import { startPreviews } from './previews.js';
 import { startBgRemove, redoBgRemove, cancelBgRemove, bgStatus, bgStale, onBgProgress } from './bgremove.js';
 import * as actions from './actions.js';
+import { KINETIC, KINETIC_GROUPS, SPRINGS, kineticById, makeMotion } from './kinetic.js';
 
 const sec = (title, body, extra = '') => `<section class="isec">${title ? `<div class="isec-head"><span>${title}</span>${extra}</div>` : ''}<div class="isec-body">${body}</div></section>`;
 
@@ -207,6 +208,12 @@ export class Inspector {
   }
 
   animPanel(c) {
+    if (this.animTab === 'kin' && c.type !== 'text') this.animTab = 'in';
+    const tabs = `<div class="seg wide">${[['in', 'Masuk', 'animIn'], ['out', 'Keluar', 'animOut'], ['loop', 'Kombo', 'animLoop'], ...(c.type === 'text' ? [['kin', 'Kinetik', null]] : [])].map(([id, n, k]) => {
+      const set = k ? c[k]?.type && c[k].type !== 'none' : !!c.text?.motion?.type;
+      return `<button class="${this.animTab === id ? 'on' : ''}" data-animtab="${id}">${n}${set ? ' •' : ''}</button>`;
+    }).join('')}</div>`;
+    if (this.animTab === 'kin') return tabs + this.kineticPanel(c);
     const lists = { in: ANIM_IN, out: ANIM_OUT, loop: ANIM_LOOP };
     const keys = { in: 'animIn', out: 'animOut', loop: 'animLoop' };
     const key = keys[this.animTab];
@@ -217,11 +224,39 @@ export class Inspector {
     const fav = favs.pick(favKind, all);
     const items = [...fav, ...all.filter((a) => !fav.includes(a))];
     return `
-      <div class="seg wide">${[['in', 'Masuk'], ['out', 'Keluar'], ['loop', 'Kombo']].map(([id, n]) => `<button class="${this.animTab === id ? 'on' : ''}" data-animtab="${id}">${n}${c[keys[id]]?.type && c[keys[id]].type !== 'none' ? ' •' : ''}</button>`).join('')}</div>
+      ${tabs}
       <div class="anim-grid">${items.map((a) => `<button class="anim-chip ${cur === a.id ? 'on' : ''}" data-anim="${a.id}" data-key="${key}"><canvas class="anim-prev" data-prev="${this.animTab}:${a.id}" data-target="${c.type === 'text' ? 'text' : 'visual'}" width="128" height="80"></canvas><span>${a.name}</span>${a.id !== 'none' ? star(favKind, a.id) : ''}</button>`).join('')}</div>
       ${cur !== 'none' ? (this.animTab === 'loop'
         ? slider('Kecepatan', 'animLoop.speed', 0.25, 4, 0.05, { unit: 'x', decimals: 2 })
         : slider('Durasi', `${key}.duration`, 0.1, Math.max(0.2, Math.min(5, c.duration)), 0.1, { unit: 's', decimals: 1 })) : ''}`;
+  }
+
+  /** (v1.12) Teks kinetik: words / letters that move on their own, with spring motion (kinetic.js). */
+  kineticPanel(c) {
+    const m = c.text?.motion || null;
+    const cur = m?.type || 'none';
+    const k = kineticById(cur);
+    const chip = (a) => `<button class="anim-chip ${cur === a.id ? 'on' : ''}" data-kin="${a.id}"><canvas class="anim-prev" data-prev="kin:${a.id}" data-target="text" width="128" height="80"></canvas><span>${a.name}</span>${a.id !== 'none' ? star('kin', a.id) : ''}</button>`;
+    const fav = favs.pick('kin', KINETIC.filter((a) => a.id !== 'none'));
+    const groups = [
+      ...(fav.length ? [['★ Favorit', fav]] : []),
+      ...KINETIC_GROUPS.map(([g, name], i) => [name, [...(i === 0 ? [KINETIC[0]] : []), ...KINETIC.filter((a) => a.group === g)]]),
+    ];
+    const timed = Array.isArray(c.text?.words) && c.text.words.length > 0;
+    let ctl = '';
+    if (k && k.id !== 'none') {
+      if (k.spring) ctl += `<div class="ctl"><label>Gaya gerak</label><div class="chip-row">${Object.entries(SPRINGS).map(([id, sp]) => `<button class="chip ${m.spring === id ? 'on' : ''}" data-kspring="${id}">${sp.name}</button>`).join('')}</div></div>`;
+      if (k.stagger != null) ctl += slider(k.unit === 'char' ? 'Jeda antar huruf' : k.unit === 'line' ? 'Jeda antar baris' : 'Jeda antar kata', 'text.motion.stagger', 0.01, 0.5, 0.005, { unit: 's', decimals: 3 });
+      ctl += slider('Kecepatan', 'text.motion.speed', 0.25, 3, 0.05, { unit: 'x', decimals: 2 });
+      if (k.color) ctl += color('Warna sorot', 'text.motion.color');
+      if (k.group === 'in') ctl += `<div class="ctl"><label>Keluar</label><div class="seg">${[['none', 'Tetap'], ['reverse', 'Kebalikan']].map(([id, n]) => `<button class="${(m.out || 'none') === id ? 'on' : ''}" data-kout="${id}">${n}</button>`).join('')}</div></div>`;
+      if (timed && (k.unit === 'word' || k.unit === 'char') && (k.group === 'in' || k.id === 'karaoke')) ctl += '<p class="hint ok">Subtitle otomatis: tiap kata bergerak tepat saat diucapkan.</p>';
+      else if (k.group === 'in') ctl += '<p class="hint">Kata/huruf masuk bergantian; kalau klipnya pendek, jedanya dirapatkan supaya semua masuk.</p>';
+    }
+    return `
+      <p class="hint">Teks bergerak per kata, per huruf, atau per baris dengan gerak pegas. Bisa digabung dengan animasi Masuk/Keluar/Kombo klip.</p>
+      ${ctl ? `<div class="kin-ctl">${ctl}</div>` : ''}
+      ${groups.map(([name, list]) => `${name ? `<h5 class="kin-h">${name}</h5>` : ''}<div class="anim-grid">${list.map(chip).join('')}</div>`).join('')}`;
   }
 
   adjustPanel() {
@@ -448,13 +483,26 @@ export class Inspector {
       this.previewAnim(c, d.key);
       return;
     }
+    if (d.kin) {
+      mut('Teks kinetik', (x) => {
+        const old = x.text.motion || {};
+        const m = makeMotion(d.kin, { speed: old.speed, out: old.out, color: old.color });
+        if (m) x.text.motion = m; else delete x.text.motion;
+      });
+      this.render(true);
+      if (d.kin !== 'none') this.previewKinetic(store.clip(c.id));
+      return;
+    }
+    if (d.kspring) { mut('Gaya gerak', (x) => { if (x.text.motion) x.text.motion.spring = d.kspring; }); this.render(true); this.previewKinetic(store.clip(c.id)); return; }
+    if (d.kout) { mut('Keluar kinetik', (x) => { if (x.text.motion) x.text.motion.out = d.kout; }); this.render(true); return; }
     if (d.speed) { mut('Kecepatan', (x) => setSpeed(store.P, x, Number(d.speed))); return; }
     if (d.preset) {
       mut('Gaya teks', (x) => {
         const content = x.text.content;
         const size = x.text.size;
+        const keep = { ...(x.text.motion ? { motion: x.text.motion } : {}), ...(x.text.words ? { words: x.text.words } : {}) };
         const base = presetStyle(d.preset);
-        x.text = deepMerge(base, { content });
+        x.text = { ...deepMerge(base, { content }), ...keep };
         if (!TEXT_PRESETS.find((p) => p.id === d.preset)?.style.size) x.text.size = size;
       });
       return;
@@ -526,6 +574,16 @@ export class Inspector {
     E.seek(start);
     E.play();
     const stopAt = Math.min(end, key === 'animLoop' ? c.start + Math.min(c.duration, 2.5) : end);
+    const off = E.on((kind) => { if (kind === 'time' && E.time >= stopAt) { E.pause(); off(); } if (kind === 'pause') off(); });
+  }
+
+  /** Play a text clip from its start (its kinetic animation), up to 3 seconds. */
+  previewKinetic(c) {
+    if (!c) return;
+    const E = this.engine;
+    E.seek(c.start);
+    E.play();
+    const stopAt = c.start + Math.min(c.duration - 0.01, 3);
     const off = E.on((kind) => { if (kind === 'time' && E.time >= stopAt) { E.pause(); off(); } if (kind === 'pause') off(); });
   }
 

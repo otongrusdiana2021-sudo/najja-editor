@@ -15,6 +15,7 @@
 import { makeClip, MIN_CLIP } from './store.js';
 import { TEXT_PRESETS, DEFAULT_TEXT } from './presets.js';
 import { clone, deepMerge, uid } from './util.js';
+import { makeMotion, wordCount } from './kinetic.js';
 
 export const STYLES = [
   {
@@ -284,7 +285,8 @@ export function placeWords(words, group) {
 export function lines(words, maxChars = 28) {
   const out = [];
   let cur = [];
-  const flush = () => { if (cur.length) out.push({ start: cur[0].s, end: cur.at(-1).e, text: cur.map((w) => w.w.trim()).join(' ').replace(/\s+([,.!?…])/g, '$1') }); cur = []; };
+  // (words: each word's time, for kinetic captions that light up as the word is said)
+  const flush = () => { if (cur.length) out.push({ start: cur[0].s, end: cur.at(-1).e, text: cur.map((w) => w.w.trim()).join(' ').replace(/\s+([,.!?…])/g, '$1'), words: cur.map((w) => [w.s, w.e]) }); cur = []; };
   for (const w of words) {
     if (FILLER.has(norm(w.w))) continue;
     const text = [...cur, w].map((x) => x.w.trim()).join(' ');
@@ -361,7 +363,7 @@ function addMusic(P, music, total, volume) {
   }
   return n;
 }
-function addSubtitleTrack(P, cues, style, { avoid = [], y = 0.34, anim = 'fade', upper = false, lower = false } = {}) {
+function addSubtitleTrack(P, cues, style, { avoid = [], y = 0.34, anim = 'fade', upper = false, lower = false, motion = null } = {}) {
   const tr = newTrack(P, 'text', 'Subtitle', { subtitle: true });
   let n = 0;
   for (const c of cues) {
@@ -371,6 +373,11 @@ function addSubtitleTrack(P, cues, style, { avoid = [], y = 0.34, anim = 'fade',
     if (avoid.some((a) => Math.min(a.end, c.end) - Math.max(a.start, c.start) > d * 0.5)) continue;
     const clip = text(upper ? c.text.toUpperCase() : lower ? c.text.toLowerCase() : c.text, style, { start: r3(c.start), duration: r3(Math.max(MIN_CLIP, d)), y, animIn: { type: anim, duration: 0.15 } });
     clip.trackId = tr.id;
+    // (v1.12) kinetic captions, each word on its time
+    if (motion) {
+      clip.text.motion = makeMotion(motion.type, motion);
+      if (Array.isArray(c.words) && c.words.length === wordCount(clip.text.content)) clip.text.words = c.words.map(([a, b]) => [r3(a - c.start), r3(b - c.start)]);
+    }
     P.clips.push(clip);
     n++;
   }
@@ -541,7 +548,7 @@ function buildEditorial(P, st, product, opts) {
       const now = formatPrice(price.discount || price.normal || product.price);
       const was = price.discount ? formatPrice(price.normal || product.price) : '';
       if (was && was !== now) big(text(was, { font: 'Poppins', weight: 600, size: 72, color: '#ffffff', strike: true, strikeColor: '#ff4d4d', shadow: { enabled: true, color: '#000000', opacity: 0.45, blur: 10, x: 0, y: 3 } }, { start: r3(s), duration: r3(d), y: -0.04, animIn: { type: 'fade', duration: 0.2 }, animOut: { type: 'fade', duration: 0.2 } }));
-      big(text(now, { font: 'Anton', weight: 400, size: 150, color: '#1b1b1b', bg: { enabled: true, color: CREAM, opacity: 1, radius: 22, padding: 0.75 } }, { start: r3(s + 0.25), duration: r3(d - 0.25), y: 0.06, rotation: -3, animIn: { type: 'pop', duration: 0.32 }, animOut: { type: 'fade', duration: 0.2 } }));
+      big(text(now, { font: 'Anton', weight: 400, size: 150, color: '#1b1b1b', bg: { enabled: true, color: CREAM, opacity: 1, radius: 22, padding: 0.75 }, motion: makeMotion('counter', { speed: 1.4 }) }, { start: r3(s + 0.25), duration: r3(d - 0.25), y: 0.06, rotation: -3, animIn: { type: 'pop', duration: 0.32 }, animOut: { type: 'fade', duration: 0.2 } }));
       big(text('!!', { font: 'Anton', weight: 400, size: 170, color: '#ff3b30', shadow: { enabled: true, color: '#000000', opacity: 0.3, blur: 0, x: 4, y: 6 } }, { start: r3(s + 0.5), duration: r3(d - 0.5), x: 0.33, y: -0.02, rotation: 12, animIn: { type: 'pop', duration: 0.28 }, animLoop: { type: 'pulse', speed: 1 } }));
       busy.push({ start: s, end: s + d });
       // leaving the price: pixelate on the next cut
@@ -573,7 +580,7 @@ function buildEditorial(P, st, product, opts) {
     const s = outroStart;
     blurTail(P, s);
     big(text(plan.outro?.text || 'bye', { font: 'Instrument Serif', weight: 400, italic: true, size: 150, color: '#ffffff' }, { start: r3(s + 0.1), duration: 1.4, y: -0.05, animIn: { type: 'fade', duration: 0.35 } }));
-    if (brand) big(text(brand.toUpperCase(), { font: 'Poppins', weight: 300, size: 64, color: '#ffffff', letterSpacing: 22 }, { start: r3(s + 0.4), duration: 1.1, y: 0.05, animIn: { type: 'typewriter', duration: 0.6 } }));
+    if (brand) big(text(brand.toUpperCase(), { font: 'Poppins', weight: 300, size: 64, color: '#ffffff', letterSpacing: 22, motion: makeMotion('charSlide', { stagger: 0.05 }) }, { start: r3(s + 0.4), duration: 1.1, y: 0.05 }));
     outro = true;
   }
   const musicClips = plan.music === 'none' ? 0 : addMusic(P, opts.music, total, 0.22);
@@ -645,7 +652,7 @@ function buildShowcase(P, st, product, opts) {
     const e = Math.min(total, sec.end - 0.07 > s + 0.3 ? sec.end - 0.07 : sec.end);
     if (name) txt(text(name, { font: 'Roboto', weight: 500, italic: true, size: 74, color: '#ffffff', shadow: { enabled: true, color: '#000000', opacity: 0.5, blur: 16, x: 0, y: 4 } }, { start: r3(s), duration: r3(e - s), y: -0.33 }));
     const line2 = sec.fin ? names.join(' · ') : [sec.v.name, sec.v.note].filter(Boolean).join(' ');
-    if (line2) txt(text(line2, { font: 'Poppins', weight: 800, size: Math.min(104, 1500 / Math.max(8, line2.length)), color: '#ffffff', shadow: HARD }, { start: r3(s), duration: r3(e - s), y: -0.255 }));
+    if (line2) txt(text(line2, { font: 'Poppins', weight: 800, size: Math.min(104, 1500 / Math.max(8, line2.length)), color: '#ffffff', shadow: HARD, motion: makeMotion('wordRise', { stagger: 0.08 }) }, { start: r3(s), duration: r3(e - s), y: -0.255 }));
     if (!sec.fin && sec.v.size) {
       // the size line: thin arrows and the measure, in softly after the cut
       txt(text(`←   ${sec.v.size}   →`, { font: 'Poppins', weight: 400, size: 58, color: '#ffffff', letterSpacing: 3, shadow: { enabled: true, color: '#000000', opacity: 0.45, blur: 10, x: 0, y: 2 } },
@@ -655,7 +662,7 @@ function buildShowcase(P, st, product, opts) {
       const now = formatPrice(product.price_discount || product.price);
       const was = product.price_discount ? formatPrice(product.price) : '';
       if (was && was !== now) txt(text(was, { font: 'Poppins', weight: 600, size: 64, color: '#ffffff', strike: true, strikeColor: '#ff4d4d', shadow: HARD }, { start: r3(sec.start + 0.2), duration: r3(sec.end - sec.start - 0.2), y: 0.14, animIn: { type: 'fade', duration: 0.2 } }));
-      txt(text(now, { font: 'Poppins', weight: 800, size: 120, color: '#ffffff', shadow: HARD }, { start: r3(sec.start + 0.35), duration: r3(sec.end - sec.start - 0.35), y: 0.22, animIn: { type: 'pop', duration: 0.3 } }));
+      txt(text(now, { font: 'Poppins', weight: 800, size: 120, color: '#ffffff', shadow: HARD, motion: makeMotion('counter', { speed: 1.4 }) }, { start: r3(sec.start + 0.35), duration: r3(sec.end - sec.start - 0.35), y: 0.22, animIn: { type: 'pop', duration: 0.3 } }));
     }
   }
   const musicClips = plan.music === 'none' ? 0 : addMusic(P, opts.music, total, 0.85);
@@ -727,7 +734,7 @@ function buildStoryPop(P, st, product, opts) {
     if (slot && s < slot.s + slot.d && e > slot.s) continue;
     const line = ws.map((w) => cleanWord(w.text).toUpperCase()).filter(Boolean).join(' ');
     if (!line || e - s < 0.3) continue;
-    txt(text(line, { font: 'Inter', weight: 800, size: Math.min(130, 1500 / Math.max(6, line.length)), color: '#ffffff', shadow: POP }, { start: r3(s), duration: r3(e - s), y: -0.2, animIn: { type: 'pop', duration: 0.22 }, animOut: { type: 'fade', duration: 0.12 } }));
+    txt(text(line, { font: 'Inter', weight: 800, size: Math.min(130, 1500 / Math.max(6, line.length)), color: '#ffffff', shadow: POP, motion: makeMotion('wordPop', { stagger: 0.12 }) }, { start: r3(s), duration: r3(e - s), y: -0.2, animIn: { type: 'fade', duration: 0.1 }, animOut: { type: 'fade', duration: 0.12 } }));
     const em = (g.emoji) || ws.map((w) => emojiFor(w.text)).find(Boolean);
     if (em && s - lastSticker > 3) { txt(makeSticker(em, s + 0.15, Math.max(0.5, e - s - 0.15), kw % 2 ? -0.3 : 0.3, -0.29)); lastSticker = s; }
     busy.push({ start: s, end: e });
@@ -745,7 +752,7 @@ function buildStoryPop(P, st, product, opts) {
       const now = formatPrice(price.discount || price.normal || product.price);
       const was = price.discount ? formatPrice(price.normal || product.price) : '';
       if (was && was !== now) txt(text(was, { font: 'Inter', weight: 700, size: 72, color: '#ffffff', strike: true, strikeColor: '#ff3b30', shadow: POP }, { start: r3(s + 0.5), duration: r3(d - 0.5), y: 0.03, animIn: { type: 'fade', duration: 0.2 } }));
-      txt(text(now, { font: 'Inter', weight: 900, size: 120, color: '#ffffff', bg: { enabled: true, color: '#ff3b30', opacity: 1, radius: 18, padding: 0.7 } }, { start: r3(s + 0.85), duration: r3(d - 0.85), y: 0.12, rotation: -4, animIn: { type: 'pop', duration: 0.3 }, animLoop: { type: 'pulse', speed: 1 } }));
+      txt(text(now, { font: 'Inter', weight: 900, size: 120, color: '#ffffff', bg: { enabled: true, color: '#ff3b30', opacity: 1, radius: 18, padding: 0.7 }, motion: makeMotion('counter', { speed: 1.5 }) }, { start: r3(s + 0.85), duration: r3(d - 0.85), y: 0.12, rotation: -4, animIn: { type: 'pop', duration: 0.3 }, animLoop: { type: 'pulse', speed: 1 } }));
       busy.push({ start: s, end: s + d });
     }
   }
@@ -768,7 +775,7 @@ function buildStoryPop(P, st, product, opts) {
   let subs = 0;
   if (plan.subtitles !== false) {
     const cues = lines(sp.words.filter((w) => cm.keeps.some((k) => w.s >= k.start - 0.05 && w.s <= k.end)).map((w) => ({ ...w, s: T(w.s), e: T(w.e) })), 24);
-    subs = addSubtitleTrack(P, cues, { font: 'Inter', weight: 800, size: 60, color: '#ffffff', shadow: { ...POP, y: 5 } }, { avoid: busy, y: 0.3, anim: 'pop' });
+    subs = addSubtitleTrack(P, cues, { font: 'Inter', weight: 800, size: 60, color: '#ffffff', shadow: { ...POP, y: 5 } }, { avoid: busy, y: 0.3, anim: 'pop', motion: { type: 'karaoke', color: '#FFE600' } });
   }
   const musicClips = plan.music === 'none' ? 0 : addMusic(P, opts.music, total, 0.18);
   return { style: st.id, name: st.name, duration: r3(total), source_duration: sp.duration, cut_seconds: r3(sp.duration - total), hook: hook.length, keywords: kw, price: priceAt != null, broll: placed.length, sting, subtitles: subs, music: musicClips > 0 };

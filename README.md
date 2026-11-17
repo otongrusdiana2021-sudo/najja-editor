@@ -6,6 +6,8 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.12.0:** **Teks kinetik** ala motion graphics: kata dan huruf bergerak sendiri-sendiri dengan gerak pegas (Pop per kata, Huruf jatuh, Sorot per kata, Stabilo, Angka berjalan, dan lainnya, 17 pilihan). Subtitle otomatis bergerak tepat saat katanya diucapkan. Tetap bisa diedit, pratinjau sama dengan ekspor, jalan di iPad, juga lewat MCP dan Style Konsep.
+
 **Baru di v1.11.0:** **Hapus latar otomatis** dirombak ala CapCut: satu sakelar, latarnya hilang, semua objek di depan tetap (orang, produk, tas, hewan). Dianalisis sekali di GPU perangkat (WebGPU) supaya cepat, lalu disimpan di server untuk ekspor dan perangkat lain. Perangkat tanpa WebGPU otomatis memakai server.
 
 **Baru di v1.10.2:** **Efek langsung ke footage**. Pilih klip, ketuk Efek, lalu pilih Terapkan ke: Klip ini. Efek menempel di klip itu saja dan ikut saat klip digeser, dipotong, atau diduplikat.

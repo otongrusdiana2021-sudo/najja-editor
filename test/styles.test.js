@@ -181,6 +181,18 @@ test('Story Pop: the hook word by word, keywords that pop, "turun HARGA!!", B-ro
   assert.ok(P.clips.some((c) => c.type === 'sticker' && c.sticker.emoji === '🤔'), 'a question: 🤔');
   assert.ok(T.some((c) => c.text.content === 'HARGA!!' && c.animIn.type === 'typewriter'));
   assert.ok(P.clips.filter((c) => c.trackId === 'main').every((c) => c.filter.name === 'cleanNatural'));
+  // (v1.12) kinetic text: captions light up word by word on the said words, keywords pop word by word, the price counts
+  const subTrack = P.tracks.find((t) => t.subtitle);
+  const subs = T.filter((c) => c.trackId === subTrack?.id);
+  assert.ok(subs.length && subs.every((c) => c.text.motion?.type === 'karaoke' && c.text.motion.color === '#FFE600'), 'karaoke captions');
+  const timed = subs.filter((c) => Array.isArray(c.text.words));
+  assert.ok(timed.length >= subs.length * 0.8, `most captions carry their words' times (${timed.length}/${subs.length})`);
+  for (const c of timed) {
+    assert.equal(c.text.words.length, c.text.content.split(/\s+/).filter(Boolean).length);
+    assert.ok(c.text.words.every(([a, b]) => a >= -0.05 && a <= c.duration + 0.05 && b >= a), 'word times inside the caption');
+  }
+  assert.ok(T.some((c) => c.text.motion?.type === 'wordPop'), 'keywords pop word by word');
+  assert.ok(T.some((c) => c.text.motion?.type === 'counter' && /^Rp/.test(c.text.content)), 'the price counts up');
 });
 
 test('Story Pop without B-roll uses punch-ins instead; Editorial without speech says what is missing', () => {

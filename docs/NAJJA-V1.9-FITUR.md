@@ -126,6 +126,37 @@ Lewat MCP: `add_effect` dengan `clip_id` menempelkan efek ke klip itu, dan `upda
 
 Cara kerjanya: klip digambar sendirian di lapisan seukuran frame, lalu efeknya diterapkan di lapisan itu. Hasilnya dipotong sesuai bentuk klip, jadi kilat atau salju tidak meluber ke luar klip. Setelah itu lapisan ditempel ke frame dengan mode campuran klip. Prosesnya sama di pratinjau dan ekspor.
 
+### Teks kinetik (v1.12)
+
+Animasi teks ala motion graphics yang dibuat dengan kode: kata, huruf, atau baris bergerak sendiri-sendiri dengan gerak pegas (memantul lalu diam, seperti benda sungguhan). Semuanya digambar oleh mesin Najja sendiri, jadi teksnya tetap bisa diedit, pratinjau sama dengan hasil ekspor, dan jalan di iPad.
+
+**Cara pakai:** pilih klip teks → **Animasi** → tab **Kinetik**. Tiap pilihan punya pratinjau kecil yang bergerak. Ketuk satu, klipnya langsung diputar dari awal.
+
+| Kelompok | Animasi |
+|---|---|
+| **Masuk** (bergantian) | Pop per kata, Naik per kata, Hentak, Fokus per kata, Ayun per kata, Tirai per baris, Huruf meluncur, Huruf jatuh, Gelombang, Huruf berputar, Ketik + kursor, Acak huruf |
+| **Penekanan** (sepanjang klip) | Sorot per kata (kata yang sedang aktif menyala dan membesar), Stabilo (blok warna menyapu di belakang baris), Angka berjalan (angka menghitung naik ke nilainya, misalnya harga) |
+| **Terus-menerus** | Melambai, Glitch |
+
+**Pengaturan:**
+- **Gaya gerak:** Halus (tanpa memantul), Memantul, Tegas, Pelan.
+- **Jeda antar kata/huruf/baris:** kalau klipnya terlalu pendek, jedanya dirapatkan otomatis supaya semua masuk.
+- **Kecepatan** dan **Warna sorot** (untuk Sorot per kata dan Stabilo).
+- **Keluar: Kebalikan:** di akhir klip potongan-potongannya keluar bergantian seperti saat masuk.
+
+Bisa digabung dengan animasi Masuk/Keluar/Kombo klip yang sudah ada. Ganti gaya teks (preset) tidak menghapus animasi kinetiknya.
+
+**Subtitle otomatis:** tiap baris menyimpan waktu kata-katanya. Dengan Pop per kata atau Sorot per kata, setiap kata bergerak atau menyala **tepat saat diucapkan**. Subtitle tertaut ikut berubah semua, tapi setiap baris tetap memakai waktu katanya sendiri. Kalau isi baris diedit sampai jumlah katanya berubah, kata-katanya dibagi rata sepanjang baris.
+
+**Style Konsep memakainya:**
+- **Story Pop:** subtitle menyala per kata, kata kunci pop per kata, harga menghitung naik.
+- **Editorial Review:** harga menghitung naik, huruf merek meluncur masuk di akhir.
+- **Showcase Clean:** nama varian naik per kata, harga akhir menghitung naik.
+
+**MCP:** `add_text`/`update_clip` dengan `text_motion` (+ `text_motion_spring`, `text_motion_stagger`, `text_motion_speed`, `text_motion_color`, `text_motion_out`). `add_subtitles` menerima `text_motion` dan `words` (waktu tiap kata dari `get_transcript`). `get_project` menampilkan `text_motion`.
+
+**Cara kerjanya:** `public/js/kinetic.js` mengukur posisi tiap kata/huruf sekali per teks, lalu tiap frame menghitung posenya dari rumus pegas teredam (deterministik: waktu yang sama selalu menghasilkan gambar yang sama). `render.js` menggambar tiap potongan dengan gaya teks yang sama (bayangan, garis tepi, isi/gradien).
+
 ### Hapus latar otomatis (v1.11)
 
 Mirip "Hapus latar otomatis" di CapCut: satu sakelar, latarnya hilang, dan **semua objek di depan tetap**: orang, produk, tas, koper, hewan. Tidak ada lagi pilihan mode "Orang saja" atau "Orang + objek" dan pilihan kualitas dari v1.10.3/v1.10.4.

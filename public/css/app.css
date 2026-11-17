@@ -426,6 +426,8 @@ select { cursor: pointer; padding-right: 6px; }
 .seg button:hover { color: var(--text); }
 .seg button.on { background: var(--panel-3); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
 .anim-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+.kin-h { margin: 14px 0 -4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3, var(--text-2)); }
+.kin-ctl { margin: 8px 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); }
 .anim-chip { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 8px; border-radius: 10px; background: var(--panel-2); border: 1.5px solid transparent; font-size: 11px; color: var(--text-2); transition: all 0.15s; }
 .anim-chip:hover { color: var(--text); background: var(--panel-3); }
 .anim-chip.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
