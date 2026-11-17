@@ -24,6 +24,12 @@ function tar(files) {
 }
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
+test('the model is the same file as the AI service\'s "cutout" model (ai/models.json)', () => {
+  const ai = JSON.parse(fs.readFileSync(new URL('../ai/models.json', import.meta.url), 'utf8')).cutout;
+  const x = VENDOR.birefnet.extra['model.onnx'];
+  assert.deepEqual({ url: x.url, sha256: x.sha256, size: x.size, file: x.local.at(-1), license: VENDOR.birefnet.license }, { url: ai.url, sha256: ai.sha256, size: ai.size, file: ai.file, license: ai.license });
+});
+
 test('untar reads the regular files of an archive', () => {
   const files = untar(tar({ 'package/a.js': Buffer.from('export const a = 1;'), 'package/wasm/b.wasm': Buffer.alloc(1300, 7) }));
   assert.equal(files.get('package/a.js').toString(), 'export const a = 1;');
