@@ -338,6 +338,10 @@ export function setSpeed(P, clip, speed) {
   if (clip.type === 'video' || clip.type === 'audio') clip.duration = Math.max(MIN_CLIP, src / speed);
 }
 
+// (v1.11) whether the background removal of a clip is being analysed right now (told by bgremove.js, which keeps it)
+let bgState = () => null;
+export const setBgState = (fn) => { bgState = fn; };
+
 export function summarizeClip(P, c) {
   const tr = P.tracks.find((t) => t.id === c.trackId);
   const r = (v) => Math.round(v * 1000) / 1000;
@@ -352,7 +356,10 @@ export function summarizeClip(P, c) {
   if (c.solid) o.solid = c.solid;
   if (c.effect) o.effect = c.effect;
   if (c.filter && c.filter.name !== 'none') o.filter = c.filter;
-  if (c.cutout?.enabled) o.remove_background = { mode: c.cutout.mode === 'person' ? 'person' : 'all', threshold: c.cutout.threshold ?? 0.5, edge: c.cutout.edge ?? 0.2, ...(c.cutout.mode !== 'person' ? { processing: !c.cutout.masks || !!c.cutout.job, ready: !!c.cutout.masks && !c.cutout.job, fps: c.cutout.masks?.fps ?? c.cutout.fps ?? 15 } : {}) };
+  if (c.cutout?.enabled) {
+    const busy = !!c.cutout.job || (!c.cutout.masks && bgState(c) === 'running');
+    o.remove_background = { ready: !!c.cutout.masks && !c.cutout.job, analysing: busy, ...(!c.cutout.masks && !busy ? { needs_analysis: true } : {}), threshold: c.cutout.threshold ?? 0.5, edge: c.cutout.edge ?? 0.2, ...(c.cutout.masks ? { frames: c.cutout.masks.n, fps: c.cutout.masks.fps } : {}) };
+  }
   if (c.fx?.length) o.clip_effects = c.fx.map((f) => ({ effect: f.type, intensity: f.intensity }));
   if (c.transition && c.transition.type !== 'none') o.transition = c.transition;
   const anim = {};

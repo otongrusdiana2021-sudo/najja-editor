@@ -283,7 +283,7 @@ const STUCK_MS = 250; // no frame out for this long while one is needed: feed fu
 const RESYNC_MS = 1000; // ... and with the biggest window, for this long: flush and re-feed (careful mode)
 const MAX_RESYNCS = 30; // a decoder that needs more than this cannot export here: fall back
 const STALE_LIMIT = 0.02; // more than 2% of the video frames late or lost: the export would look frozen, fall back
-class VideoSource {
+export class VideoSource {
   constructor(src, track, stats = {}) {
     this.src = src;
     this.track = track;

@@ -10,8 +10,7 @@ import { escapeHtml, getPath, setPath, clamp, fmtSec, normHex, deepMerge, clone 
 import { presetStyle } from './actions.js';
 import { favs, star, onStar } from './favs.js';
 import { startPreviews } from './previews.js';
-import { loadSegmenter, segmenterReady, segmenterError } from './segment.js';
-import { startObjectCutout, cancelObjectCutout, objectCutoutAvailable, jobProgress, cutoutStale, onCutoutProgress, CUTOUT_QUALITY } from './cutoutjob.js';
+import { startBgRemove, redoBgRemove, cancelBgRemove, bgStatus, bgStale, onBgProgress } from './bgremove.js';
 import * as actions from './actions.js';
 
 const sec = (title, body, extra = '') => `<section class="isec">${title ? `<div class="isec-head"><span>${title}</span>${extra}</div>` : ''}<div class="isec-body">${body}</div></section>`;
@@ -51,7 +50,7 @@ export class Inspector {
     window.addEventListener('pointercancel', this.onUpH);
     store.on('project', () => { if (this.root) this.render(); });
     store.on('transform', () => this.syncValues());
-    onCutoutProgress((id) => { if (this.root && this.section === 'chroma' && store.selected()?.cutout?.job?.id === id) this.render(); });
+    onBgProgress((clipId) => { if (this.root && this.section === 'chroma' && (!clipId || store.selection === clipId)) this.render(); });
     store.on('live', () => this.syncValues());
     engine.on((k) => { if (k === 'time' && this.root && !engine.playing && store.selected()?.keyframes?.length) this.syncValues(true); });
   }
@@ -171,45 +170,41 @@ export class Inspector {
   }
 
   chromaPanel(c) {
-    // "Hapus otomatis": the background goes, the subject stays. Two ways (v1.10.4):
-    //   all     "Orang + objek": the person AND what is with them (bags, a suitcase, a product) — BiRefNet on the
-    //           server, once per clip, with progress (cutoutjob.js)
-    //   person  "Orang saja": people only, at once, on this device (MediaPipe, v1.10.3)
+    // (v1.11) "Hapus latar otomatis", like a phone editor's: one switch, the background goes and every object in
+    // front stays; the clip is analysed once (on this device's GPU, or on the server) — bgremove.js
     const cut = c.cutout || {};
     const on = !!cut.enabled;
-    const mode = cut.mode === 'person' ? 'person' : 'all';
-    const busy = this.cutoutBusy;
+    const st = on ? bgStatus(c) : null;
     let state = '';
-    if (busy) state = `<p class="hint">${escapeHtml(busy)}</p>`;
-    else if (on && mode === 'all') {
-      const jp = cut.job?.id ? jobProgress(cut.job.id) : null;
-      if (cut.job?.id && (!jp || ['queued', 'running'].includes(jp.state))) {
-        const pct = Math.round((jp?.p || 0) * 100);
-        const eta = jp?.eta != null ? jp.eta : null;
-        const what = jp?.retrying ? `Mencoba lagi (${jp.retrying})…`
-          : jp?.stage === 'download' ? 'Mengunduh model AI ke server (sekali saja)…'
-          : jp?.stage === 'frames' ? 'Menyiapkan frame video…'
-            : jp?.state === 'queued' ? 'Menunggu giliran di server…'
-              : `Memproses di server${jp?.frame ? ` · frame ${jp.frame}/${jp.frames}` : ''}${eta != null ? ` · sisa ±${eta >= 90 ? `${Math.round(eta / 60)} mnt` : `${eta} dtk`}` : ''}`;
-        state = `<div class="ac-prog cut-prog"><div class="ai-bar"><i style="width:${Math.max(3, pct)}%"></i></div><span>${escapeHtml(what)} (${pct}%)</span><button class="btn sm ghost" data-do="cutCancel">Batal</button></div>
-          <p class="hint">Boleh sambil mengedit atau menutup lembar ini. Selama diproses, pratinjau memakai mode Orang saja.</p>`;
-      } else if (cut.job?.id && jp && ['failed', 'cancelled'].includes(jp.state)) {
-        state = `<p class="hint warn">${escapeHtml(jp.error || 'Proses di server berhenti')}</p><button class="btn sm" data-do="cutRedo">Coba lagi</button>`;
-      } else if (cut.masks) {
-        state = `<p class="hint ok">✓ Siap · ${cut.masks.fps} fps · ${cut.masks.n} frame dari server</p>`;
-        if (cutoutStale(c)) state += `<p class="hint warn">Klip ini sekarang memakai bagian video yang belum diproses (dipotong/diperpanjang setelahnya).</p><button class="btn sm" data-do="cutRedo">Proses ulang</button>`;
-      }
-    } else if (on && mode === 'person' && !segmenterReady()) state = `<p class="hint">${segmenterError() ? escapeHtml(segmenterError()) : 'Model AI sedang dimuat…'}</p>`;
-    const quality = on && mode === 'all' ? `<div class="ctl ctl-inline"><label>Kualitas</label><div class="seg">${CUTOUT_QUALITY.map(([f, n]) => `<button class="${(cut.fps || 15) === f ? 'on' : ''}" data-cutfps="${f}" title="${f} frame/detik dicek di server">${n}</button>`).join('')}</div></div>` : '';
-    const auto = sec('', `<label class="switch-row cut-row"><span class="cut-title">${icon('bgRemove', 20)}<span><b>Hapus otomatis</b><em>Latar hilang, orang dan barangnya tetap. Tanpa layar hijau.</em></span></span><input type="checkbox" class="switch" data-do="cutout" ${on ? 'checked' : ''} ${busy ? 'disabled' : ''}></label>
-      ${on ? `<div class="ctl ctl-inline"><label>Yang disimpan</label><div class="seg"><button class="${mode === 'all' ? 'on' : ''}" data-cutmode="all">Orang + objek</button><button class="${mode === 'person' ? 'on' : ''}" data-cutmode="person">Orang saja (cepat)</button></div></div>${quality}` : ''}
+    if (this.bgBusy) state = `<p class="hint">${escapeHtml(this.bgBusy)}</p>`;
+    else if (st?.state === 'running') {
+      const pct = Math.round((st.p || 0) * 100);
+      const eta = st.eta != null ? ` · sisa ±${st.eta >= 90 ? `${Math.round(st.eta / 60)} mnt` : `${st.eta} dtk`}` : '';
+      const what = st.retrying ? `Mencoba lagi (${st.retrying})…`
+        : st.stage === 'model' ? `Mengunduh model AI ke perangkat ini (sekali saja) · ${pct}%`
+          : st.stage === 'init' ? 'Menyiapkan AI di GPU…'
+            : st.stage === 'upload' ? `Menunggu video selesai diunggah ke server · ${pct}%`
+              : st.stage === 'save' ? 'Menyimpan hasil…'
+                : st.stage === 'download' ? 'Mengunduh model AI ke server (sekali saja)…'
+                  : st.stage === 'queued' ? 'Menunggu giliran di server…'
+                    : st.stage === 'prepare' ? 'Menyiapkan frame video di server…'
+                      : `Menganalisis video${st.frame ? ` · frame ${st.frame}/${st.frames}` : ''}${eta} · ${pct}%`;
+      state = `<div class="ac-prog cut-prog"><div class="ai-bar"><i style="width:${Math.max(3, st.stage === 'model' || st.stage === 'frames' ? pct : 4)}%"></i></div><span>${escapeHtml(what)}</span><button class="btn sm ghost" data-do="cutCancel">Batal</button></div>
+        <p class="hint">${st.engine === 'device' ? 'Diproses di GPU perangkat ini (cepat). Hasilnya disimpan di server Najja supaya ekspor dan perangkat lain langsung memakainya.' : 'Diproses di server Najja karena GPU perangkat ini tidak bisa dipakai (butuh browser dengan WebGPU), jadi bisa beberapa menit. Boleh sambil mengedit atau menutup lembar ini.'}</p>`;
+    } else if (st?.state === 'error') {
+      state = `<p class="hint warn">${escapeHtml(st.error || 'Analisis berhenti')}</p><button class="btn sm" data-do="cutRedo">Coba lagi</button>`;
+    } else if (on && cut.masks) {
+      state = `<p class="hint ok">✓ Latar dihapus · ${cut.masks.n} frame dianalisis</p>`;
+      if (bgStale(c)) state += `<p class="hint warn">Klip ini sekarang memakai bagian video yang belum dianalisis (dipotong/diperpanjang setelahnya).</p><button class="btn sm" data-do="cutRedo">Analisis ulang</button>`;
+    } else if (on) {
+      state = `<p class="hint">Klip ini belum dianalisis.</p><button class="btn sm" data-do="cutStart">Analisis sekarang</button>`;
+    }
+    const auto = sec('', `<label class="switch-row cut-row"><span class="cut-title">${icon('bgRemove', 20)}<span><b>Hapus latar otomatis</b><em>Latar hilang, semua objek di depan tetap: orang, produk, tas, hewan.</em></span></span><input type="checkbox" class="switch" data-do="cutout" ${on ? 'checked' : ''} ${this.bgBusy ? 'disabled' : ''}></label>
       ${state}
-      ${on ? `${slider('Ketelitian', 'cutout.threshold', 10, 90, 1, { scale: 100, unit: '%' })}${slider('Tepi halus', 'cutout.edge', 0, 60, 1, { scale: 100, unit: '%' })}
-        ${c.trackId === 'main' ? `<p class="hint">Klip ini di track utama, jadi latarnya diganti warna latar proyek. Pindahkan ke Overlay supaya bisa ditaruh di atas video atau foto lain.</p><button class="btn sm" data-do="cutToOverlay">${icon('toOverlay', 14)} Pindah ke Overlay</button>` : ''}` : ''}
-      <p class="hint">${mode === 'all' || !on ? '<b>Orang + objek</b>: orang beserta barang di depan (tas, koper, produk) tetap, diproses sekali di server Najja (AI BiRefNet). ' : ''}<b>Orang saja</b>: langsung di perangkat ini, hanya orang.</p>`);
+      ${on && cut.masks ? `${slider('Ketelitian', 'cutout.threshold', 10, 90, 1, { scale: 100, unit: '%' })}${slider('Tepi halus', 'cutout.edge', 0, 60, 1, { scale: 100, unit: '%' })}` : ''}
+      ${on && c.trackId === 'main' ? `<p class="hint">Klip ini di track utama, jadi latarnya diganti warna latar proyek. Pindahkan ke Overlay supaya bisa ditaruh di atas video atau foto lain.</p><button class="btn sm" data-do="cutToOverlay">${icon('toOverlay', 14)} Pindah ke Overlay</button>` : ''}`);
     return `${auto}${sec('Kunci kroma (layar hijau/biru)', `${toggle('Hapus warna latar', 'chroma.enabled')}${c.chroma?.enabled ? `${color('Warna kunci', 'chroma.color')}${slider('Kemiripan', 'chroma.similarity', 0, 100, 1, { scale: 100, unit: '%' })}${slider('Kehalusan', 'chroma.smoothness', 0, 100, 1, { scale: 100, unit: '%' })}` : ''}`)}`;
   }
-
 
   animPanel(c) {
     const lists = { in: ANIM_IN, out: ANIM_OUT, loop: ANIM_LOOP };
@@ -427,15 +422,18 @@ export class Inspector {
       return;
     }
     if (d.do === 'cutout' && c) {
-      if (!t.checked) { store.mutate('Hapus latar otomatis mati', () => { const x = store.clip(c.id); x.cutout = { ...(x.cutout || {}), enabled: false }; }); return; }
+      if (!t.checked) {
+        if (bgStatus(c)?.state === 'running') cancelBgRemove(c.id);
+        store.mutate('Hapus latar mati', () => { const x = store.clip(c.id); x.cutout = { ...(x.cutout || {}), enabled: false }; });
+        return;
+      }
       t.checked = false;
-      this.startCutout(c, c.cutout?.mode === 'person' ? 'person' : 'all');
+      this.runBg(() => startBgRemove(c.id));
       return;
     }
-    if (d.cutmode && c) { this.startCutout(c, d.cutmode); return; }
-    if (d.cutfps && c) { this.startCutout(c, 'all', Number(d.cutfps)); return; }
-    if (d.do === 'cutRedo' && c) { this.startCutout(c, 'all', c.cutout?.fps, true); return; }
-    if (d.do === 'cutCancel' && c) { cancelObjectCutout(c.id); return; }
+    if (d.do === 'cutStart' && c) { this.runBg(() => startBgRemove(c.id)); return; }
+    if (d.do === 'cutRedo' && c) { this.runBg(() => redoBgRemove(c.id)); return; }
+    if (d.do === 'cutCancel' && c) { cancelBgRemove(c.id); return; }
     if (d.do === 'cutToOverlay' && c) { actions.moveToOverlay(c.id); toast('Klip dipindah ke Overlay', { type: 'ok' }); return; }
     if (d.do === 'cfxDel' && c) { actions.removeClipEffect(c.id, Number(d.i)); return; }
     if (d.do === 'cfxMain' && c) { const n = actions.clipEffectsToMain(c.id); toast(`Efek diterapkan ke ${n} klip lain di track utama`, { type: 'ok' }); return; }
@@ -503,36 +501,20 @@ export class Inspector {
     }
   }
 
-  /**
-   * Turn "Hapus otomatis" on in a mode: 'all' (Orang + objek: a job on the server; masks that cover the clip are used
-   * again) or 'person' (Orang saja: the model on this device). Without the AI service, 'all' falls back to 'person'.
-   */
-  async startCutout(c, mode, fps, redo = false) {
-    const busy = (txt) => { this.cutoutBusy = txt; this.render(true); };
+  /** Start the background removal (bgremove.js); the analysis itself reports its progress through onBgProgress. */
+  async runBg(fn) {
+    this.bgBusy = 'Memulai…';
+    this.render(true);
     try {
-      if (mode === 'all') {
-        const cur = c.cutout || {};
-        const want = fps || cur.fps || 15;
-        // (already being processed at this quality: nothing to do; masks that cover the clip are used again below)
-        if (!redo && cur.enabled && cur.mode === 'all' && cur.job?.id && cur.job.fps === want) return;
-        busy('Menghubungi layanan AI server…');
-        const av = await objectCutoutAvailable();
-        if (!av.ok) {
-          toast(`Orang + objek belum bisa (${av.reason}). Memakai Orang saja.`, { type: 'warn', timeout: 6000 });
-          mode = 'person';
-        } else {
-          await startObjectCutout(c.id, { fps: want, onWait: (p) => busy(`Menunggu video selesai diunggah ke server (${Math.round(p * 100)}%)…`) });
-          return;
-        }
-      }
-      busy('Memuat model AI ke perangkat ini (sekali saja)…');
-      await loadSegmenter();
-      store.mutate('Hapus latar otomatis', () => { const x = store.clip(c.id); if (x) x.cutout = { threshold: 0.5, edge: 0.2, ...(x.cutout || {}), enabled: true, mode: 'person' }; });
+      const p = fn();
+      this.bgBusy = null;
+      this.render(true);
+      await p;
       this.engine.requestRender();
     } catch (err) {
-      toast(`Hapus latar otomatis belum bisa: ${err.message}`, { type: 'error', timeout: 6000 });
+      toast(err.message, { type: 'error', timeout: 7000 });
     } finally {
-      this.cutoutBusy = null;
+      this.bgBusy = null;
       this.render(true);
     }
   }

@@ -126,59 +126,39 @@ Lewat MCP: `add_effect` dengan `clip_id` menempelkan efek ke klip itu, dan `upda
 
 Cara kerjanya: klip digambar sendirian di lapisan seukuran frame, lalu efeknya diterapkan di lapisan itu. Hasilnya dipotong sesuai bentuk klip, jadi kilat atau salju tidak meluber ke luar klip. Setelah itu lapisan ditempel ke frame dengan mode campuran klip. Prosesnya sama di pratinjau dan ekspor.
 
-### Hapus latar otomatis untuk orang (v1.10.3)
+### Hapus latar otomatis (v1.11)
 
-Pilih klip video atau foto, ketuk **Hapus Latar Belakang**, lalu nyalakan **Hapus otomatis**. Orangnya tetap, latarnya hilang, tanpa layar hijau.
+Mirip "Hapus latar otomatis" di CapCut: satu sakelar, latarnya hilang, dan **semua objek di depan tetap**: orang, produk, tas, koper, hewan. Tidak ada lagi pilihan mode "Orang saja" atau "Orang + objek" dan pilihan kualitas dari v1.10.3/v1.10.4.
 
-- **Pengaturan:**
-  - **Ketelitian**: makin tinggi, potongan makin ketat.
-  - **Tepi halus**: mengatur lebar tepi yang memudar.
-- **Klip di track utama:** latarnya diganti warna latar proyek. Tombol **Pindah ke Overlay** memindahkan klip supaya orangnya bisa ditaruh di atas video atau foto lain.
-- **Khusus untuk orang:** barang yang dipegang ikut tersimpan. Barang yang berdiri sendiri, misalnya koper di samping, ikut terhapus.
-- **Badge:** klip yang aktif diberi badge di timeline.
-- **MCP:** `update_clip` dengan `remove_background: true/false` dan `remove_background_threshold`.
+**Cara pakai:** pilih klip video atau foto, ketuk **Hapus Latar Belakang**, lalu nyalakan **Hapus latar otomatis**.
 
-**Cara kerjanya:** MediaPipe Selfie Segmentation (Google, Apache-2.0) berjalan di perangkat. Prosesnya memakai GPU kalau ada, dan videonya tidak dikirim ke mana pun.
+- Klip dianalisis **sekali**. Progres per frame dan perkiraan sisa waktu tampil di lembar, dengan tombol **Batal**.
+- Setelah selesai, lembar menampilkan **✓ Latar dihapus · N frame dianalisis**. Pratinjau dan ekspor langsung memakainya.
+- **Ketelitian** dan **Tepi halus** bisa digeser kapan saja. Hasilnya langsung terlihat, tanpa analisis ulang.
+- Kalau klip dipotong atau diperpanjang ke bagian video yang belum dianalisis, muncul tombol **Analisis ulang**.
+- Klip duplikat atau klip lain dari video yang sama memakai hasil analisis yang sudah ada.
+- **Klip di track utama:** latarnya diganti warna latar proyek. Tombol **Pindah ke Overlay** memindahkan klip supaya objeknya bisa ditaruh di atas video atau foto lain.
+- **Kunci kroma** (layar hijau) tetap ada di lembar yang sama, tidak berubah.
 
-- Setiap frame klip mendapat masker orang.
-- Masker dari frame yang berurutan dicampur sedikit, supaya tepinya tidak berkedip.
-- Pratinjau dan ekspor memakai proses yang sama.
-- Ekspor menunggu model siap. Kalau model tidak bisa dimuat, ekspor berhenti dengan pesan, jadi latar tidak muncul diam-diam di video hasil.
+**Mesinnya:** BiRefNet lite 512 (MIT), model hapus latar yang juga dipakai alat hapus latar foto di beranda. Model ini memisahkan objek utama dari latar, bukan khusus orang.
 
-**Asal file:** pustaka dan modelnya tidak dimuat dari CDN. Server Najja mengunduhnya sekali dari versi yang dikunci (paket npm `@mediapipe/tasks-vision` 0.10.35 dan model `selfie_segmenter.tflite`), mencocokkan sha256-nya, menyimpannya di folder data, lalu menyajikannya di `/vendor/` (`lib/vendor.js`). Unduhan pertama sekitar 10 MB.
+- **Di GPU perangkat (WebGPU, onnxruntime-web 1.29.0):** jalur utama, paling cepat. Dianalisis sampai 30 frame per detik (paling banyak ±450 frame per klip; klip panjang dianalisis lebih jarang, minimal 10 fps).
+- **Di server (perangkat tanpa WebGPU, atau GPU-nya gagal memuat model):** sakelar yang sama otomatis memakai server Najja. Lebih lambat (sekitar 5 detik per frame per CPU), 8–15 fps, paling banyak ±240 frame. Lembar boleh ditutup atau ditinggal untuk mengedit.
+- **Supaya halus:** tiap masker dicampur sedikit dengan frame sebelumnya (tepi tidak berkedip), dan di antara dua frame yang dianalisis, masker dicampur halus mengikuti waktu.
+- **Model pertama kali:** ±190 MB, diunduh sekali per perangkat dari server Najja (bukan CDN) lalu disimpan di cache browser.
+- **Ekspor** menunggu hasil analisis. Kalau belum ada, ekspor berhenti dengan pesan, jadi latar tidak muncul diam-diam di video hasil.
 
-### Hapus latar "Orang + objek" (v1.10.4)
+**Penyimpanan:** masker disimpan gzip di `<data>/masks/` (milik akun pembuatnya) dan disajikan di `/api/masks/<id>`, jadi perangkat lain dan ekspor memakai hasil yang sama.
 
-Sekarang **Hapus otomatis** punya dua mode di "Yang disimpan":
+- Dari perangkat: `POST /api/masks` (hanya untuk video milik akun itu yang sudah selesai diunggah; ukurannya dicek).
+- Dari server: tugas `cutoutvideo` (`lib/ai.js` mengekstrak frame dengan ffmpeg, `ai/server.py` menjalankan BiRefNet).
+- Di editor: `public/js/bgdevice.js` (analisis di GPU), `bgremove.js` (memilih mesin, progres, menyimpan), `segment.js` (memutar masker).
 
-- **Orang + objek** (default): orang beserta barang di depannya (tas, koper, produk) tetap, latar saja yang hilang.
-  - Diproses sekali per klip di server Najja dengan **BiRefNet** (MIT). BiRefNet adalah model hapus latar yang juga dipakai alat hapus latar foto di beranda.
-  - Progres per frame dan perkiraan sisa waktu tampil di lembar. Lembar boleh ditutup atau ditinggal untuk mengedit.
-  - Selama proses berjalan, pratinjau sementara memakai Orang saja.
-  - Pilihan **Kualitas** = frame per detik yang dicek di server:
-    - **Cepat** 8 fps;
-    - **Halus** 15 fps (default);
-    - **Penuh** 30 fps.
-  - Di antara frame itu, masker dicampur halus. Pada mode Cepat dan Halus, masker orang dari perangkat ditambahkan di setiap frame, supaya tangan dan kepala yang bergerak tetap tajam.
-  - Klip duplikat atau klip lain dari video yang sama memakai masker yang sudah ada, tanpa proses baru.
-  - Kalau klip dipotong atau diperpanjang ke bagian video yang belum diproses, muncul tombol **Proses ulang**.
-  - Ekspor menunggu sampai masker siap.
-- **Orang saja (cepat)**: mode v1.10.3, langsung di perangkat (MediaPipe), khusus orang.
+**Asal file:** onnxruntime-web dan modelnya tidak dimuat dari CDN. Server Najja mengambilnya sekali dari versi yang dikunci, mencocokkan sha256-nya, lalu menyajikannya di `/vendor/` (`lib/vendor.js`). Modelnya diambil dari folder model layanan AI kalau sudah ada, kalau belum diunduh dari sumbernya.
 
-Kalau layanan AI server tidak berjalan, sakelarnya otomatis memakai Orang saja dan memberi tahu.
+**Proyek lama:** klip dengan mode "Orang + objek" dari v1.10.4 tetap terpotong (hasil analisisnya masih dipakai). Klip dengan mode "Orang saja" dari v1.10.3 belum punya hasil analisis: lembarnya menampilkan **Analisis sekarang**.
 
-**Waktu proses:** sekitar 5 detik per frame di 1 CPU, lebih cepat kalau AI mendapat lebih banyak CPU (`NAJJA_AI_CPUS`). Contoh untuk klip 10 detik:
-
-| Kualitas | Jumlah frame | Perkiraan waktu (1 CPU) |
-|---|---|---|
-| Halus | ±160 | ±13 menit |
-| Cepat | ±90 | ±7 menit |
-
-**Server dengan RAM AI kecil:** di bawah ±2,5 GB, server memakai IS-Net yang lebih ringan. IS-Net lebih sering hanya menyimpan orang, jadi barang di samping orang bisa ikut terhapus. Untuk mode Orang + objek, BiRefNet disarankan.
-
-**Penyimpanan:** masker disimpan di `<data>/masks/` (milik akun pembuatnya) dan disajikan di `/api/masks/<id>`. Alurnya: `lib/ai.js` mengekstrak frame dengan ffmpeg, `ai/server.py` menjalankan tugas `cutoutvideo`, lalu `public/js/cutoutjob.js` dan `segment.js` memakainya di editor.
-
-**MCP:** `update_clip` dengan `remove_background: true | "all" | "person" | false` dan `remove_background_quality: fast | smooth | full`. Untuk mode `all`, `get_project` menampilkan `processing`/`ready`.
+**MCP:** `update_clip` dengan `remove_background: true/false` dan `remove_background_threshold` (0–1). `get_project` menampilkan `remove_background` dengan `ready`/`analysing`.
 
 Cara kerja lapisan efek: render menggambar lapisan dari bawah ke atas (`plan.layers`). Saat bertemu efek, efek itu diterapkan ke gambar yang sudah tersusun sejauh itu. Lapisan sesudahnya digambar di atas hasilnya, sama di pratinjau maupun ekspor.
 

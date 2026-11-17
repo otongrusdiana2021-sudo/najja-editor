@@ -347,16 +347,16 @@ Dengan `NAJJA_URL` terisi, `mcp-stdio.js` hanya meneruskan perintah ke VPS dan t
 - Proyek, media, dan hasil ekspor tersimpan di server kamu sendiri (volume `najja-data`), tidak di layanan luar.
 - Tombol **Keluar** ada di menu akun (bulatan inisial di kanan atas), atau buka `/logout`.
 
-## Hapus latar otomatis (v1.10.3)
+## Hapus latar otomatis (v1.11)
 
-Saat **Hapus otomatis** dipakai pertama kali, server mengunduh pustaka dan modelnya sekali (±10 MB). Sumbernya:
+Saat **Hapus latar otomatis** dipakai pertama kali, server Najja menyiapkan file berikut sekali:
 
-- `registry.npmjs.org`: paket `@mediapipe/tasks-vision` 0.10.35;
-- `storage.googleapis.com`: model `selfie_segmenter.tflite`.
+- `registry.npmjs.org`: paket `onnxruntime-web` 1.29.0 (unduhan ±32 MB, hanya 3 file yang disimpan);
+- model BiRefNet lite 512 (±190 MB): disalin dari folder model layanan AI kalau sudah ada (volume yang sama di Docker), kalau belum diunduh dari `huggingface.co`.
 
-Versinya dikunci dan sha256-nya dicek. File disimpan di `<folder data>/vendor/` dan disajikan oleh server Najja sendiri. Browser tidak memuat apa pun dari CDN.
+Versinya dikunci dan sha256-nya dicek. File disimpan di `<folder data>/vendor/` dan disajikan oleh server Najja sendiri. Browser tidak memuat apa pun dari CDN. Tiap perangkat mengunduh model ±190 MB itu sekali dari server Najja, lalu menyimpannya di cache browser.
 
-Kalau VPS memblokir akses keluar ke dua alamat itu, sakelarnya akan menampilkan pesan error. Fitur editor lain tidak terpengaruh.
+Perangkat tanpa WebGPU memakai layanan AI di server (container `ai`). Kalau layanan itu juga tidak berjalan, sakelarnya menampilkan pesan. Fitur editor lain tidak terpengaruh.
 
 ## Masalah umum
 

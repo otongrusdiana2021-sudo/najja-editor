@@ -533,8 +533,8 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
     const filter = cssFilterFor(clip, blurUnits, pxPerUnit);
     const overlays = overlaysFor(clip);
     const chroma = clip.chroma?.enabled;
-    // (v1.10.3) "Hapus otomatis": the person stays, the background goes (segment.js)
-    const cutout = clip.cutout?.enabled && typeof document !== 'undefined';
+    // (v1.11) "Hapus latar otomatis": every object in front stays, the background goes (segment.js masks)
+    const cutout = clip.cutout?.enabled && !!clip.cutout.masks && typeof document !== 'undefined';
     // An opaque video drawn normally covers its whole rectangle, so colour overlays and the vignette can go
     // straight onto the frame — same result as the separate layer, without a full-size extra copy.
     const direct = overlays.length && !chroma && !cutout && clip.type === 'video' && alpha >= 0.999
@@ -563,8 +563,8 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
       lc.globalCompositeOperation = 'source-over';
       lc.clearRect(0, 0, lw, lh);
       drawFiltered(lc, filter, src.el, sx, sy, sw, sh, 0, 0, lw, lh);
-      // the person mask of this frame (from the picture before the colour overlays), applied last
-      const mask = cutout ? cutoutMask(clip, L, clip.type === 'video' ? Math.round(((clip.in || 0) + local * (clip.speed || 1)) * 1000) / 1000 : 0) : null;
+      // the mask of this frame (applied last, after the colour overlays)
+      const mask = cutout ? cutoutMask(clip, clip.type === 'video' ? Math.round(((clip.in || 0) + local * (clip.speed || 1)) * 1000) / 1000 : 0) : null;
       if (chroma && !chromaKeyGPU(L, lc, lw, lh, clip.chroma)) chromaKey(lc, lw, lh, clip.chroma);
       for (const ov of overlays) {
         lc.globalAlpha = clamp(ov.alpha, 0, 1);

@@ -8,6 +8,7 @@ import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -88,6 +89,43 @@ test('AI requests: image formats only, each account sees only its own', { skip: 
   assert.equal((await as(A, 'DELETE', `/api/ai/${rec.id}`)).status, 200);
   assert.equal((await as(A, 'GET', `/api/ai/${rec.id}`)).status, 404, 'deleted');
   assert.equal((await req(srv.port, { path: '/api/ai', headers: H })).status, 401, 'signed out: refused');
+});
+
+test('masks made on the device (v1.11): kept for their owner, size checked, only for a finished upload', async () => {
+  const mid = 'm_maskdev1';
+  assert.equal((await as(A, 'PUT', `/api/media/${mid}/meta`, JSON.stringify({ id: mid, name: 'v.mp4' }), 'application/json')).status, 200);
+  const n = 10;
+  const w = 8;
+  const h = 16;
+  const raw = Buffer.alloc(n * w * h);
+  for (let i = 0; i < raw.length; i++) raw[i] = i % 256;
+  const url = (o = {}) => `/api/masks?${new URLSearchParams({ mediaId: mid, start: 0, end: 1, fps: 10, n, w, h, model: 'birefnet-lite-512', ...o })}`;
+  const post = (cookie, u, body, gz = true) => req(srv.port, { method: 'POST', path: u, headers: { ...H, cookie, 'content-type': 'application/octet-stream', ...(gz ? { 'x-najja-gzip': '1' } : {}) }, body });
+  const gz = zlib.gzipSync(raw);
+  const early = await post(A, url(), gz);
+  assert.equal(early.status, 409, 'the video is not on the server yet');
+  assert.equal(early.json().code, 'uploading');
+  assert.equal((await as(A, 'PUT', '/api/upload/up_maskdev1/0', Buffer.from('VIDEO'))).status, 200);
+  assert.equal((await as(A, 'POST', '/api/upload/up_maskdev1/finish', JSON.stringify({ parts: 1, size: 5, target: 'media', mediaId: mid, filename: 'v.mp4', mime: 'video/mp4' }), 'application/json')).status, 200);
+  assert.equal((await post(B, url(), gz)).status, 404, 'another account\'s video: refused');
+  assert.equal((await post(A, url({ n: n + 1 }), gz)).status, 400, 'fewer bytes than frames: refused');
+  assert.equal((await post(A, url(), Buffer.from('not gzip'))).status, 400, 'broken data: refused');
+  assert.equal((await post(A, url({ w: 4096 }), gz)).status, 400, 'too big: refused');
+  const ok = await post(A, url(), gz);
+  assert.equal(ok.status, 200);
+  const rec = ok.json();
+  assert.match(rec.id, /^ai_[0-9a-f]{16}$/);
+  assert.deepEqual([rec.mediaId, rec.n, rec.w, rec.h, rec.fps, rec.model], [mid, n, w, h, 10, 'birefnet-lite-512']);
+  assert.equal(rec.ownerId, undefined, 'no owner id sent back');
+  const got = await as(A, 'GET', `/api/masks/${rec.id}`);
+  assert.equal(got.status, 200);
+  assert.equal(got.headers['content-encoding'], 'gzip');
+  assert.ok(zlib.gunzipSync(got.buf).equals(raw), 'the same masks come back');
+  assert.equal((await as(B, 'GET', `/api/masks/${rec.id}`)).status, 404, 'another account: not found');
+  // (not gzipped by the browser: stored gzipped all the same)
+  const plain = await post(A, url(), raw, false);
+  assert.equal(plain.status, 200);
+  assert.ok(zlib.gunzipSync((await as(A, 'GET', `/api/masks/${plain.json().id}`)).buf).equals(raw));
 });
 
 test('background removal: a transparent PNG of the subject', { skip: (!hasModels || !hasPython || !hasFfmpeg) && 'model files / python / ffmpeg missing (set NAJJA_AI_MODELS)' }, async () => {

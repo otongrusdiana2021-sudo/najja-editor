@@ -12,8 +12,7 @@ import { exportState } from './exporter.js';
 import { clamp, normHex, deepMerge } from './util.js';
 import { STYLES, checkMaterial } from './styles.js';
 import { generateStyle, getTranscript } from './stylerun.js';
-import { loadSegmenter } from './segment.js';
-import { startObjectCutout, objectCutoutAvailable } from './cutoutjob.js';
+import { startBgRemove, cancelBgRemove, bgStatus } from './bgremove.js';
 
 const ids = (a) => a.map((x) => x.id);
 const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -294,24 +293,19 @@ export const tools = {
     });
     if (a.remove_background != null) {
       need(c.type === 'video' || c.type === 'image', 'remove_background is for video and photo clips');
-      let mode = a.remove_background === 'person' ? 'person' : a.remove_background ? 'all' : null;
-      if (mode === 'all') {
-        // (as the switch does: without the server's AI service, people only — and say so)
-        const av = await objectCutoutAvailable();
-        if (!av.ok) { mode = 'person'; note = `Person + objects needs the server's AI service (${av.reason}); used "person" (people only) instead.`; }
+      // (v1.11) one way: the background goes, every object in front stays; the clip is analysed once (device GPU or
+      // server) — the analysis runs on, get_project shows remove_background.analysing / ready
+      if (a.remove_background && a.remove_background !== 'off') {
+        const p = startBgRemove(c.id);
+        // (the analysis can take a while: wait a little for an early error, then answer)
+        const early = await Promise.race([p.then(() => null, (err) => err), new Promise((r) => setTimeout(() => r(null), 1500))]);
+        if (early) throw early;
+        p.catch(() => {});
+      } else {
+        if (bgStatus(store.clip(c.id))?.state === 'running') await cancelBgRemove(c.id);
+        store.mutate('AI: latar kembali', () => { const x = store.clip(c.id); x.cutout = { ...(x.cutout || {}), enabled: false }; });
       }
-      if (mode === 'all') {
-        // (v1.10.4) person + objects: a job on the server; the preview shows the person alone until it is done
-        const fps = { fast: 8, smooth: 15, full: 30 }[a.remove_background_quality] || 15;
-        await startObjectCutout(c.id, { fps });
-      } else if (mode === 'person') {
-        try { await loadSegmenter(); } catch (err) { throw new Error(`Background removal cannot run in this browser: ${err.message}`); }
-      }
-      store.mutate(mode ? 'AI: hapus latar' : 'AI: latar kembali', () => {
-        const x = store.clip(c.id);
-        x.cutout = { threshold: 0.5, edge: 0.2, ...(x.cutout || {}), enabled: !!mode, ...(mode ? { mode } : {}) };
-        if (a.remove_background_threshold != null) x.cutout.threshold = clamp(Number(a.remove_background_threshold), 0.1, 0.9);
-      });
+      if (a.remove_background_threshold != null) store.mutate('AI: ketelitian latar', () => { const x = store.clip(c.id); x.cutout = { ...(x.cutout || {}), threshold: clamp(Number(a.remove_background_threshold), 0.1, 0.9) }; });
     }
     if (Array.isArray(a.clip_effects)) actions.setClipEffects(c.id, a.clip_effects.map((f) => ({ type: f.effect || f.type, intensity: f.intensity })));
     focus(c.id);

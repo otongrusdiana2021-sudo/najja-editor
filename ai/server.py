@@ -445,7 +445,7 @@ def cutout(inp, out_base, report, cancelled):
     return {'file': os.path.basename(path), 'width': W, 'height': H, 'model': name, 'subject': list(box) if box else None}
 
 
-def cutout_video(frames_dir, out_base, report, cancelled, mask_long=320):
+def cutout_video(frames_dir, out_base, report, cancelled, mask_long=384):
     """(v1.10.4) The subject of every frame of a video (person AND objects: BiRefNet; IS-Net on small servers).
     frames_dir: the frames as JPEG (extracted by the editor with ffmpeg, in order). Writes <out>.bin.gz: one 8-bit
     mask per frame (mask_long px on the long side), frame after frame, gzip; returns its size."""

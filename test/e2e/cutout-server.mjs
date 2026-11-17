@@ -1,8 +1,8 @@
-// End-to-end (v1.10.4): "Hapus otomatis · Orang + objek" — the subject (a person and the objects with them) found
-// by BiRefNet on the server, frame by frame, the masks used by the preview and the export.
-//   A. the switch starts a server job (the default mode), progress shows, the masks land on the clip
+// End-to-end (v1.11): "Hapus latar otomatis" on a device without WebGPU — the same switch, the analysis done by
+// BiRefNet on the server (slower), the masks used by the preview and the export. (The GPU path: test/e2e/cutout.mjs.)
+//   A. the switch starts a server job, progress shows, the masks land on the clip
 //   B. preview: the object stays, its background goes; a masks file is only for its owner
-//   C. a duplicate of the clip uses the same masks (no second job); trimming outside them asks to process again
+//   C. a duplicate of the clip uses the same masks (no second analysis); trimming outside them asks to analyse again
 //   D. export: the same cut in the video file
 // Needs the AI service with its models: NAJJA_AI_MODELS=<folder with birefnet-lite-512.onnx> (and python3 with
 // onnxruntime, numpy, pillow), Playwright and ffmpeg. Without NAJJA_AI_MODELS it is skipped.
@@ -16,12 +16,12 @@ import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const TOKEN = 'tok-e2e-cutobj-1234567890';
+const TOKEN = 'tok-e2e-cutsrv-1234567890';
 let chromium;
 try { ({ chromium } = createRequire(import.meta.url)('playwright')); } catch { /* optional */ }
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 if (!chromium || !hasFfmpeg || !process.env.NAJJA_AI_MODELS) {
-  console.log(`SKIP cutout-objects e2e: ${!chromium ? 'playwright' : !hasFfmpeg ? 'ffmpeg' : 'NAJJA_AI_MODELS (model BiRefNet)'} tidak ada`);
+  console.log(`SKIP cutout-server e2e: ${!chromium ? 'playwright' : !hasFfmpeg ? 'ffmpeg' : 'NAJJA_AI_MODELS (model BiRefNet)'} tidak ada`);
   process.exit(0);
 }
 let failed = 0;
@@ -30,7 +30,7 @@ const step = (m) => console.log(`·  ${m}`);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'najja-cutobj-e2e-'));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'najja-cutsrv-e2e-'));
 fs.mkdirSync(path.join(dir, 'media'), { recursive: true });
 const PERSON = process.env.NAJJA_TEST_PERSON;
 const ff = (args) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
@@ -67,7 +67,7 @@ try {
   await p.goto(`${BASE}/?debug`);
   await p.waitForSelector('body.ready');
   await p.waitForFunction(() => document.querySelector('.mcp-pill')?.classList.contains('on'));
-  await mcp('new_project', { name: 'Orang + objek', aspect_ratio: '9:16' });
+  await mcp('new_project', { name: 'Hapus latar (server)', aspect_ratio: '9:16' });
   const media = await mcp('import_media', { path: 'video.mp4' });
   for (let t = Date.now(); Date.now() - t < 60000; await wait(250)) {
     if (await p.evaluate(async (id) => { const { mediaRT } = await import('/js/media.js'); return !!mediaRT.get(id)?.url; }, media.media_id)) break;
@@ -86,13 +86,15 @@ try {
     return id;
   }, media.media_id);
 
-  step('A. sakelar Hapus otomatis → "Orang + objek" diproses di server');
+  step('A. perangkat tanpa WebGPU: sakelar "Hapus latar otomatis" → dianalisis di server');
+  const gpu = await p.evaluate(async () => !!(navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null))));
+  check(!gpu, 'Chromium ini tanpa WebGPU (jalur server)');
   await p.click('.tool[data-tool="bgremove"]');
   await p.waitForSelector('.sheet.in [data-do="cutout"]');
   await p.click('.sheet.in .cut-row');
   await p.waitForSelector('.sheet.in .cut-prog', { timeout: 30000 });
-  const ui = await p.evaluate(() => ({ mode: document.querySelector('.sheet.in [data-cutmode].on')?.textContent, q: document.querySelector('.sheet.in [data-cutfps].on')?.textContent, prog: document.querySelector('.sheet.in .cut-prog span')?.textContent }));
-  check(ui.mode === 'Orang + objek' && ui.q === 'Halus' && !!ui.prog, `mode default "${ui.mode}", kualitas ${ui.q}, progres: "${ui.prog}"`);
+  const ui = await p.evaluate(() => ({ modes: document.querySelectorAll('.sheet.in [data-cutmode], .sheet.in [data-cutfps]').length, prog: document.querySelector('.sheet.in .cut-prog span')?.textContent, hint: document.querySelector('.sheet.in').textContent }));
+  check(ui.modes === 0 && !!ui.prog && /server/i.test(ui.hint), `satu sakelar tanpa pilihan mode, progres: "${ui.prog}", keterangan menyebut server`);
   let seen = new Set();
   let masks = null;
   const t0 = Date.now();
@@ -107,10 +109,10 @@ try {
     console.log('diag jobs:', JSON.stringify(await (await fetch(`${BASE}/api/jobs`, { headers: { authorization: `Bearer ${TOKEN}` } }).catch(() => ({ json: () => null }))).json?.() || null).slice(0, 600));
   }
   check(!!masks && masks.n >= 20 && masks.fps === 15, `masker dari server: ${masks?.n} frame, ${masks?.fps} fps, ${masks?.w}×${masks?.h}, model ${masks?.model} (${Math.round((Date.now() - t0) / 1000)} dtk)`);
-  check([...seen].some((x) => /frame #\/#/.test(x)), `progres per frame terlihat (${[...seen].slice(-1)[0] || '-'})`);
+  check([...seen].some((x) => /Menganalisis video · frame #\/#/.test(x)), `progres per frame terlihat (${[...seen].filter((x) => /frame/.test(x)).slice(-1)[0] || [...seen].join(' / ')})`);
   if (masks) {
     const ready = await p.evaluate(() => document.querySelector('.sheet.in .hint.ok')?.textContent);
-    check(/Siap/.test(ready || ''), `lembar: "${ready}"`);
+    check(/Latar dihapus/.test(ready || ''), `lembar: "${ready}"`);
 
     step('B. pratinjau: objeknya tetap, latarnya hilang');
     await p.evaluate(() => window.najja.sheet?.close?.());
@@ -128,21 +130,21 @@ try {
     const other = await fetch(`${BASE}/api/masks/${masks.id}`);
     check(other.status === 401 || other.status === 302 || other.status === 404, `berkas masker hanya untuk pemiliknya (tanpa login: HTTP ${other.status})`);
 
-    step('C. duplikat memakai masker yang sama; dipotong di luar rentang → minta proses ulang');
+    step('C. duplikat memakai masker yang sama; dipotong di luar rentang → minta analisis ulang');
     const dup = await p.evaluate(async (id) => {
       const a = await import('/js/actions.js');
       const { store } = await import('/js/store.js');
       const d = a.duplicateClip(id);
       const did = d.id || d;
-      const cj = await import('/js/cutoutjob.js');
-      const r = await cj.startObjectCutout(did, { fps: 15 });
+      const bg = await import('/js/bgremove.js');
+      const r = await bg.startBgRemove(did);
       const same = store.clip(did).cutout.masks?.id === store.clip(id).cutout.masks?.id;
       store.mutate('t', () => { store.clip(did).in = 2.6; });
-      const stale = cj.cutoutStale(store.clip(did));
+      const stale = bg.bgStale(store.clip(did));
       a.deleteClips([did]);
       return { reused: !!r.reused, same, stale };
     }, ov);
-    check(dup.reused && dup.same && dup.stale, 'duplikat memakai masker yang sama tanpa proses baru; bagian video di luar masker terdeteksi (Proses ulang)');
+    check(dup.reused && dup.same && dup.stale, 'duplikat memakai masker yang sama tanpa analisis baru; bagian video di luar masker terdeteksi (Analisis ulang)');
 
     step('D. ekspor: potongan yang sama di video hasil');
     const ex = await p.evaluate(async () => {
@@ -165,5 +167,5 @@ try {
   await browser.close();
   cleanup();
 }
-console.log(failed ? `\n${failed} cek GAGAL` : '\nsemua cek orang + objek lolos');
+console.log(failed ? `\n${failed} cek GAGAL` : '\nsemua cek hapus latar (server) lolos');
 process.exit(failed ? 1 : 0);

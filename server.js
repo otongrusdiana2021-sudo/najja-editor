@@ -78,8 +78,8 @@ const proxies = createProxyManager({
 
 // AI tools of the home screen (background removal, upscaling): a separate Python service, jobs in the shared queue.
 const ai = createAi({ dataDir: DATA_DIR, jobs, log: (...a) => log(...a) });
-// browser libraries fetched once from a pinned version (v1.10.3: MediaPipe for background removal of people)
-const vendor = createVendor({ dir: path.join(DATA_DIR, 'vendor'), log: (...a) => log(...a) });
+// browser libraries fetched once from a pinned version (v1.11: onnxruntime-web + BiRefNet, background removal on the GPU)
+const vendor = createVendor({ dir: path.join(DATA_DIR, 'vendor'), dataDir: DATA_DIR, modelDirs: [process.env.NAJJA_AI_MODELS], log: (...a) => log(...a) });
 process.on('exit', () => ai.stop());
 for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { ai.stop(); process.exit(0); });
 
@@ -813,7 +813,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       const rec = await ai.create({ owner: who.id, tool: m[1], image, mime: req.headers['content-type'], scale: url.searchParams.get('scale'), name: url.searchParams.get('name') || '', language: url.searchParams.get('lang') || 'auto' });
       return sendJson(res, 200, rec);
     }
-    // (v1.10.4) background removal of a video part ("Orang + objek"): the server reads the media file itself
+    // background removal of a video part, on the server (v1.11: for devices without WebGPU): it reads the media file itself
     if (p === '/api/ai/cutoutvideo' && req.method === 'POST') {
       const body = await readJson(req);
       const mediaId = String(body.mediaId || '');
@@ -823,6 +823,16 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       // (the editor uses a video at once while it is still being uploaded: the server waits for the whole file)
       if (!(await storage.getMeta(mediaId).catch(() => null))?.file) return sendJson(res, 409, { error: 'Video masih diunggah ke server', code: 'uploading' });
       const rec = await ai.createVideo({ owner: who.id, file: await storage.mediaFile(mediaId), mediaId, start: body.start, end: body.end, fps: body.fps, name: body.name || '' });
+      return sendJson(res, 200, rec);
+    }
+    // (v1.11) masks made on the device (BiRefNet on its GPU): kept on the server for the export and other devices
+    if (p === '/api/masks' && req.method === 'POST') {
+      const q = url.searchParams;
+      const mediaId = String(q.get('mediaId') || '');
+      await ownMedia(mediaId);
+      if (!(await storage.getMeta(mediaId).catch(() => null))?.file) return sendJson(res, 409, { error: 'Video masih diunggah ke server', code: 'uploading' });
+      const body = await readBody(req, 256 * 1024 * 1024);
+      const rec = await ai.saveMask({ owner: who.id, mediaId, start: q.get('start'), end: q.get('end'), fps: q.get('fps'), n: q.get('n'), w: q.get('w'), h: q.get('h'), model: q.get('model'), body, gzip: req.headers['x-najja-gzip'] === '1' });
       return sendJson(res, 200, rec);
     }
     if ((m = /^\/api\/masks\/(ai_[0-9a-f]{16})$/.exec(p)) && req.method === 'GET') {

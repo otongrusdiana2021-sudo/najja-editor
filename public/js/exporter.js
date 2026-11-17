@@ -104,7 +104,7 @@ export async function exportVideo(engine, opts, onProgress = () => {}, onPrepare
   const P = store.P;
   const duration = store.duration();
   if (duration <= 0) throw new Error('Timeline masih kosong');
-  // (v1.10.3) clips with "Hapus otomatis" need the segmenter; without it the export would show their background
+  // (v1.11) clips with "Hapus latar otomatis" need their masks; without them the export would show their background
   if (!(await ensureCutout(P))) throw new Error(`Hapus latar otomatis belum siap: ${cutoutError() || 'model tidak termuat'}`);
   const fmts = supportedFormats();
   const wantMp4 = opts.format !== 'webm';
