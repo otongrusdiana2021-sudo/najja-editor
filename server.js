@@ -17,6 +17,7 @@ import { createMcpHandler, formatToolResult } from './mcp/protocol.js';
 import { TOOLS } from './mcp/tools.js';
 import { createStorage } from './lib/storage.js';
 import { createAuth } from './lib/auth.js';
+import { createOAuth, ACCESS_PREFIX, protectedResourceMetadata, authorizationServerMetadata, redirectLabel } from './lib/oauth.js';
 import { createTenancy, LOCAL_OWNER } from './lib/tenancy.js';
 import { createProxyManager, capabilities as mediaTools } from './lib/media-proxy.js';
 import { createJobs } from './lib/jobs.js';
@@ -256,6 +257,7 @@ function parseCookies(req) {
   return out;
 }
 let accounts = null; // created in createNajjaServer when NAJJA_TOKEN is set
+let oauth = null; // (v1.12.1) OAuth for MCP clients that connect with only the URL (Claude connectors)
 /**
  * Who is calling, verified by the server: { id, email, role, via }. id owns the data the request may touch.
  *   local   no accounts (NAJJA_TOKEN unset): one local owner
@@ -269,6 +271,12 @@ async function authenticate(req) {
   if (/^bearer\s+/i.test(h)) {
     const t = h.replace(/^bearer\s+/i, '').trim();
     if (safeEqual(t, TOKEN)) return { id: primaryOwnerId, role: 'admin', via: 'token' };
+    if (oauth && t.startsWith(ACCESS_PREFIX)) {
+      // (a Claude connector: the user who allowed it — gone when that user is removed)
+      const g = await oauth.userByAccessToken(t);
+      const ou = g && (await accounts.byId(g.userId));
+      return ou?.id ? { id: ou.id, email: ou.email, role: ou.role, via: 'oauth', client: g.clientId } : null;
+    }
     const u = await accounts.userByToken(t);
     if (u?.id) return { id: u.id, email: u.email, role: u.role, via: 'pat' };
     return null;
@@ -331,7 +339,13 @@ const isHttps = (req) => req.socket.encrypted || String(req.headers['x-forwarded
 const clientIp = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
 const loginFailures = new Map();
 
-function loginPage(mode, { error = '', email = '' } = {}) {
+/** Where the login may send the user afterwards: only back to an OAuth "allow?" page of this server. */
+// (the path is fixed, so the rest cannot lead elsewhere; no spaces, line breaks, backslashes or quotes)
+const safeNext = (v) => (typeof v === 'string' && /^\/oauth\/authorize\?[^\s\\<>"'`]*$/.test(v) && v.length < 4000 ? v : '');
+/** This server's address as clients see it (https://editor.example.com). */
+const baseUrlOf = (req) => (process.env.NAJJA_PUBLIC_URL || `${isHttps(req) ? 'https' : 'http'}://${requestHost(req)}`).replace(/\/$/, '');
+
+function loginPage(mode, { error = '', email = '', next = '' } = {}) {
   const setup = mode === 'setup';
   const field = (id, label, type, extra = '') => `<label for="${id}">${label}</label><input id="${id}" name="${id}" type="${type}" ${extra}>`;
   return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${setup ? 'Buat akun' : 'Masuk'} · Najja Editor</title>
@@ -354,7 +368,34 @@ ${field('token', 'Token server', 'password', 'autocomplete="off" required')}
     : `<h1>Masuk</h1><p>Masuk ke editor dengan akun kamu.</p>
 ${field('email', 'Email', 'email', `autocomplete="username" required ${email ? '' : 'autofocus'} value="${escHtml(email)}"`)}
 ${field('password', 'Password', 'password', `autocomplete="current-password" required ${email ? 'autofocus' : ''}`)}`}
+${next ? `<input type="hidden" name="next" value="${escHtml(next)}"><small>Setelah masuk, kamu diminta mengizinkan aplikasi AI yang ingin terhubung.</small>` : ''}
 ${error ? `<div class="e">${escHtml(error)}</div>` : ''}<button type="submit">${setup ? 'Buat akun & masuk' : 'Masuk'}</button></form></body></html>`;
+}
+
+/** (v1.12.1) "Allow this app?" — an MCP client (e.g. a Claude connector) asks to edit the signed-in user's projects. */
+function consentPage({ name, to, email, nonce, error = '' }) {
+  return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Izinkan akses · Najja Editor</title>
+<meta name="theme-color" content="#0b0b0d"><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
+<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Poppins,system-ui,sans-serif;background:radial-gradient(1200px 600px at 50% -10%,#1d1838 0,#0b0b0d 60%);color:#f2f2f5;padding:16px}
+form{width:min(420px,100%);background:#141417;border:1px solid #2b2b31;border-radius:18px;padding:28px 24px;display:flex;flex-direction:column;gap:12px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+h1{margin:0;font-size:20px;font-weight:600;line-height:1.35}p{margin:0;color:#a3a3ad;font-size:13.5px;line-height:1.55}b{color:#f2f2f5}ul{margin:0;padding-left:18px;color:#c9c9d1;font-size:13px;line-height:1.7}
+.who{background:#1b1b1f;border:1px solid #2b2b31;border-radius:10px;padding:10px 12px;font-size:13px;color:#c9c9d1}.row{display:flex;gap:10px;margin-top:6px}
+button{flex:1;height:44px;border:0;border-radius:10px;font:600 14px Poppins,sans-serif;cursor:pointer}.ok{background:linear-gradient(135deg,#47c9d7,#22d3c5);color:#061315}.no{background:#232328;color:#f2f2f5;border:1px solid #34343c}
+button:focus-visible{outline:2px solid #47c9d7;outline-offset:2px}.e{color:#ff6b81;font-size:12.5px;background:rgba(255,77,109,.1);border-radius:8px;padding:8px 10px}small{color:#75757f;font-size:11.5px;line-height:1.5}</style></head><body>
+<form method="post" action="/oauth/authorize"><input type="hidden" name="nonce" value="${escHtml(nonce)}">
+<h1>${escHtml(name)} ingin terhubung ke Najja Editor</h1>
+<div class="who">Akun: <b>${escHtml(email)}</b><br>Kembali ke: <b>${escHtml(to)}</b></div>
+<p>Kalau diizinkan, AI ini bisa:</p>
+<ul><li>melihat dan mengedit proyek di akun ini</li><li>memakai media dan mengekspor video di akun ini</li></ul>
+<p>Perintahnya dijalankan oleh tab editor yang kamu buka. Bisa diputus kapan saja di menu akun → <b>Token AI (MCP)</b>.</p>
+${error ? `<div class="e">${escHtml(error)}</div>` : ''}
+<div class="row"><button class="no" name="decision" value="deny" type="submit">Tolak</button><button class="ok" name="decision" value="allow" type="submit">Izinkan</button></div>
+<small>Hanya izinkan aplikasi yang baru saja kamu hubungkan sendiri.</small></form></body></html>`;
+}
+function oauthErrorPage(message) {
+  return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tidak bisa terhubung · Najja Editor</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Poppins,system-ui,sans-serif;background:#0b0b0d;color:#f2f2f5;padding:16px}div{max-width:420px;background:#141417;border:1px solid #2b2b31;border-radius:18px;padding:24px}h1{font-size:19px;margin:0 0 8px}p{color:#a3a3ad;font-size:13.5px;line-height:1.55;margin:0}</style></head>
+<body><div><h1>Tidak bisa terhubung</h1><p>${escHtml(message)}</p></div></body></html>`;
 }
 
 function readBody(req, limit = 64 * 1024 * 1024) {
@@ -477,6 +518,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
   const publicUrl = (process.env.NAJJA_PUBLIC_URL || `http://${displayHost}:${port}`).replace(/\/$/, '');
   const bridge = new Bridge(publicUrl);
   if (TOKEN && !accounts) accounts = createAuth(DATA_DIR);
+  if (TOKEN && !oauth) oauth = createOAuth(DATA_DIR);
   const localFiles = new Map(); // token -> { abs, owner } (for import_media with a local path)
   const cacheOwners = new Map(); // media-cache file -> owner (URL downloads for import_media)
   const lastExport = new Map(); // owner -> latest export status reported by that owner's editor
@@ -571,7 +613,9 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     await initData();
     const who = req.method === 'OPTIONS' ? null : await authenticate(req);
     if (req.method !== 'OPTIONS' && !who) {
-      return sendJson(res, 401, { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized: send "Authorization: Bearer <NAJJA_TOKEN>"' } }, { ...cors, 'WWW-Authenticate': 'Bearer realm="najja-editor"' });
+      // (a Claude connector reads resource_metadata, then signs the user in with OAuth)
+      return sendJson(res, 401, { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized: connect with OAuth, or send "Authorization: Bearer <token>"' } },
+        { ...cors, 'Access-Control-Expose-Headers': 'WWW-Authenticate, Mcp-Session-Id', 'WWW-Authenticate': `Bearer realm="najja-editor", resource_metadata="${baseUrlOf(req)}/.well-known/oauth-protected-resource"` });
     }
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
@@ -612,6 +656,81 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     return sendJson(res, 200, Array.isArray(body) ? responses : responses[0], { ...cors, ...sessionHeader });
   }
 
+  /**
+   * (v1.12.1) OAuth for MCP clients: discovery, registration, the "allow?" page and tokens (lib/oauth.js).
+   * Returns false for a path that is not OAuth's.
+   */
+  async function oauthRoute(req, res, url, p) {
+    const base = baseUrlOf(req);
+    const open = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Protocol-Version', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
+    const html = (status, body) => { res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'" }); return res.end(body); };
+    const fail = (err) => sendJson(res, err.status || 400, { error: err.oauth || 'invalid_request', error_description: err.message }, open);
+    if (req.method === 'OPTIONS') { res.writeHead(204, open); return res.end(); }
+    // discovery (RFC 9728, RFC 8414; the OpenID path too, for clients that look there)
+    if (p === '/.well-known/oauth-protected-resource' || p === '/.well-known/oauth-protected-resource/mcp') return sendJson(res, 200, protectedResourceMetadata(base), open);
+    if (p === '/.well-known/oauth-authorization-server' || p === '/.well-known/openid-configuration') return sendJson(res, 200, authorizationServerMetadata(base), open);
+    if (p.startsWith('/.well-known/')) return false;
+    // (clients that find no metadata try /register, /authorize and /token at the server's root)
+    const what = p.replace(/^\/oauth\//, '/');
+    if (what === '/register' && req.method === 'POST') {
+      const ip = clientIp(req);
+      const r = registrations.get(ip);
+      if (r && r.n >= 30 && Date.now() < r.until) return sendJson(res, 429, { error: 'too_many_requests', error_description: 'Terlalu banyak pendaftaran. Coba lagi nanti.' }, open);
+      registrations.set(ip, { n: (r && Date.now() < r.until ? r.n : 0) + 1, until: Date.now() + 3600_000 });
+      try { return sendJson(res, 201, await oauth.register(await readJson(req)), open); } catch (err) { return fail(err); }
+    }
+    if (what === '/token' && req.method === 'POST') {
+      const raw = (await readBody(req, 64 * 1024)).toString('utf8');
+      let form;
+      if (/json/i.test(String(req.headers['content-type'] || ''))) { try { form = new URLSearchParams(Object.entries(JSON.parse(raw || '{}')).map(([k, v]) => [k, String(v)])); } catch { return fail(Object.assign(new Error('JSON tidak valid'), { status: 400 })); } } else form = new URLSearchParams(raw);
+      try { return sendJson(res, 200, await oauth.token(form), { ...open, Pragma: 'no-cache' }); } catch (err) { return fail(err); }
+    }
+    if (what === '/revoke' && req.method === 'POST') {
+      const form = new URLSearchParams((await readBody(req, 16 * 1024)).toString('utf8'));
+      await oauth.revokeToken(form.get('token'));
+      res.writeHead(200, open);
+      return res.end();
+    }
+    if (what === '/authorize' && req.method === 'GET') {
+      let ask;
+      try { ask = await oauth.checkAuthorize(url.searchParams); } catch (err) {
+        if (err.redirect === false || !err.req) return html(400, oauthErrorPage(err.message));
+        const back = new URL(err.req.redirectUri);
+        back.searchParams.set('error', err.oauth);
+        back.searchParams.set('error_description', err.message);
+        if (err.req.state) back.searchParams.set('state', err.req.state);
+        res.writeHead(302, { Location: back.href });
+        return res.end();
+      }
+      const who = await authenticate(req);
+      if (!who || who.via !== 'session') {
+        res.writeHead(302, { Location: `/login?next=${encodeURIComponent(`/oauth/authorize${url.search}`)}` });
+        return res.end();
+      }
+      const nonce = oauth.holdRequest(who.id, ask);
+      return html(200, consentPage({ name: ask.client.name, to: redirectLabel(ask.redirectUri), email: who.email, nonce }));
+    }
+    if (what === '/authorize' && req.method === 'POST') {
+      if (!originAllowed(req)) return html(403, oauthErrorPage('Origin tidak diizinkan.'));
+      const who = await authenticate(req);
+      if (!who || who.via !== 'session') { res.writeHead(303, { Location: '/login' }); return res.end(); }
+      const form = new URLSearchParams((await readBody(req, 16 * 1024)).toString('utf8'));
+      const ask = oauth.takeRequest(form.get('nonce'), who.id);
+      if (!ask) return html(400, oauthErrorPage('Permintaan ini sudah kedaluwarsa atau sudah dijawab. Hubungkan ulang dari aplikasinya.'));
+      const back = new URL(ask.redirectUri);
+      if (form.get('decision') === 'allow') {
+        back.searchParams.set('code', oauth.issueCode(ask));
+        log(`AI terhubung lewat OAuth: ${ask.client.name} → ${who.email}`);
+      } else back.searchParams.set('error', 'access_denied');
+      if (ask.state) back.searchParams.set('state', ask.state);
+      back.searchParams.set('iss', base);
+      res.writeHead(303, { Location: back.href });
+      return res.end();
+    }
+    return false;
+  }
+  const registrations = new Map(); // ip → registrations in the last hour
+
   async function route(req, res) {
     const url = new URL(req.url, 'http://local');
     const p = decodeURIComponent(url.pathname);
@@ -630,9 +749,10 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     if (p === '/login') {
       if (!TOKEN) { res.writeHead(302, { Location: '/' }); return res.end(); }
       const setupMode = !(await accounts.hasUsers());
+      let next = safeNext(url.searchParams.get('next'));
       const page = (status, error, email) => {
         res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-        res.end(loginPage(setupMode ? 'setup' : 'login', { error, email }));
+        res.end(loginPage(setupMode ? 'setup' : 'login', { error, email, next }));
       };
       if (req.method !== 'POST') return page(200);
       if (!originAllowed(req)) return page(403, 'Origin tidak diizinkan.');
@@ -641,6 +761,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       if (f && f.n >= 10 && Date.now() < f.until) return page(429, 'Terlalu banyak percobaan. Coba lagi 15 menit lagi.');
       const form = new URLSearchParams((await readBody(req, 16 * 1024)).toString('utf8'));
       const email = form.get('email') || '';
+      next = safeNext(form.get('next')) || next;
       try {
         let user;
         if (setupMode) {
@@ -655,7 +776,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
         }
         loginFailures.delete(ip);
         res.writeHead(303, {
-          Location: '/',
+          Location: next || '/',
           'Set-Cookie': `najja_auth=${await accounts.createSession(user)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${accounts.maxAge}${isHttps(req) ? '; Secure' : ''}`,
         });
         return res.end();
@@ -672,6 +793,10 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       return res.end();
     }
 
+    if (TOKEN && oauth && (p.startsWith('/oauth/') || p.startsWith('/.well-known/') || p === '/authorize' || p === '/token' || p === '/register')) {
+      const handled = await oauthRoute(req, res, url, p);
+      if (handled !== false) return handled;
+    }
     if (p === '/mcp' || p === '/mcp/') return handleMcp(req, res);
 
     const who = await authenticate(req);
@@ -693,10 +818,19 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       if (req.method === 'POST') return sendJson(res, 200, { token: await accounts.createToken(who.id) });
       if (req.method === 'DELETE') return sendJson(res, 200, await accounts.revokeToken(who.id));
     }
+    // (v1.12.1) apps connected with OAuth (Claude connectors): list, disconnect
+    if (p === '/api/me/oauth' || p.startsWith('/api/me/oauth/')) {
+      if (!TOKEN || !oauth) return sendJson(res, 400, { error: 'Hanya di mode server (NAJJA_TOKEN).' });
+      if (who.via !== 'session') return sendJson(res, 403, { error: 'Masuk dengan email untuk mengatur aplikasi terhubung.' });
+      if (p === '/api/me/oauth' && req.method === 'GET') return sendJson(res, 200, { apps: await oauth.grants(who.id), url: `${baseUrlOf(req)}/mcp` });
+      const one = /^\/api\/me\/oauth\/(nc_[\w-]{10,40})$/.exec(p);
+      if (one && req.method === 'DELETE') return sendJson(res, 200, { ok: true, removed: await oauth.revokeUser(who.id, one[1]) });
+    }
     if (p === '/api/me/password' && req.method === 'POST') {
       if (who.via !== 'session') return sendJson(res, 400, { error: 'Masuk dengan email untuk mengganti password.' });
       const body = await readJson(req);
       const user = await accounts.changePassword(who.email, body.current, body.next);
+      if (oauth) await oauth.revokeUser(user.id); // (a new password disconnects the connected apps too)
       return sendJson(res, 200, { ok: true }, {
         'Set-Cookie': `najja_auth=${await accounts.createSession(user)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${accounts.maxAge}${isHttps(req) ? '; Secure' : ''}`,
       });
@@ -713,6 +847,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       if (del && req.method === 'DELETE') {
         // Explicit admin action: the removed user's projects, media and exports go to this admin (backed up, logged).
         const r = await accounts.removeUser(del[1], who.email);
+        if (oauth && r.removed?.id) await oauth.revokeUser(r.removed.id);
         const moved = r.removed?.id ? await tenancy.transfer(r.removed.id, who.id) : null;
         await refreshOwner(); // the removed user may have been the first admin
         return sendJson(res, 200, { ok: true, moved });

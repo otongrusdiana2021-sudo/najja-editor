@@ -123,6 +123,9 @@ body.ready .boot { opacity: 0; visibility: hidden; }
 .tok-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .tok-fresh { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px; border-radius: 10px; border: 1px solid var(--accent, #7c5cff); background: var(--panel-2); }
 .tok-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tok-oauth { display: grid; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--border); }
+.tok-oauth h4 { margin: 0; font-size: 13px; font-weight: 600; }
+.oauth-apps { display: grid; gap: 6px; }
 .dc-meta { font-size: 12px; color: var(--text-2); margin-bottom: 10px; }
 .dc-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; margin-bottom: 12px; }
 .user-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); }

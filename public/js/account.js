@@ -96,7 +96,29 @@ export const account = {
           <button class="btn btn-primary" data-new>${icon('ai', 15)} ${info.exists ? 'Buat token baru' : 'Buat token'}</button>
           ${info.exists ? `<button class="btn" data-revoke>${icon('x', 14)} Cabut token</button>` : ''}
         </div>
-        ${info.exists && !fresh ? '<p class="hint">Membuat token baru otomatis mencabut token lama.</p>' : ''}`;
+        ${info.exists && !fresh ? '<p class="hint">Membuat token baru otomatis mencabut token lama.</p>' : ''}
+        <div class="tok-oauth">
+          <h4>Tanpa token: hubungkan dari Claude</h4>
+          <p class="hint">Di Claude (desktop, claude.ai, atau HP): <b>Settings → Connectors → Add custom connector</b>, tempel alamat ini, lalu masuk dan izinkan.</p>
+          <div class="copy-row"><code>${escapeHtml(`${location.origin}/mcp`)}</code>${copyBtn(`${location.origin}/mcp`)}</div>
+          <div class="oauth-apps"><p class="hint">Memuat aplikasi terhubung…</p></div>
+        </div>`;
+      // (apps connected with OAuth: when they were allowed and last used; disconnect one)
+      const appsEl = body.querySelector('.oauth-apps');
+      const listApps = async () => {
+        let r;
+        try { r = await api('/api/me/oauth'); } catch { appsEl.innerHTML = ''; return; }
+        appsEl.innerHTML = r.apps.length
+          ? r.apps.map((a) => `<div class="user-row"><div><b>${escapeHtml(a.name)}</b><span>${a.to && a.to !== a.name ? `${escapeHtml(a.to)} · ` : ''}diizinkan ${when(a.createdAt)} · terakhir dipakai ${when(a.lastUsedAt)}</span></div><button class="btn sm" data-unlink="${escapeHtml(a.clientId)}">${icon('x', 14)} Putuskan</button></div>`).join('')
+          : '<p class="hint">Belum ada aplikasi yang terhubung lewat cara ini.</p>';
+        for (const b of appsEl.querySelectorAll('[data-unlink]')) {
+          b.onclick = async () => {
+            if (!(await confirmDialog('Putuskan aplikasi ini?', 'AI di aplikasi itu tidak bisa mengedit lagi sampai dihubungkan ulang.', 'Putuskan', true))) return;
+            try { await api(`/api/me/oauth/${encodeURIComponent(b.dataset.unlink)}`, { method: 'DELETE' }); toast('Aplikasi diputus'); listApps(); } catch (err) { toast(err.message, { type: 'error' }); }
+          };
+        }
+      };
+      listApps();
       for (const b of body.querySelectorAll('[data-copy]')) {
         b.onclick = () => navigator.clipboard?.writeText(b.dataset.copy).then(() => toast('Disalin', { type: 'ok' })).catch(() => toast('Gagal menyalin', { type: 'error' }));
       }

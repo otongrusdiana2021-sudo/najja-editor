@@ -305,7 +305,15 @@ Token server dipakai untuk membuat akun admin pertama dan sebagai token MCP mili
 
 > Perintah AI dijalankan oleh **tab editor yang sedang terbuka di akun yang sama**. Buka editornya di browser dulu sebelum menyuruh AI.
 
-**Token AI pribadi (disarankan):** menu akun → **Token AI (MCP)** → **Buat token**. Token berawalan `najja_pat_`, hanya ditampilkan sekali, dan server hanya menyimpan hash-nya. AI yang memakai token ini hanya bisa mengedit proyek di akun kamu, lewat editor yang kamu buka. Bisa dicabut kapan saja dari menu yang sama. Token server (`NAJJA_TOKEN`) tetap berlaku dan bertindak sebagai admin pertama.
+**Paling mudah (v1.12.1): konektor Claude, tanpa token.** Di Claude (aplikasi desktop, claude.ai, atau HP) buka **Settings → Connectors → Add custom connector** (bahasa Indonesia: **Pengaturan → Konektor → Tambahkan konektor kustom**), isi alamat `https://editor.domainkamu.com/mcp`, lalu klik **Hubungkan**. Claude membuka halaman masuk Najja; masuk dengan akun kamu, lalu klik **Izinkan**. Selesai.
+
+- Najja memakai OAuth 2.1 standar MCP: penemuan di `/.well-known/oauth-protected-resource` dan `/.well-known/oauth-authorization-server`, pendaftaran otomatis, kode + PKCE, token yang diperbarui otomatis.
+- AI yang terhubung dengan cara ini hanya bisa mengedit proyek akun yang mengizinkannya, sama seperti token AI pribadi.
+- Daftar aplikasi terhubung dan tombol **Putuskan** ada di menu akun → **Token AI (MCP)**. Ganti password memutus semua aplikasi.
+- Server menyimpan hanya hash token di `<folder data>/oauth.json`.
+- Di belakang reverse proxy (aaPanel/nginx), jalur `/.well-known/` dan `/oauth/` harus ikut diteruskan ke Najja. Cek: `https://editor.domainkamu.com/.well-known/oauth-authorization-server` harus menampilkan JSON. Kalau malah 404 dari nginx, atur reverse proxy-nya supaya semua jalur (`/`) diteruskan.
+
+**Token AI pribadi:** menu akun → **Token AI (MCP)** → **Buat token**. Token berawalan `najja_pat_`, hanya ditampilkan sekali, dan server hanya menyimpan hash-nya. AI yang memakai token ini hanya bisa mengedit proyek di akun kamu, lewat editor yang kamu buka. Bisa dicabut kapan saja dari menu yang sama. Token server (`NAJJA_TOKEN`) tetap berlaku dan bertindak sebagai admin pertama.
 
 **Claude Code:**
 

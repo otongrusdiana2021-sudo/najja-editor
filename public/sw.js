@@ -1,9 +1,9 @@
 // Najja Editor service worker: makes the app installable and keeps the shell available offline.
 // Network-first for the app (updates always apply), cache-first for Google Fonts.
 // API, MCP, login, media and exports are never cached — project data lives on the server.
-const CACHE = 'najja-shell-v25'; // v1.12.0
+const CACHE = 'najja-shell-v26'; // v1.12.1
 // (/vendor: the AI library and model are big and versioned by path; bgdevice.js keeps the model in its own cache)
-const BYPASS = /^\/(api|mcp|bridge|login|logout|exports|media-cache|vendor)(\/|$)/;
+const BYPASS = /^\/(api|mcp|bridge|login|logout|exports|media-cache|vendor|oauth|\.well-known|authorize|token|register)(\/|$)/;
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
