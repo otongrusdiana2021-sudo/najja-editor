@@ -346,7 +346,7 @@ export const TOOLS = [
   {
     name: 'apply_style',
     title: 'Edit with a style',
-    description: 'Build a complete edit of the project in one of the styles (see list_styles). By default it makes a NEW project (a copy, named "<project> · <style>") and leaves the current one as it is. You are the director: pass a plan with your choices (which words become big text, where the price is said, what to cut, which shot goes where); anything you leave out is chosen automatically. The style does the look (fonts, timing, colours, transitions, music). One undo takes the whole edit back.',
+    description: 'Build a complete edit of the project in one of the styles (see list_styles). By default it makes a NEW project (a copy, named "<project> · <style>") and leaves the current one as it is. You are the director: pass a plan with your choices (which words become big text, where the price is said, what to cut, which shot goes where); anything you leave out is chosen automatically. The style does the look (fonts, timing, colours, transitions, music), puts a sound effect on every text and transition (plan.sfx), and keeps every text and sticker off the faces (found on the user\'s device; a text on a face moves above or below it). The result says how many texts moved (faces) and how many sounds were placed (sfx). One undo takes the whole edit back.',
     inputSchema: obj({
       style: enm(['showcase', 'editorial', 'storypop'], 'The style.'),
       product: obj({
@@ -378,6 +378,7 @@ export const TOOLS = [
           outro: bool('Editorial: the "bye" + brand ending (default true).'),
           sting: bool('Story Pop: the brand sting in the middle (default true).'),
           live: bool('Story Pop: a LIVE badge.'),
+          sfx: enm(['full', 'graphics', 'none'], 'Sound effects (default full): a sound for every text that comes in (pop, swipe, typing, ka-ching on the price, bubble on a sticker), every transition (whoosh, swipe, glitch) and a soft click per subtitle line. graphics: the same without the subtitle clicks. none: no sound effects.'),
         },
         additionalProperties: false,
       },

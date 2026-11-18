@@ -143,10 +143,10 @@ try {
   const aiLook = await p.evaluate(async (foto) => {
     const { store } = await import('/js/store.js');
     const T = store.P.clips.filter((c) => c.type === 'text');
-    return { name: store.P.name, kw: T.filter((c) => c.text.font === 'Anton' && c.text.color === '#F8F8A8').map((c) => c.text.content), price: T.some((c) => c.text.content === 'Rp150.000'), foto: store.P.clips.filter((c) => c.mediaId === foto).length, audio: store.P.clips.filter((c) => c.type === 'audio').length };
+    return { name: store.P.name, kw: T.filter((c) => c.text.font === 'Anton' && c.text.color === '#F8F8A8').map((c) => c.text.content), price: T.some((c) => c.text.content === 'Rp150.000'), foto: store.P.clips.filter((c) => c.mediaId === foto).length, audio: store.P.clips.filter((c) => c.type === 'audio' && !/^SFX /.test(c.name)).length, sfx: store.P.clips.filter((c) => /^SFX /.test(c.name)).length };
   }, ids['foto.png']);
-  check(aiLook.kw.join(' ') === 'MUAT LIMA OUTFIT' && aiLook.price && aiLook.foto === 1 && aiLook.audio === 0 && ai.outro === false,
-    `rencana AI: kata kunci ${aiLook.kw.join(' ')}, harga Rp150.000, B-roll foto, tanpa musik & outro`);
+  check(aiLook.kw.join(' ') === 'MUAT LIMA OUTFIT' && aiLook.price && aiLook.foto === 1 && aiLook.audio === 0 && ai.outro === false && aiLook.sfx > 0,
+    `rencana AI: kata kunci ${aiLook.kw.join(' ')}, harga Rp150.000, B-roll foto, tanpa musik & outro (SFX tetap: ${aiLook.sfx})`);
   check(aiLook.name === 'Review Tas · Editorial Review', `style dari proyek style tetap memakai nama asli ("${aiLook.name}")`);
   // (this edit was made from the first one's project: one undo brings that edit back, whole)
   const undone = await p.evaluate(async () => { const { store } = await import('/js/store.js'); store.undo(); return { style: store.P.style?.id, kw: store.P.clips.filter((c) => c.type === 'text' && c.text.font === 'Anton' && c.text.color === '#F8F8A8').map((c) => c.text.content).join(' '), audio: store.P.clips.filter((c) => c.type === 'audio').length }; });

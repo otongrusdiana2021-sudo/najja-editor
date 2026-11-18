@@ -101,3 +101,17 @@ test('the model: the AI service\'s copy is used when it is the same file; otherw
     fs.rmSync(data, { recursive: true, force: true });
   }
 });
+
+test('a new app version clears old shells but keeps the AI models in the browser (sw.js)', async () => {
+  const src = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
+  const handlers = {};
+  const deleted = [];
+  const names = ['najja-shell-v1', 'najja-models-v1', 'najja-shell-v999'];
+  const self = { addEventListener: (k, fn) => { handlers[k] = fn; }, skipWaiting() {}, clients: { claim: async () => {} }, location: { origin: 'https://x' } };
+  const caches = { keys: async () => names, delete: async (k) => { deleted.push(k); return true; } };
+  new Function('self', 'caches', src)(self, caches);
+  let done;
+  handlers.activate({ waitUntil: (p) => { done = p; } });
+  await done;
+  assert.deepEqual(deleted, ['najja-shell-v1', 'najja-shell-v999']);
+});

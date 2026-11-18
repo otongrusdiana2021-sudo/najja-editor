@@ -8,6 +8,9 @@ import { mixForSpeech } from './fastexport.js';
 import { wav16, transcribeWav, transcribeStatus } from './captions.js';
 import { STYLES, styleById, buildStyle, checkMaterial, speechTimeline } from './styles.js';
 import { makeClip } from './store.js';
+import { findFaces } from './faces.js';
+import { sfxCues } from './stylefx.js';
+import { baseSize, preloadFonts } from './render.js';
 import { clone, uid } from './util.js';
 
 const GAP = 1; // seconds of silence between videos in one transcription request
@@ -102,6 +105,11 @@ export async function generateStyle(styleId, { product = {}, plan = null, target
   if (signal?.aborted) throw new Error('Dibatalkan');
   const check = checkMaterial(store.P);
   if (check.styles[styleId].ok === 'no') throw new Error(check.styles[styleId].note);
+  // (v1.12.4) where the faces are, so no text covers one: each video once, kept in the project
+  onProgress(0.8, 'Mencari wajah…');
+  const faces = await findFaces(store.P, { onProgress: (p) => onProgress(0.8 + p * 0.04, 'Mencari wajah…'), signal });
+  if (faces.looked) store.scheduleSave();
+  if (signal?.aborted) throw new Error('Dibatalkan');
   onProgress(0.84, 'Menyusun edit…');
   // (the product is remembered in the original project, to fill the form next time)
   store.P.styleProduct = { ...product };
@@ -115,12 +123,29 @@ export async function generateStyle(styleId, { product = {}, plan = null, target
       music = { mediaId: m.id, duration: m.duration };
     } catch { /* no music: the edit is still made */ }
   }
-  onProgress(0.92, 'Menyusun edit…');
+  // a first build on a copy says which sounds and fonts the edit uses: those sounds are made, the fonts loaded (so
+  // the texts are measured in their own font when they are kept off the faces)
+  onProgress(0.9, 'Menyiapkan efek suara…');
+  const level = ['full', 'graphics', 'none'].includes(plan?.sfx) ? plan.sfx : 'full';
+  const dry = clone(store.P);
+  buildStyle(dry, styleId, { product, plan, music });
+  const sfx = {};
+  for (const id of new Set(sfxCues(dry, { level }).map((q) => q.id))) {
+    try {
+      const m = await ensureStockAudio(id);
+      sfx[id] = { mediaId: m.id, duration: m.duration };
+    } catch { /* that sound is left out */ }
+  }
+  await preloadFonts(dry);
+  const ctx = document.createElement('canvas').getContext('2d');
+  onProgress(0.95, 'Menyusun edit…');
   const summary = store.mutate(`Style: ${st.name}`, (P) => {
-    const s = buildStyle(P, styleId, { product, plan, music });
+    const measure = (c) => baseSize(c, { project: P }, ctx);
+    const s = buildStyle(P, styleId, { product, plan, music, sfx, measure });
     P.style.product = { ...product };
     return s;
   });
+  if (!faces.looked && faces.failed) summary.faces = { ...summary.faces, detection: `tidak jalan di perangkat ini (${faces.reason}); posisi wajah ditebak` };
   const { engine, timeline } = actions.app;
   store.select(null);
   engine?.seek(0);

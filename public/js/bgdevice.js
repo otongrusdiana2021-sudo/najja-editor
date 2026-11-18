@@ -64,6 +64,28 @@ async function modelBytes(onProgress) {
 }
 
 let ort = null;
+let ortLoading = null;
+/** onnxruntime-web from the Najja server (once; also used by faces.js). */
+export function loadOrt() {
+  if (ort) return Promise.resolve(ort);
+  if (!ortLoading) {
+    ortLoading = (async () => {
+      let lib;
+      try { lib = await import(`${ORT}/ort.webgpu.min.mjs`); } catch {
+        let msg = 'pustaka AI tidak bisa dimuat dari server';
+        try { const r = await fetch(`${ORT}/ort.webgpu.min.mjs`, { credentials: 'same-origin' }); if (!r.ok) msg = (await r.json()).error || msg; } catch { /* offline */ }
+        throw new Error(msg);
+      }
+      lib.env.wasm.wasmPaths = `${location.origin}${ORT}/`;
+      lib.env.wasm.numThreads = 1;
+      lib.env.logLevel = 'error';
+      ort = lib;
+      return lib;
+    })().catch((err) => { ortLoading = null; throw err; });
+  }
+  return ortLoading;
+}
+
 let session = null;
 let loading = null;
 /** The model ready on the GPU (once). onProgress(p, stage): 'model' while downloading, 'init' while it is set up. */
@@ -71,14 +93,7 @@ export function loadDeviceModel(onProgress = () => {}) {
   if (session) return Promise.resolve(session);
   if (loading) return loading;
   loading = (async () => {
-    try { ort = await import(`${ORT}/ort.webgpu.min.mjs`); } catch {
-      let msg = 'pustaka AI tidak bisa dimuat dari server';
-      try { const r = await fetch(`${ORT}/ort.webgpu.min.mjs`, { credentials: 'same-origin' }); if (!r.ok) msg = (await r.json()).error || msg; } catch { /* offline */ }
-      throw new Error(msg);
-    }
-    ort.env.wasm.wasmPaths = `${location.origin}${ORT}/`;
-    ort.env.wasm.numThreads = 1;
-    ort.env.logLevel = 'error';
+    await loadOrt();
     const bytes = await modelBytes((p) => onProgress(p, 'model'));
     onProgress(1, 'init');
     try {
@@ -94,7 +109,7 @@ export function loadDeviceModel(onProgress = () => {}) {
 }
 
 /** Frames of a media at the given times, one after another: WebCodecs, or seeking a video element. */
-async function frameReader(mediaId) {
+export async function frameReader(mediaId) {
   const rt = mediaRT.get(mediaId);
   if (rt?.img) return { size: { w: rt.img.naturalWidth || rt.img.width, h: rt.img.naturalHeight || rt.img.height }, at: async () => rt.img, close() {} };
   const url = rt?.exportUrl || rt?.url;

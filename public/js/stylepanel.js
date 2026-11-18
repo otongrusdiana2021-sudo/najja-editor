@@ -123,7 +123,7 @@ async function generateOne(id, progress, signal) {
   const r = await generateStyle(id, { product: product(), onProgress: progress, signal });
   S.forProject = store.P.id;
   actions.app.sheet?.close(); // (the edit is what to look at now)
-  toast(`${r.name}: video ${Math.round(r.duration)} dtk jadi di proyek baru “${r.project_name}”${r.cut_seconds > 0.5 ? `, ${Math.round(r.cut_seconds)} dtk jeda dipotong` : ''}`, { type: 'ok', timeout: 5000 });
+  toast(`${r.name}: video ${Math.round(r.duration)} dtk jadi di proyek baru “${r.project_name}”${r.cut_seconds > 0.5 ? `, ${Math.round(r.cut_seconds)} dtk jeda dipotong` : ''}${r.sfx ? `, ${r.sfx} SFX` : ''}${r.faces?.moved ? `, ${r.faces.moved} teks digeser dari wajah` : ''}`, { type: 'ok', timeout: 5000 });
   return r;
 }
 

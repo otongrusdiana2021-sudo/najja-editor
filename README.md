@@ -6,6 +6,8 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.12.4:** **Style Konsep langsung lengkap.** Tiap konsep (dari tombol Generate atau prompt ke Claude) menghasilkan subtitle dari transkrip, teks kinetik, dan **SFX di tiap teks dan transisi** (pop, swipe, ketik, kaching saat harga, bubble untuk stiker, whoosh di transisi, klik pelan per subtitle). **Teks tidak menutupi wajah:** wajah dicari sekali per video di perangkat (detektor 1,3 MB, tanpa GPU), lalu teks yang kena wajah otomatis dipindah ke atas atau bawahnya. Lihat [docs/STYLE-KONSEP.md](docs/STYLE-KONSEP.md). Perbaikan: update aplikasi tidak lagi menghapus model Hapus latar (±190 MB) yang sudah tersimpan di browser.
+
 **Baru di v1.12.3:** Panel **AI · MCP** dirombak jadi siap tempel. Tab **Hubungkan** berisi alamat konektor, perintah Claude Code tanpa token, dan JSON untuk Cursor/VS Code (token bisa diisi otomatis untuk cara lama). Tab **Prompt** berisi perintah siap pakai berisi nama proyek, plus tombol **Buka di Claude** yang membuka chat dengan perintahnya sudah terisi. Tab **Tempel JSON** menjalankan perintah dari AI mana pun (ChatGPT, Claude tanpa konektor) langsung di editor, dan **Salin panduan untuk AI lain** menyalin daftar tool beserta formatnya.
 
 **Baru di v1.12.1:** **Hubungkan Claude tanpa token.** Di Claude (desktop, claude.ai, atau HP): Settings → Connectors → Add custom connector, tempel `https://editor.domainkamu.com/mcp`, masuk, lalu Izinkan. Najja sekarang mendukung OAuth standar MCP; aplikasi terhubung bisa dilihat dan diputus di menu Token AI.

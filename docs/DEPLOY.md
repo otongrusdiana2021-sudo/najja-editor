@@ -366,6 +366,8 @@ Saat **Hapus latar otomatis** dipakai pertama kali, server Najja menyiapkan file
 
 Versinya dikunci dan sha256-nya dicek. File disimpan di `<folder data>/vendor/` dan disajikan oleh server Najja sendiri. Browser tidak memuat apa pun dari CDN. Tiap perangkat mengunduh model ±190 MB itu sekali dari server Najja, lalu menyimpannya di cache browser.
 
+Style Konsep (v1.12.4) juga memakai `onnxruntime-web` yang sama, ditambah detektor wajah UltraFace RFB-320 (±1,3 MB, Apache-2.0) dari `huggingface.co`. File ini diunduh sekali saat style pertama dibuat, lalu disajikan dari `/vendor/ultraface-320/`. Detektor ini jalan di WebAssembly, tidak butuh GPU. Kalau server tidak bisa mengunduhnya, style tetap jadi dan posisi wajah ditebak.
+
 Perangkat tanpa WebGPU memakai layanan AI di server (container `ai`). Kalau layanan itu juga tidak berjalan, sakelarnya menampilkan pesan. Fitur editor lain tidak terpengaruh.
 
 ## Masalah umum

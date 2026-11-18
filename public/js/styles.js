@@ -16,6 +16,7 @@ import { makeClip, MIN_CLIP } from './store.js';
 import { TEXT_PRESETS, DEFAULT_TEXT } from './presets.js';
 import { clone, deepMerge, uid } from './util.js';
 import { makeMotion, wordCount } from './kinetic.js';
+import { avoidFaces, addStyleSfx } from './stylefx.js';
 
 export const STYLES = [
   {
@@ -319,9 +320,13 @@ export function buildStyle(P, styleId, opts = {}) {
   P.clips = [];
   P.tracks = [{ id: 'main', kind: 'main', name: 'Utama', muted: false, hidden: false, locked: false }];
   P.style = { id: styleId, at: Date.now() };
-  if (styleId === 'editorial') return buildEditorial(P, st, product, opts);
-  if (styleId === 'showcase') return buildShowcase(P, st, product, opts);
-  return buildStoryPop(P, st, product, opts);
+  const build = styleId === 'editorial' ? buildEditorial : styleId === 'showcase' ? buildShowcase : buildStoryPop;
+  const s = build(P, st, product, opts);
+  // (v1.12.4) no text over a face; a sound for every text that comes in and every transition
+  s.faces = avoidFaces(P, { measure: opts.measure || null, talking: (m) => !!m && isTalking(P, m) });
+  const level = ['full', 'graphics', 'none'].includes(opts.plan?.sfx) ? opts.plan.sfx : 'full';
+  s.sfx = opts.sfx ? addStyleSfx(P, opts.sfx, { level, total: s.duration }) : 0;
+  return s;
 }
 
 // ---- shared pieces ---------------------------------------------------------------------------
