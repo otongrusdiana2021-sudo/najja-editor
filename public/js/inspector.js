@@ -317,6 +317,8 @@ export class Inspector {
   }
 
   stickerPanel(c) {
+    // (v1.12.6) a colour circle from Style Konsep: its colour and its name
+    if (c.sticker?.swatch) return sec('Bulatan warna', `${color('Warna', 'sticker.swatch.color')}<div class="ctl"><label>Nama</label><input type="text" data-path="sticker.swatch.label" data-kind="str" placeholder="(tanpa nama)"></div>${color('Warna nama', 'sticker.swatch.labelColor')}`);
     const b = c.sticker?.badge;
     return b ? sec('Label', `<div class="ctl"><label>Teks</label><input type="text" data-path="sticker.badge.text" data-kind="str"></div>${color('Latar', 'sticker.badge.bg')}${color('Teks', 'sticker.badge.fg')}`)
       : '<p class="hint pad">Stiker emoji tidak punya pengaturan teks. Atur posisi dan ukuran lewat Transformasi.</p>';

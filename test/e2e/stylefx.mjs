@@ -67,7 +67,7 @@ const mcp = async (name, args = {}) => {
 };
 
 /** A new project with the talking video and the product shot, the transcript put in (Whisper is not here). */
-async function setup(p, name) {
+async function setup(p, name, words = WORDS) {
   await mcp('new_project', { name, aspect_ratio: '9:16' });
   const talk = (await mcp('import_media', { path: 'ngomong.mp4' })).media_id;
   const shot = (await mcp('import_media', { path: 'produk.mp4' })).media_id;
@@ -80,7 +80,7 @@ async function setup(p, name) {
     store.P.speech = { [talk]: { lang: 'id', words }, [shot]: { lang: 'id', words: [] } };
     await store.save({ force: true });
     return { id: store.P.id, talk, shot };
-  }, { talk, shot, words: WORDS });
+  }, { talk, shot, words });
 }
 
 /** In the open project: texts/stickers on a face or a person (measured in their fonts), the SFX, the face boxes. */
@@ -204,8 +204,64 @@ try {
   check(modelRequests === 2 && b.onFace.length === 0 && b.onBody.length === 0 && ed.sfx > 0 && ed.faces.moved > 0, `Editorial: model tidak dijalankan lagi (${modelRequests} model diambil sekali), ${ed.faces.moved} kelompok teks digeser, tidak menutupi orang, ${ed.sfx} SFX`);
   const quiet = await mcp('apply_style', { style: 'showcase', product: PRODUCT, plan: { sfx: 'none' } });
   const q = await inspect(p);
-  check(quiet.sfx === 0 && q.sfxTracks === 0 && q.onFace.length === 0 && q.onBody.length === 0, `plan.sfx "none": tanpa SFX; Showcase juga tidak menutupi orang${q.onBody.length ? ` (${q.onBody.join(', ')})` : ''}`);
+  check(quiet.sfx === 0 && q.sfxTracks === 0 && q.onFace.length === 0 && q.onBody.length === 0, `plan.sfx "none": tanpa SFX (${quiet.sfx}, ${q.sfxTracks} track); Showcase juga tidak menutupi orang${q.onFace.length || q.onBody.length ? ` (${[...q.onFace, ...q.onBody].join(', ')})` : ''}`);
   check(!errors.length, `tidak ada error halaman${errors.length ? `: ${errors.join(' | ')}` : ''}`);
+
+  step('E. momen dari ucapan: bulatan warna, timer, chip "bisa buat"');
+  const SAID2 = ['Halo semuanya, ini tas travel yang lagi viral.', 'Warnanya ada tiga, hitam, cream, sama dusty pink.', 'Bisa buat baju basah, minuman, sama laptop.', 'Harganya cuma 149 ribu aja.', 'Promonya tinggal 2 hari lagi ya, buruan checkout.'];
+  const W2 = [];
+  { let t = 0.8; for (const x of SAID2) { for (const w of x.split(' ')) { W2.push({ w, s: +t.toFixed(3), e: +(t + 0.3).toFixed(3) }); t += 0.36; } t += 1.2; } }
+  await setup(p, 'Momen', W2);
+  const mm = await mcp('apply_style', { style: 'storypop', product: { name: 'Travel Bag', price: '189rb', price_discount: '149rb' } });
+  check(mm.moments?.color === 1 && mm.moments?.uses === 1 && mm.moments?.timer === 1, `momen ditemukan dari transkrip: ${JSON.stringify(mm.moments)}`);
+  const look = await p.evaluate(async () => {
+    const { store } = await import('/js/store.js');
+    const { mediaRT } = await import('/js/media.js');
+    const P = store.P;
+    const sw = P.clips.filter((c) => c.sticker?.swatch).map((c) => ({ id: c.id, color: c.sticker.swatch.color, label: c.sticker.swatch.label, start: c.start, end: c.start + c.duration, x: c.x, y: c.y, scale: c.scale }));
+    const clock = P.clips.find((c) => c.sticker?.emoji === '⏰');
+    const tick = P.clips.find((c) => c.name === 'SFX tick');
+    const tickMedia = tick && P.media.find((m) => m.id === tick.mediaId);
+    return { sw, clock: clock && { start: clock.start, loop: clock.animLoop?.type }, tick: tick && { start: tick.start, stock: tickMedia?.stock, ready: mediaRT.get(tick.mediaId)?.status === 'ready' }, chips: P.clips.filter((c) => c.sticker?.badge?.icon).map((c) => `${c.sticker.badge.icon} ${c.sticker.badge.text}`) };
+  });
+  check(look.sw.map((x) => x.label).join(',') === 'Hitam,Cream,Dusty Pink' && look.sw[0].start < look.sw[1].start && look.sw[1].start < look.sw[2].start, `3 bulatan warna muncul satu per satu: ${look.sw.map((x) => `${x.label}@${x.start.toFixed(2)}`).join(', ')}`);
+  check(look.clock?.loop === 'shake' && look.tick?.stock === 'tick' && look.tick.ready && Math.abs(look.tick.start - look.clock.start) < 0.01, `⏰ bergetar + SFX timer berdetak di ${look.tick?.start?.toFixed(2)} dtk (suara dibuat di editor, siap diputar)`);
+  check(look.chips.join('|') === '👕 baju basah|🥤 minuman|💻 laptop', `chip "bisa buat": ${look.chips.join(', ')}`);
+  // what is seen: each circle in its colour (a spot in its lower right, away from the shine)
+  const tSee = Math.max(...look.sw.map((x) => x.start)) + 0.6;
+  const fr2 = await mcp('get_frame', { time: tSee, max_width: 540, format: 'png' });
+  const seen = await p.evaluate(async ({ src, sw, k }) => {
+    const im = new Image(); im.src = `data:image/png;base64,${src}`; await im.decode();
+    const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+    const g = c.getContext('2d'); g.drawImage(im, 0, 0);
+    return sw.map((x) => {
+      // (render.js: a 170 px circle above a 42 px name; its centre 30 px above the sticker's centre at scale 1)
+      const cx = (540 + x.x * 1080) * k;
+      const cy = (960 + x.y * 1920 - 30.45 * x.scale) * k;
+      const r = 75 * x.scale * k;
+      const d = g.getImageData(Math.round(cx + r * 0.35) - 2, Math.round(cy + r * 0.35) - 2, 5, 5).data;
+      const avg = [0, 1, 2].map((ch) => Math.round([0, 4, 8, 12, 16, 20, 24].reduce((a, i) => a + d[i * 4 / 4 * 4 + ch] || a, 0) / 7));
+      const want = [1, 3, 5].map((i) => parseInt(x.color.slice(i, i + 2), 16));
+      return { label: x.label, avg, want, diff: Math.max(...avg.map((v, i) => Math.abs(v - want[i]))) };
+    });
+  }, { src: fr2.img, sw: look.sw, k: fr2.width / 1080 });
+  check(seen.every((x) => x.diff < 40), `frame hasil render: tiap bulatan berwarna sesuai (${seen.map((x) => `${x.label} ${x.avg.join('/')} ≈ ${x.want.join('/')}`).join('; ')})`);
+  if (process.env.NAJJA_TEST_FACE_FRAMES) {
+    // (frames for a person to look at: the circles, the chips, the timer)
+    const times = await p.evaluate(async () => {
+      const { store } = await import('/js/store.js');
+      const P = store.P;
+      const last = (f) => { const cs = P.clips.filter(f); return cs.length ? Math.max(...cs.map((c) => c.start)) + 0.5 : null; };
+      return [last((c) => c.sticker?.swatch), (last((c) => c.sticker?.badge?.icon) ?? 0) - 0.2, (last((c) => c.sticker?.emoji === '⏰') ?? 0) + 0.4].filter((x) => x != null && x > 0.5);
+    });
+    fs.mkdirSync(process.env.NAJJA_TEST_FACE_FRAMES, { recursive: true });
+    for (const t of times) {
+      const fr = await mcp('get_frame', { time: t, max_width: 540 });
+      fs.writeFileSync(path.join(process.env.NAJJA_TEST_FACE_FRAMES, `momen-${t.toFixed(2)}.jpg`), Buffer.from(fr.img, 'base64'));
+    }
+  }
+  const added = await mcp('add_sticker', { color_circle: 'sage', start: 1, duration: 2 });
+  check(added.sticker?.color_circle === '#B2BFA4' && added.sticker.label === 'Sage', `MCP add_sticker color_circle "sage" → ${JSON.stringify(added.sticker)}`);
 
   step('C. perangkat yang tidak bisa memuat model');
   const ctx2 = await browser.newContext({ viewport: { width: 1180, height: 820 } });

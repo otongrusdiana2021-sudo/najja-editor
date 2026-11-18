@@ -17,6 +17,7 @@ import { TEXT_PRESETS, DEFAULT_TEXT } from './presets.js';
 import { clone, deepMerge, uid } from './util.js';
 import { makeMotion, wordCount } from './kinetic.js';
 import { avoidPeople, addStyleSfx } from './stylefx.js';
+import { findMoments, planMoments, colorOf } from './moments.js';
 
 export const STYLES = [
   {
@@ -214,7 +215,7 @@ export function autoPlan(styleId, { words = [], duration = 0, product = {} } = {
   }
   const pm = findPriceMention(words);
   if (pm || product.price || product.price_discount) {
-    plan.price = { start: pm ? pm.start : r3(duration * 0.55), normal: product.price || '', discount: product.price_discount || '' };
+    plan.price = { start: pm ? pm.start : r3(duration * 0.55), normal: product.price || '', discount: product.price_discount || '', ...(pm ? {} : { guessed: true }) };
   }
   if (styleId === 'storypop') {
     // the hook: an early question ("butuh lebih dari satu size?"), else the start of the first sentence; ≤ 6 words
@@ -518,14 +519,27 @@ function buildEditorial(P, st, product, opts) {
   // the price's place first (it matters most): a keyword group that cannot make way for it goes
   let outroStart = outroAt;
   let slot = null;
-  if (price) {
-    const s = Math.min(Math.max(0.5, T(price.start)), Math.max(0.5, total - 2.4));
+  const priceSlot = (at) => {
+    const s = Math.min(Math.max(0.5, at), Math.max(0.5, total - 2.4));
     // (the price matters more than the outro: when both do not fit, the outro goes)
     if (outroStart - s - 0.1 < 1.4) outroStart = total;
     const d = Math.min(3.2, outroStart - s - 0.1);
-    if (d > 1) slot = { s, d };
-  }
+    return d > 1 ? { s, d } : null;
+  };
+  if (price && !price.guessed) slot = priceSlot(T(price.start));
   if (slot) groups = groups.filter((g) => !(T(g.start) < slot.s + slot.d && Math.min(total, T(g.end)) > slot.s));
+  // (v1.12.6) moments — colour circles, a timer, chips, claims — quietly styled; keywords make way for them. A price
+  // that was said keeps its moment; a guessed one finds a gap between the moments.
+  const keptAt = (t) => cm.keeps.some((k) => t >= k.start - 0.05 && t <= k.end);
+  // (the AI's own keywords come first; automatic ones make way)
+  const aiKw = Array.isArray(opts.plan?.keywords) ? groups.map((g) => ({ start: T(g.start), end: Math.min(total, T(g.end)) })) : [];
+  const mo = addMoments(P, momentsOf(plan, sp.words, product, ['color', 'timer', 'stock', 'uses', 'claim']), { T, kept: keptAt, total: outroStart, look: 'editorial', put: big, avoid: [...busy, ...aiKw, ...(slot ? [{ start: slot.s, end: slot.s + slot.d }] : [])] });
+  if (price && price.guessed) {
+    slot = guessedPriceSlot(P, mo, priceSlot(T(price.start)), outroStart, busy.length ? busy[0].end + 0.05 : 0.5);
+    if (slot) groups = groups.filter((g) => !(T(g.start) < slot.s + slot.d && Math.min(total, T(g.end)) > slot.s));
+  }
+  groups = groups.filter((g) => !mo.ranges.some((r) => T(g.start) < r.end && Math.min(total, T(g.end)) > r.start));
+  busy.push(...mo.ranges);
   // big stacked keywords: each word appears when it is said, the group stays until a breath after the last
   let kwCount = 0;
   for (const g of groups) {
@@ -589,7 +603,7 @@ function buildEditorial(P, st, product, opts) {
     outro = true;
   }
   const musicClips = plan.music === 'none' ? 0 : addMusic(P, opts.music, total, 0.22);
-  return { style: st.id, name: st.name, duration: r3(total), source_duration: sp.duration, cut_seconds: r3(sp.duration - total), cuts: cm.keeps.length - 1, keywords: kwCount, price: priceAt != null, cutaways: placed.length, subtitles: subs, outro, music: musicClips > 0 };
+  return { style: st.id, name: st.name, duration: r3(total), source_duration: sp.duration, cut_seconds: r3(sp.duration - total), cuts: cm.keeps.length - 1, keywords: kwCount, price: priceAt != null, cutaways: placed.length, subtitles: subs, outro, music: musicClips > 0, moments: mo.counts };
 }
 
 // ---- Showcase Clean --------------------------------------------------------------------------
@@ -652,12 +666,20 @@ function buildShowcase(P, st, product, opts) {
   const total = t;
   const txt = lane(P, 'text', 'Teks');
   const name = (plan.title?.text ?? product.name ?? '').trim();
+  let swatches = 0;
   for (const sec of sections) {
     const s = Math.max(0, sec.start - 0.07);
     const e = Math.min(total, sec.end - 0.07 > s + 0.3 ? sec.end - 0.07 : sec.end);
     if (name) txt(text(name, { font: 'Roboto', weight: 500, italic: true, size: 74, color: '#ffffff', shadow: { enabled: true, color: '#000000', opacity: 0.5, blur: 16, x: 0, y: 4 } }, { start: r3(s), duration: r3(e - s), y: -0.33 }));
     const line2 = sec.fin ? names.join(' · ') : [sec.v.name, sec.v.note].filter(Boolean).join(' ');
     if (line2) txt(text(line2, { font: 'Poppins', weight: 800, size: Math.min(104, 1500 / Math.max(8, line2.length)), color: '#ffffff', shadow: HARD, motion: makeMotion('wordRise', { stagger: 0.08 }) }, { start: r3(s), duration: r3(e - s), y: -0.255 }));
+    // (v1.12.6) a variant named after a colour gets its colour circle; the ending shows them all, one after another
+    const look = { label: { font: 'Poppins', weight: 700, italic: false, color: '#ffffff' } };
+    const cols = (sec.fin ? variants : [sec.v]).map((v) => variantColor(v.name)).filter(Boolean);
+    if (cols.length && (!sec.fin || cols.length === variants.length) && e - s > 1) {
+      cols.forEach((c, i) => txt(swatch(c.hex, sec.fin ? c.label : '', look, { start: r3(Math.min(e - 0.6, s + 0.25 + i * 0.25)), duration: r3(e - Math.min(e - 0.6, s + 0.25 + i * 0.25)), x: r3((i - (cols.length - 1) / 2) * 0.17), y: -0.16, scale: sec.fin ? 0.8 : 0.7 })));
+      swatches += cols.length;
+    }
     if (!sec.fin && sec.v.size) {
       // the size line: thin arrows and the measure, in softly after the cut
       txt(text(`←   ${sec.v.size}   →`, { font: 'Poppins', weight: 400, size: 58, color: '#ffffff', letterSpacing: 3, shadow: { enabled: true, color: '#000000', opacity: 0.45, blur: 10, x: 0, y: 2 } },
@@ -671,7 +693,7 @@ function buildShowcase(P, st, product, opts) {
     }
   }
   const musicClips = plan.music === 'none' ? 0 : addMusic(P, opts.music, total, 0.85);
-  return { style: st.id, name: st.name, duration: r3(total), sections: sections.length, variants: names, ending: !!fin, music: musicClips > 0, clips: P.clips.filter((c) => c.trackId === 'main').length };
+  return { style: st.id, name: st.name, duration: r3(total), sections: sections.length, variants: names, ending: !!fin, music: musicClips > 0, clips: P.clips.filter((c) => c.trackId === 'main').length, moments: swatches ? { color: swatches } : {} };
 }
 
 // ---- Story Pop -------------------------------------------------------------------------------
@@ -721,12 +743,20 @@ function buildStoryPop(P, st, product, opts) {
   }
   // the price's place first; keywords keep out of it
   const price = plan.price && (plan.price.discount || plan.price.normal || product.price) ? { ...plan.price, start: plan.price.start ?? sp.duration * 0.6 } : null;
-  let slot = null;
-  if (price) {
+  // (v1.12.6) moments — a colour said: its circle; "tinggal 2 hari": a timer; "bisa buat …": chips; claims; reactions.
+  // A price that was said keeps its moment (a moment said then waits for it); a guessed one finds a gap between them.
+  const keptAt = (t) => cm.keeps.some((k) => t >= k.start - 0.05 && t <= k.end);
+  // (the AI's own keywords come first; automatic ones make way)
+  const aiKw = Array.isArray(opts.plan?.keywords) ? plan.keywords.map((g) => placeWords(sp.words, g)).filter((ws) => ws.length).map((ws) => ({ start: T(ws[0].s), end: T(ws.at(-1).e) + 0.7 })) : [];
+  const priceSlot = () => {
     const s = Math.max(0.5, Math.min(Math.max(T(price.start), busy.length ? busy[0].end + 0.05 : 0), total - 2.6));
     const d = Math.min(3.2, total - s - 0.1);
-    if (d > 1.2) slot = { s, d };
-  }
+    return d > 1.2 ? { s, d } : null;
+  };
+  let slot = null;
+  if (price && !price.guessed) slot = priceSlot();
+  const mo = addMoments(P, momentsOf(plan, sp.words, product, ['color', 'timer', 'stock', 'uses', 'claim', 'reaction']), { T, kept: keptAt, total, look: 'pop', put: txt, avoid: [...busy, ...aiKw, ...(slot ? [{ start: slot.s, end: slot.s + slot.d }] : [])] });
+  if (price && price.guessed) slot = guessedPriceSlot(P, mo, priceSlot(), total, busy.length ? busy[0].end + 0.05 : 0.5);
   // keywords: one line that pops, a sticker when a word has one
   let kw = 0;
   let lastSticker = -Infinity;
@@ -736,6 +766,7 @@ function buildStoryPop(P, st, product, opts) {
     const s = T(ws[0].s);
     const e = Math.min(total, T(ws.at(-1).e) + 0.7);
     if (busy.some((b) => s < b.end && e > b.start)) continue;
+    if (mo.ranges.some((b) => s < b.end && e > b.start)) continue;
     if (slot && s < slot.s + slot.d && e > slot.s) continue;
     const line = ws.map((w) => cleanWord(w.text).toUpperCase()).filter(Boolean).join(' ');
     if (!line || e - s < 0.3) continue;
@@ -768,7 +799,7 @@ function buildStoryPop(P, st, product, opts) {
   const brand = (product.brand ?? 'NAJJA').trim();
   let sting = false;
   if (brand && plan.sting !== false && total > 12) {
-    const mid = main.find((c) => c.start > total * 0.45 && noTr(c) && !busy.some((b) => c.start > b.start - 0.5 && c.start < b.end + 0.5));
+    const mid = main.find((c) => c.start > total * 0.45 && noTr(c) && ![...busy, ...mo.ranges].some((b) => c.start > b.start - 0.5 && c.start < b.end + 0.5));
     if (mid) {
       mid.transition = { type: 'blur', duration: 0.6 };
       txt(text(brand.toUpperCase(), { font: 'Inter', weight: 900, size: 120, color: '#ffffff', letterSpacing: 10, shadow: POP }, { start: r3(mid.start - 0.3), duration: 0.9, animIn: { type: 'pop', duration: 0.25 }, animOut: { type: 'blur', duration: 0.25 } }));
@@ -783,8 +814,147 @@ function buildStoryPop(P, st, product, opts) {
     subs = addSubtitleTrack(P, cues, { font: 'Inter', weight: 800, size: 60, color: '#ffffff', shadow: { ...POP, y: 5 } }, { avoid: busy, y: 0.3, anim: 'pop', motion: { type: 'karaoke', color: '#FFE600' } });
   }
   const musicClips = plan.music === 'none' ? 0 : addMusic(P, opts.music, total, 0.18);
-  return { style: st.id, name: st.name, duration: r3(total), source_duration: sp.duration, cut_seconds: r3(sp.duration - total), hook: hook.length, keywords: kw, price: priceAt != null, broll: placed.length, sting, subtitles: subs, music: musicClips > 0 };
+  return { style: st.id, name: st.name, duration: r3(total), source_duration: sp.duration, cut_seconds: r3(sp.duration - total), hook: hook.length, keywords: kw, price: priceAt != null, broll: placed.length, sting, subtitles: subs, music: musicClips > 0, moments: mo.counts };
 }
 function makeSticker(emoji, start, duration, x, y, badge = null) {
   return makeClip('sticker', { sticker: { emoji: emoji || '', badge }, start: r3(start), duration: r3(Math.max(0.3, duration)), x, y, scale: badge ? 0.7 : 0.75, name: badge ? badge.text : emoji, animIn: { type: 'pop', duration: 0.25 }, animOut: { type: 'pop', duration: 0.2 } });
+}
+
+// ---- Moments (v1.12.6): what the talent says, shown -------------------------------------------
+const MOMENT_LOOK = {
+  pop: {
+    label: { font: 'Inter', weight: 800, italic: false, color: '#ffffff' },
+    chip: { bg: '#ffffff', fg: '#111111' },
+    header: { font: 'Inter', weight: 800, size: 52, color: '#ffffff', shadow: { enabled: true, color: '#000000', opacity: 0.9, blur: 0, x: 0, y: 6 } },
+    chipText: { font: 'Inter', weight: 900, size: 84, color: '#ffffff', bg: { enabled: true, color: '#FF3B30', opacity: 1, radius: 18, padding: 0.55 } },
+    stockText: { font: 'Inter', weight: 900, size: 84, color: '#111111', bg: { enabled: true, color: '#FFE600', opacity: 1, radius: 18, padding: 0.55 } },
+    reaction: { font: 'Inter', weight: 900, size: 170, color: '#FFE600', stroke: { enabled: true, color: '#111111', width: 7 }, shadow: { enabled: true, color: '#000000', opacity: 0.9, blur: 0, x: 0, y: 8 } },
+    motion: 'wordSlam',
+    y: -0.04,
+  },
+  editorial: {
+    label: { font: 'Instrument Serif', weight: 400, italic: true, color: CREAM },
+    chip: { bg: CREAM, fg: '#1b1b1b' },
+    header: { font: 'Instrument Serif', weight: 400, italic: true, size: 64, color: CREAM, shadow: { enabled: true, color: '#000000', opacity: 0.45, blur: 12, x: 0, y: 3 } },
+    chipText: { font: 'Anton', weight: 400, size: 104, color: CREAM, letterSpacing: 1, shadow: { enabled: true, color: '#000000', opacity: 0.35, blur: 0, x: 0, y: 6 } },
+    stockText: { font: 'Anton', weight: 400, size: 104, color: CREAM, letterSpacing: 1, shadow: { enabled: true, color: '#000000', opacity: 0.35, blur: 0, x: 0, y: 6 } },
+    reaction: null,
+    motion: 'lineReveal',
+    y: 0.02,
+  },
+};
+/** A coloured circle (with its name under it) as a sticker. */
+function swatch(hex, label, look, props) {
+  return makeClip('sticker', {
+    sticker: { emoji: '', badge: null, swatch: { color: hex, label: label || '', font: look.label.font, weight: look.label.weight, italic: !!look.label.italic, labelColor: look.label.color } },
+    name: `Warna ${label || hex}`, scale: 1, animIn: { type: 'pop', duration: 0.3 }, animOut: { type: 'pop', duration: 0.2 }, animLoop: { type: 'float', speed: 0.8 }, sound: 'bubble', ...props,
+  });
+}
+/**
+ * The moments as clips. moments: speech times; T: speech → edit time; kept(t): the word at speech time t is kept;
+ * avoid: edit-time ranges taken (the hook, the price…). Returns { counts, ranges } (ranges: edit times used).
+ */
+function addMoments(P, moments, { T, kept, total, look, put: put0, avoid = [] }) {
+  const L = MOMENT_LOOK[look];
+  const counts = {};
+  const ranges = [];
+  let made = [];
+  const put = (c) => { made.push(c); return put0(c); };
+  for (const m of moments) {
+    made = [];
+    if (!kept(m.s)) continue;
+    if (m.type === 'reaction' && !L.reaction) continue;
+    let s = T(m.s);
+    let e = Math.min(total - 0.05, Math.max(T(m.e), s + 1.1));
+    if (m.type === 'reaction') e = Math.min(total - 0.05, s + 1.1);
+    // said while the price (or the hook) is on screen: right after it, when that is soon;
+    // (said just before it: it ends as the price comes)
+    let shift = 0;
+    const clash = avoid.find((r) => s < r.end - 0.1 && e > r.start + 0.1);
+    if (clash && m.type !== 'reaction') {
+      if (s < clash.start && clash.start - 0.1 - s >= 1.4) e = clash.start - 0.1;
+      else if (clash.end + 0.1 - s <= 3.5) {
+        shift = clash.end + 0.1 - s;
+        s += shift;
+        e = Math.min(total - 0.05, Math.max(e + shift, s + 1.6));
+      }
+    }
+    if (e - s < 0.8) continue;
+    if (avoid.some((r) => s < r.end - 0.1 && e > r.start + 0.1) || ranges.some((r) => s < r.end && e > r.start)) continue;
+    const y = L.y;
+    if (m.type === 'color') {
+      const n = m.items.length;
+      const gap = n >= 5 ? 0.172 : 0.19;
+      m.items.forEach((it, i) => {
+        const at = Math.min(e - 0.5, Math.max(s, kept(it.s) ? T(it.s) + shift : s + i * 0.3));
+        put(swatch(it.hex, it.label, L, { start: r3(at), duration: r3(e - at), x: r3((i - (n - 1) / 2) * gap), y }));
+      });
+    } else if (m.type === 'timer' || m.type === 'stock') {
+      const icon = m.type === 'stock' ? '🔥' : /FLASH/.test(m.text) ? '⚡' : /TERBATAS/.test(m.text) ? '⏳' : '⏰';
+      put(makeClip('sticker', { sticker: { emoji: icon, badge: null }, name: icon, start: r3(s), duration: r3(e - s), x: 0, y: r3(y - 0.11), scale: 0.62, animIn: { type: 'pop', duration: 0.25 }, animOut: { type: 'pop', duration: 0.2 }, animLoop: { type: m.type === 'timer' ? 'shake' : 'pulse', speed: 1.2 }, sound: m.type === 'timer' ? 'tick' : 'notif' }));
+      const style = m.type === 'timer' ? L.chipText : L.stockText;
+      put(Object.assign(text(m.text, { ...style, motion: makeMotion(L.motion, { stagger: 0.12 }) }, { start: r3(s + 0.12), duration: r3(e - s - 0.12), y: r3(y + 0.005), animIn: { type: 'fade', duration: 0.1 }, animOut: { type: 'fade', duration: 0.15 } }), { sound: null }));
+    } else if (m.type === 'uses') {
+      put(Object.assign(text(m.header, L.header, { start: r3(s), duration: r3(e - s), x: 0.18, y: r3(y - 0.1), animIn: { type: 'slideLeft', duration: 0.25 }, animOut: { type: 'fade', duration: 0.15 } }), { sound: 'swipe' }));
+      m.items.forEach((it, i) => {
+        const at = Math.min(e - 0.5, Math.max(s + 0.15, kept(it.s) ? T(it.s) + shift : s + 0.3 + i * 0.4));
+        put(makeClip('sticker', { sticker: { emoji: '', badge: { text: it.label, icon: it.emoji, bg: L.chip.bg, fg: L.chip.fg } }, name: it.label, start: r3(at), duration: r3(e - at), x: 0.18, y: r3(y - 0.035 + i * 0.058), scale: 0.72, animIn: { type: 'pop', duration: 0.25 }, animOut: { type: 'pop', duration: 0.2 }, sound: 'pop' }));
+      });
+    } else if (m.type === 'claim') {
+      put(makeClip('sticker', { sticker: { emoji: '', badge: { text: m.text, icon: m.icon, bg: m.bg, fg: m.fg } }, name: m.text, start: r3(s), duration: r3(e - s), x: 0, y: r3(y - 0.12), scale: 0.85, rotation: -3, animIn: { type: 'bounce', duration: 0.4 }, animOut: { type: 'pop', duration: 0.2 }, animLoop: { type: 'pulse', speed: 0.8 }, sound: m.sound || 'ding' }));
+    } else if (m.type === 'reaction') {
+      put(Object.assign(text(m.text, L.reaction, { start: r3(s), duration: r3(e - s), x: 0.1, y: r3(y - 0.16), rotation: -6, animIn: { type: 'bounce', duration: 0.3 }, animOut: { type: 'pop', duration: 0.15 } }), { sound: m.sound || 'boing' }));
+    } else if (m.type === 'emoji') {
+      put(Object.assign(makeSticker(m.emoji, s, e - s, 0.26, r3(y - 0.2)), { sound: m.sound || 'bubble' }));
+    } else continue;
+    counts[m.type] = (counts[m.type] || 0) + 1;
+    ranges.push({ start: s, end: e, type: m.type, clips: made });
+  }
+  return { counts, ranges };
+}
+/**
+ * Where the price label goes when the price was never said (its place is a guess): near the guess, but in a gap
+ * between the moments the talent did say. Returns { s, d } or null. ranges: the moments (edit times); after: not before.
+ */
+function priceGap(guess, total, ranges, { after = 0, minD = 1.4, maxD = 3.2 } = {}) {
+  const cands = [guess, ...ranges.map((r) => r.end + 0.1), ...ranges.map((r) => r.start - maxD - 0.1)].filter((x) => x >= after && x < total - minD - 0.1);
+  cands.sort((a, b) => Math.abs(a - guess) - Math.abs(b - guess));
+  for (const c of cands) {
+    const next = Math.min(total - 0.1, ...ranges.filter((r) => r.start >= c - 0.05).map((r) => r.start - 0.1));
+    const d = Math.min(maxD, next - c);
+    if (d >= minD && !ranges.some((r) => c < r.end && c + d > r.start)) return { s: c, d };
+  }
+  return null;
+}
+const MOMENT_RANK = { reaction: 0, emoji: 0, claim: 1, uses: 2, stock: 3, color: 4, timer: 5 };
+/** The price's place when it was never said: a gap between the moments; no gap: the least important ones make way. */
+function guessedPriceSlot(P, mo, want, total, after) {
+  if (!want) return null;
+  for (;;) {
+    const gap = mo.ranges.length ? priceGap(want.s, total, mo.ranges, { after, minD: 1.3 }) : want;
+    if (gap || !mo.ranges.length) return gap || want;
+    const weakest = [...mo.ranges].sort((a, b) => MOMENT_RANK[a.type] - MOMENT_RANK[b.type] || Math.abs(a.start - want.s) - Math.abs(b.start - want.s))[0];
+    dropMoment(P, mo, weakest);
+  }
+}
+/** Take a moment's clips back out (the price needs its place). */
+function dropMoment(P, mo, r) {
+  P.clips = P.clips.filter((c) => !r.clips.includes(c));
+  mo.ranges.splice(mo.ranges.indexOf(r), 1);
+  if (!--mo.counts[r.type]) delete mo.counts[r.type];
+}
+/** The moments of a style: the AI's (plan.moments), none (plan.moments false or []), or found in the words. */
+function momentsOf(plan, words, product, kinds) {
+  if (plan.moments === false) return [];
+  if (Array.isArray(plan.moments)) return planMoments(plan.moments);
+  return findMoments(words, { product, kinds });
+}
+/** A variant name's colour ("Hitam", "Pink Pastel", "Navy Blue"), or null. */
+function variantColor(name) {
+  const w = String(name || '').trim().split(/\s+/);
+  for (let i = 0; i < w.length; i++) {
+    const c = (i + 1 < w.length && colorOf(`${w[i]} ${w[i + 1]}`)) || colorOf(w[i]);
+    if (c && !/^#/.test(w[i])) return c;
+  }
+  return null;
 }

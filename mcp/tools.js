@@ -175,12 +175,14 @@ export const TOOLS = [
   {
     name: 'add_sticker',
     title: 'Add sticker',
-    description: 'Add an emoji sticker, or a label badge such as SUBSCRIBE or SALE, as an overlay.',
+    description: 'Add an emoji sticker, a label badge such as SUBSCRIBE or SALE (with an optional emoji icon), or a colour circle (a product colour, with its name under it) as an overlay.',
     inputSchema: obj({
-      emoji: str('Emoji character to use as the sticker, for example 🔥.'),
+      emoji: str('Emoji character to use as the sticker, for example 🔥. With badge_text: the badge\'s icon.'),
       badge_text: str('Use this instead of emoji to make a rounded label badge with this text.'),
       badge_color: str('Badge background color (hex).'),
       badge_text_color: str('Badge text color (hex).'),
+      color_circle: str('Make a colour circle instead: a hex colour ("#F3E5C8") or a colour name ("cream", "hitam", "dusty pink", "navy").'),
+      label: str('With color_circle: the name under the circle (default: the colour name; "" for none).'),
       start: num('Start time in seconds (default: the playhead).'),
       duration: num('Duration in seconds (default 3).'),
       ...POSITION,
@@ -346,7 +348,7 @@ export const TOOLS = [
   {
     name: 'apply_style',
     title: 'Edit with a style',
-    description: 'Build a complete edit of the project in one of the styles (see list_styles). By default it makes a NEW project (a copy, named "<project> · <style>") and leaves the current one as it is. You are the director: pass a plan with your choices (which words become big text, where the price is said, what to cut, which shot goes where); anything you leave out is chosen automatically. The style does the look (fonts, timing, colours, transitions, music), puts a sound effect on every text and transition (plan.sfx), and keeps every text and sticker off the people in the picture: the whole person, the face above all (found on the user\'s device; a text over someone moves to the free background beside or above them, smaller if it must be). The result says how many text groups moved (faces) and how many sounds were placed (sfx). One undo takes the whole edit back.',
+    description: 'Build a complete edit of the project in one of the styles (see list_styles). By default it makes a NEW project (a copy, named "<project> · <style>") and leaves the current one as it is. You are the director: pass a plan with your choices (which words become big text, where the price is said, what to cut, which shot goes where); anything you leave out is chosen automatically. The style does the look (fonts, timing, colours, transitions, music), puts a sound effect on every text and transition (plan.sfx), shows what the talent says as moments (a colour said: its circle; "tinggal 2 hari": a ticking timer; "bisa buat …": chips; claims: badges — plan.moments), and keeps every text and sticker off the people in the picture: the whole person, the face above all (found on the user\'s device; a text over someone moves to the free background beside or above them, smaller if it must be). The result says how many text groups moved (faces) and how many sounds were placed (sfx). One undo takes the whole edit back.',
     inputSchema: obj({
       style: enm(['showcase', 'editorial', 'storypop'], 'The style.'),
       product: obj({
@@ -378,6 +380,21 @@ export const TOOLS = [
           outro: bool('Editorial: the "bye" + brand ending (default true).'),
           sting: bool('Story Pop: the brand sting in the middle (default true).'),
           live: bool('Story Pop: a LIVE badge.'),
+          moments: {
+            type: 'array',
+            description: 'What the talent says, shown (editorial, storypop). Left out: found in the transcript automatically (colours named, "tinggal 2 hari", "stok tinggal 5", "bisa buat …", claims like anti bocor / best seller / gratis ongkir / diskon N%, and in Story Pop oops / wow). [] or false: none. Each with its speech time (s). Colours pop in as circles one by one; a timer shakes with a ticking sound; uses become chips with emoji; a claim is a badge; a reaction is a big word with a cartoon sound.',
+            items: obj({
+              type: enm(['color', 'timer', 'stock', 'uses', 'claim', 'reaction', 'emoji'], 'The kind of moment.'),
+              start: num('Speech time (s) when it is said.'),
+              duration: num('Seconds on screen (default per kind).'),
+              colors: { type: 'array', description: 'color: the colours, names ("hitam", "cream", "dusty pink") or hex, in the order said.', items: { type: 'string' } },
+              text: str('timer/stock/claim/reaction: the words, e.g. "TINGGAL 2 HARI", "STOK TINGGAL 5", "ANTI BOCOR", "OOPS!". uses: the header (default "BISA BUAT:").'),
+              items: { type: 'array', description: 'uses: the things, e.g. ["baju basah", "minuman"] (an emoji is chosen) or [{ "text": "laptop", "emoji": "💻" }].', items: {} },
+              emoji: str('claim: the badge icon; emoji: the emoji.'),
+              color: str('claim: the badge colour (hex).'),
+              sound: str('reaction/emoji: the sound effect id (e.g. boing, success, tada, pop).'),
+            }, ['type', 'start']),
+          },
           sfx: enm(['full', 'graphics', 'none'], 'Sound effects (default full): a sound for every text that comes in (pop, swipe, typing, ka-ching on the price, bubble on a sticker), every transition (whoosh, swipe, glitch) and a soft click per subtitle line. graphics: the same without the subtitle clicks. none: no sound effects.'),
         },
         additionalProperties: false,

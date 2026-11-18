@@ -295,6 +295,8 @@ export const SFX = [
   { id: 'heartbeat', name: 'Detak Jantung', kind: 'sfx', dur: 1.6 },
   { id: 'drumroll', name: 'Drum Roll', kind: 'sfx', dur: 2.5 },
   { id: 'glitchfx', name: 'Glitch', kind: 'sfx', dur: 0.6 },
+  // v1.12.6: a ticking timer (Style Konsep: "tinggal 2 hari")
+  { id: 'tick', name: 'Timer Detik', kind: 'sfx', dur: 1.7 },
   { id: 'lofi', name: 'Lo-fi Santai', kind: 'music', dur: 22.6 },
   { id: 'upbeat', name: 'Upbeat Ceria', kind: 'music', dur: 16 },
   { id: 'ambient', name: 'Ambient Tenang', kind: 'music', dur: 19.2 },

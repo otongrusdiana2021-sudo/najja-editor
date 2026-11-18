@@ -150,7 +150,8 @@ export function occupancy(P, start, end, { talking = () => false, nx = 54 } = {}
   };
   let any = false;
   for (let s = 0; s <= n; s++) {
-    const t = start + ((end - start) * s) / n;
+    // (from its first moment to its last, just inside: a shot that starts as the text ends is not seen with it)
+    const t = start + 0.01 + (Math.max(0, end - start - 0.02) * s) / n;
     b1.fill(0);
     f1.fill(0);
     u1.fill(0);
@@ -213,11 +214,14 @@ export function occupancy(P, start, end, { talking = () => false, nx = 54 } = {}
   const SF = sat(face);
   const SU = sat(upper);
   /** The share of a canvas rectangle over a person (body), their head-shoulders-chest (upper) and face, 0–1 each. */
+  // (a box edge a sliver into a cell — under a third of it — does not count that cell: the mask itself is coarser)
   const cover = (b) => {
-    const i1 = Math.max(0, Math.min(nx, Math.floor(b.x1 / cw)));
-    const i2 = Math.max(0, Math.min(nx, Math.ceil(b.x2 / cw)));
-    const j1 = Math.max(0, Math.min(ny, Math.floor(b.y1 / ch)));
-    const j2 = Math.max(0, Math.min(ny, Math.ceil(b.y2 / ch)));
+    const tx = cw / 3;
+    const ty = ch / 3;
+    const i1 = Math.max(0, Math.min(nx, Math.floor((b.x1 + tx) / cw)));
+    const i2 = Math.max(i1, Math.min(nx, Math.ceil((b.x2 - tx) / cw)));
+    const j1 = Math.max(0, Math.min(ny, Math.floor((b.y1 + ty) / ch)));
+    const j2 = Math.max(j1, Math.min(ny, Math.ceil((b.y2 - ty) / ch)));
     const cells = Math.max(1, (i2 - i1) * (j2 - j1));
     const q = (S) => S[j2 * (nx + 1) + i2] - S[j1 * (nx + 1) + i2] - S[j2 * (nx + 1) + i1] + S[j1 * (nx + 1) + i1];
     return { body: q(SB) / cells, upper: q(SU) / cells, face: q(SF) / cells };
@@ -232,7 +236,17 @@ export function itemBox(c, measure = null) {
   let h;
   const m = measure?.(c);
   if (m) ({ w, h } = m);
-  else if (c.type === 'sticker') { w = c.sticker?.badge ? 380 : 220; h = c.sticker?.badge ? 130 : 220; }
+  else if (c.type === 'sticker' && c.sticker?.swatch) {
+    // (render.js swatchLayout: a 170 px circle, its name under it)
+    const sw = c.sticker.swatch;
+    w = Math.max(186, String(sw.label || '').length * 42 * 0.56 + 24);
+    h = 178 + (sw.label ? 61 : 0);
+  } else if (c.type === 'sticker' && c.sticker?.badge) {
+    // (render.js badgeLayout: 64 px text, an icon, a pill 112 px tall)
+    const b = c.sticker.badge;
+    w = String(b.text || '').length * 64 * 0.66 + (b.icon ? 74 : 0) + 70;
+    h = 112;
+  } else if (c.type === 'sticker') { w = 220; h = 220; }
   else {
     const t = c.text || {};
     const lines = String(t.content ?? '').split('\n');
@@ -364,8 +378,10 @@ export function avoidPeople(P, { measure = null, talking = () => false } = {}) {
     res.checked++;
     // (subtitles may sit lower: the app's buttons and the platform's caption are in the bottom fifth)
     const bottom = H * (g.sub ? 0.9 : 0.8);
+    // (a little air between a text and the person: ~12 px)
+    const pad = W * 0.011;
     const cost = (b, k) => {
-      const cv = occ.cover(b);
+      const cv = occ.cover({ x1: b.x1 - pad, y1: b.y1 - pad, x2: b.x2 + pad, y2: b.y2 + pad });
       const cy = (b.y1 + b.y2) / 2;
       const dx = Math.abs((b.x1 + b.x2) / 2 - (g.box.x1 + g.box.x2) / 2) / W;
       const dy = Math.abs(cy - (g.box.y1 + g.box.y2) / 2) / H;
@@ -434,9 +450,9 @@ export const avoidFaces = avoidPeople;
 // Sounds
 
 /** The sounds the styles use (made by the caller: media.js ensureStockAudio). */
-export const STYLE_SFX = ['pop', 'swipe', 'whoosh', 'cash', 'typing', 'click', 'bubble', 'glitchfx', 'ding'];
-const VOL = { pop: 0.5, swipe: 0.42, whoosh: 0.38, cash: 0.6, typing: 0.45, click: 0.22, bubble: 0.45, glitchfx: 0.32, ding: 0.5 };
-const PRIO = { cash: 9, ding: 8, typing: 7, pop: 6, glitchfx: 5, swipe: 4, bubble: 4, whoosh: 3, click: 1 };
+export const STYLE_SFX = ['pop', 'swipe', 'whoosh', 'cash', 'typing', 'click', 'bubble', 'glitchfx', 'ding', 'tick', 'notif', 'success', 'boing'];
+const VOL = { pop: 0.5, swipe: 0.42, whoosh: 0.38, cash: 0.6, typing: 0.45, click: 0.22, bubble: 0.45, glitchfx: 0.32, ding: 0.5, tick: 0.55, notif: 0.45, success: 0.45, boing: 0.45 };
+const PRIO = { tick: 10, cash: 9, ding: 8, success: 8, notif: 8, typing: 7, boing: 7, pop: 6, glitchfx: 5, swipe: 4, bubble: 4, whoosh: 3, click: 1 };
 const ENTRANCE = {
   wordPop: 'pop', wordSlam: 'pop', wordRise: 'swipe', wordBlur: 'whoosh', wordSwing: 'swipe', lineReveal: 'swipe',
   charSlide: 'swipe', charDrop: 'pop', charWave: 'swipe', charFlip: 'pop', typeCursor: 'typing', scramble: 'glitchfx',
@@ -455,8 +471,10 @@ export function sfxCues(P, { level = 'full' } = {}) {
   if (level === 'none') return [];
   const subtitleTracks = new Set(P.tracks.filter((t) => t.subtitle).map((t) => t.id));
   const cues = [];
-  const add = (t, id, vol = VOL[id], prio = PRIO[id]) => { if (t >= 0) cues.push({ t: r3(t), id, vol, prio }); };
+  const add = (t, id, vol = VOL[id] ?? 0.45, prio = PRIO[id] ?? 5) => { if (t >= 0) cues.push({ t: r3(t), id, vol, prio }); };
   for (const c of P.clips) {
+    // (a clip that says its own sound — the style's moments: a timer ticks, a colour circle bubbles — or none: null)
+    if ((c.type === 'text' || c.type === 'sticker') && 'sound' in c) { if (c.sound) add(c.start, c.sound); continue; }
     if (c.type === 'text') {
       if (subtitleTracks.has(c.trackId)) { if (level === 'full') add(c.start, 'click', VOL.click * 0.8, PRIO.click); continue; }
       const m = c.text?.motion;

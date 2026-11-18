@@ -14,6 +14,7 @@ import { STYLES, checkMaterial } from './styles.js';
 import { generateStyle, getTranscript } from './stylerun.js';
 import { startBgRemove, cancelBgRemove, bgStatus } from './bgremove.js';
 import { KINETIC, SPRINGS, makeMotion } from './kinetic.js';
+import { colorOf } from './moments.js';
 
 const ids = (a) => a.map((x) => x.id);
 const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -245,8 +246,25 @@ export const tools = {
   },
 
   async add_sticker(a) {
-    need(a.emoji || a.badge_text, 'Provide emoji or badge_text');
-    const badge = a.badge_text ? { text: String(a.badge_text).toUpperCase(), bg: a.badge_color ? color(a.badge_color) : '#ff0033', fg: a.badge_text_color ? color(a.badge_text_color) : '#ffffff', icon: '' } : null;
+    need(a.emoji || a.badge_text || a.color_circle, 'Provide emoji, badge_text or color_circle');
+    if (a.color_circle) {
+      // (v1.12.6) a colour circle with its name under it
+      const col = colorOf(a.color_circle);
+      need(col, `Unknown colour "${a.color_circle}". Use a hex colour (#RRGGBB) or a name such as hitam, putih, cream, pink, navy, sage.`);
+      const c = actions.addSticker({ emoji: '', start: a.start, duration: a.duration || 3 });
+      store.mutate('AI: bulatan warna', () => {
+        const x = store.clip(c.id);
+        x.sticker = { emoji: '', badge: null, swatch: { color: col.hex, label: a.label ?? (/^#/.test(a.color_circle) ? '' : col.label), font: 'Poppins', weight: 700, italic: false, labelColor: '#ffffff' } };
+        x.name = `Warna ${x.sticker.swatch.label || col.hex}`;
+        x.scale = 1;
+        if (!a.animation_in) x.animIn = { type: 'pop', duration: 0.3 };
+        applyVisual(x, a);
+        applyAnim(x, a);
+      });
+      focus(c.id);
+      return { data: summarizeClip(store.P, store.clip(c.id)) };
+    }
+    const badge = a.badge_text ? { text: String(a.badge_text).toUpperCase(), bg: a.badge_color ? color(a.badge_color) : '#ff0033', fg: a.badge_text_color ? color(a.badge_text_color) : '#ffffff', icon: a.emoji || '' } : null;
     const c = actions.addSticker({ emoji: a.emoji, badge, start: a.start, duration: a.duration || 3 });
     store.mutate('AI: stiker', () => { applyVisual(c, a); applyAnim(c, a); });
     focus(c.id);

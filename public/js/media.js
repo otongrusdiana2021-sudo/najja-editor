@@ -895,6 +895,15 @@ function buildSfx(id, ctx, out, nb, dur) {
       tone(ctx, out, { f0: 110, f1: 40, t: 2.0, a: 0.005, d: 0.45, peak: 1 });
       noise(ctx, out, nb, { t: 2.0, a: 0.002, d: 0.45, peak: 0.6, type: 'highpass', f: 5000 });
       break;
+    case 'tick':
+      // a clock: tick-tock, eight times, a little louder towards the end
+      for (let i = 0; i < 8; i++) {
+        const t0 = i * 0.2;
+        const hi = i % 2 === 0;
+        noise(ctx, out, nb, { t: t0, a: 0.001, d: 0.03, peak: 0.55 + i * 0.05, type: 'bandpass', f: hi ? 3600 : 2500, q: 5 });
+        tone(ctx, out, { f0: hi ? 2093 : 1568, t: t0, a: 0.001, d: 0.045, peak: 0.3 + i * 0.03 });
+      }
+      break;
     case 'glitchfx':
       for (let i = 0; i < 8; i++) {
         const t = i * 0.07;

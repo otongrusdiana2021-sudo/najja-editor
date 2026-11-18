@@ -355,7 +355,8 @@ export function summarizeClip(P, c) {
   if ('x' in c) Object.assign(o, { x: r(c.x), y: r(c.y), scale: r(c.scale), rotation: r(c.rotation), opacity: r(c.opacity) });
   if (c.text) Object.assign(o, { text: c.text.content, font: c.text.font, size: c.text.size, color: c.text.color, preset: c.text.preset });
   if (c.text?.motion) o.text_motion = { ...c.text.motion, ...(Array.isArray(c.text.words) ? { timed_to_speech: true } : {}) };
-  if (c.sticker) o.sticker = c.sticker.badge ? { badge: c.sticker.badge.text } : { emoji: c.sticker.emoji };
+  if (c.sticker) o.sticker = c.sticker.badge ? { badge: c.sticker.badge.text, ...(c.sticker.badge.icon ? { icon: c.sticker.badge.icon } : {}) } : c.sticker.swatch ? { color_circle: c.sticker.swatch.color, label: c.sticker.swatch.label || '' } : { emoji: c.sticker.emoji };
+  if ((c.type === 'text' || c.type === 'sticker') && 'sound' in c) o.sound = c.sound || 'none';
   if (c.solid) o.solid = c.solid;
   if (c.effect) o.effect = c.effect;
   if (c.filter && c.filter.name !== 'none') o.filter = c.filter;

@@ -12,6 +12,7 @@ export const PROMPT_GROUPS = [
     'Edit proyek "{proyek}" pakai Style Konsep Editorial Review. Ambil transkripnya, buang jeda dan take ulang, pilih kata kunci terkuat, dan pasang label harga saat harga disebut. Produk: [nama produk], harga: [harga].',
     'Edit proyek "{proyek}" pakai Style Konsep Showcase Clean. Varian: [varian 1], [varian 2], [varian 3]. Harga: [harga].',
     'Buat ketiga Style Konsep (Showcase Clean, Editorial Review, Story Pop) untuk proyek "{proyek}" supaya bisa saya bandingkan. Produk: [nama produk], harga: [harga].',
+    'Edit proyek "{proyek}" pakai Style Konsep Story Pop. Ambil transkripnya, lalu tiap warna yang disebut kasih bulatan warna, kalau bilang tinggal beberapa hari kasih timer, dan kalau menyebut kegunaan (bisa buat …) kasih chip dengan emoji. Produk: [nama produk], harga: [harga].',
   ]],
   ['Subtitle & teks', [
     'Ambil transkrip proyek "{proyek}", betulkan salah ketik nama produk ([nama produk]), lalu buat subtitle dengan animasi Sorot per kata warna kuning, tiap kata menyala saat diucapkan.',

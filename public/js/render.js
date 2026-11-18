@@ -304,6 +304,10 @@ export function baseSize(clip, env, ctx) {
         const L = badgeLayout(ctx, clip.sticker.badge);
         return { w: L.w, h: L.h };
       }
+      if (clip.sticker?.swatch) {
+        const L = swatchLayout(ctx, clip.sticker.swatch);
+        return { w: L.w, h: L.h };
+      }
       return { w: 220, h: 220 };
     }
     default:
@@ -442,8 +446,73 @@ function badgeLayout(ctx, b) {
   const iconW = b.icon ? size * 1.15 : 0;
   return { size, tw, iconW, w: tw + iconW + size * 1.1, h: size * 1.75 };
 }
+/** (v1.12.6) A colour circle with its name under it: the size. */
+const SW_D = 150;
+const SW_RING = 10;
+function swatchLayout(ctx, sw) {
+  const size = 42;
+  let tw = 0;
+  if (sw.label) {
+    ctx.font = `${sw.italic ? 'italic ' : ''}${sw.weight || 700} ${size}px "${sw.font || 'Poppins'}", Poppins, sans-serif`;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+    tw = ctx.measureText(sw.label).width;
+  }
+  const d = SW_D + SW_RING * 2;
+  return { size, tw, d, w: Math.max(d + 16, tw + 24), h: d + (sw.label ? size * 1.45 : 0) + 8 };
+}
+function drawSwatch(ctx, sw) {
+  const L = swatchLayout(ctx, sw);
+  const cy = -L.h / 2 + L.d / 2 + 4;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.38)';
+  ctx.shadowBlur = 20;
+  ctx.shadowOffsetY = 7;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(0, cy, L.d / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = sw.color || '#888888';
+  ctx.beginPath();
+  ctx.arc(0, cy, SW_D / 2, 0, Math.PI * 2);
+  ctx.fill();
+  // (a very light colour: a thin line so it does not melt into the white ring)
+  const hex = String(sw.color || '').replace('#', '');
+  if (hex.length === 6) {
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    if (0.299 * r + 0.587 * g + 0.114 * b > 225) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, cy, SW_D / 2 - 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+  // a soft shine, like a button
+  const g = ctx.createRadialGradient(-SW_D * 0.2, cy - SW_D * 0.22, 2, -SW_D * 0.2, cy - SW_D * 0.22, SW_D * 0.55);
+  g.addColorStop(0, 'rgba(255,255,255,0.35)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, cy, SW_D / 2, 0, Math.PI * 2);
+  ctx.fill();
+  if (sw.label) {
+    ctx.font = `${sw.italic ? 'italic ' : ''}${sw.weight || 700} ${L.size}px "${sw.font || 'Poppins'}", Poppins, sans-serif`;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.75)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 3;
+    ctx.fillStyle = sw.labelColor || '#ffffff';
+    ctx.fillText(sw.label, 0, cy + L.d / 2 + L.size * 0.78);
+    ctx.restore();
+  }
+}
 function drawSticker(ctx, clip) {
   const st = clip.sticker || {};
+  if (st.swatch) { drawSwatch(ctx, st.swatch); return; }
   if (st.badge) {
     const b = st.badge;
     const L = badgeLayout(ctx, b);

@@ -153,7 +153,7 @@ Bisa digabung dengan animasi Masuk/Keluar/Kombo klip yang sudah ada. Ganti gaya 
 - **Editorial Review:** harga menghitung naik, huruf merek meluncur masuk di akhir.
 - **Showcase Clean:** nama varian naik per kata, harga akhir menghitung naik.
 
-Sejak v1.12.4, tiap teks yang muncul di Style Konsep juga diberi SFX yang sesuai gerakannya (pop per kata, swipe, ketik, kaching saat harga selesai menghitung), dan teks otomatis dipindah ke latar kosong supaya tidak menutupi orangnya, baik wajah maupun badan (v1.12.5). Lihat [STYLE-KONSEP.md](STYLE-KONSEP.md).
+Sejak v1.12.4, tiap teks yang muncul di Style Konsep juga diberi SFX yang sesuai gerakannya (pop per kata, swipe, ketik, kaching saat harga selesai menghitung), dan teks otomatis dipindah ke latar kosong supaya tidak menutupi orangnya, baik wajah maupun badan (v1.12.5). Sejak v1.12.6, warna yang disebut talent jadi bulatan warna, "tinggal 2 hari" jadi ⏰ dengan SFX timer berdetak, "bisa buat …" jadi chip emoji, dan klaim jadi badge. Lihat [STYLE-KONSEP.md](STYLE-KONSEP.md).
 
 **MCP:** `add_text`/`update_clip` dengan `text_motion` (+ `text_motion_spring`, `text_motion_stagger`, `text_motion_speed`, `text_motion_color`, `text_motion_out`). `add_subtitles` menerima `text_motion` dan `words` (waktu tiap kata dari `get_transcript`). `get_project` menampilkan `text_motion`.
 
@@ -199,6 +199,7 @@ Cara kerja lapisan efek: render menggambar lapisan dari bawah ke atas (`plan.lay
 
 - Semua suara bawaan dinormalisasi ke puncak **−1 dBFS**. Sebelumnya −6 sampai −10 dB di bawah kompresor.
 - Ada 12 suara dasar baru: jepret kamera, lonceng, ta-da, berhasil, salah, boing, gelembung, kaching, ketik, detak jantung, drum roll, glitch.
+- v1.12.6: **Timer Detik** (tick-tock 1,7 dtk), dipakai Style Konsep saat talent bilang "tinggal N hari".
 
 Semuanya dibuat di editor tanpa audio pihak ketiga. Proyek lama otomatis memakai versi baru.
 

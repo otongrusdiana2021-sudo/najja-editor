@@ -46,6 +46,29 @@ Tiap konsep, dari tombol **Generate** maupun dari prompt ke Claude, langsung men
 
 Ringkasan `apply_style` berisi `faces: { checked, moved, scaled, wrapped, partly, left }` dan `sfx` (jumlah efek suara).
 
+### Momen dari ucapan (v1.12.6)
+
+Apa yang diucapkan talent langsung jadi grafik di detik itu juga, seperti kerja editor. Momennya dicari otomatis dari transkrip:
+
+| Talent bilang | Yang muncul | SFX |
+|---|---|---|
+| "warnanya ada hitam, cream, sama dusty pink" | **Bulatan warna** per warna, muncul satu per satu tepat saat warnanya disebut, dengan nama di bawahnya. Bulatannya melayang pelan, lalu keluar bersamaan. | bubble per bulatan |
+| "promonya **tinggal 2 hari**", "2 hari lagi", "cuma sehari", "hari ini aja", "sampai besok" (konteks promo), "flash sale", "waktu terbatas" | **⏰ bergetar** + label merah "TINGGAL 2 HARI" yang dihentak per kata | **timer berdetak** (tick-tock, SFX baru) |
+| "stoknya tinggal 5", "sisa 3 pcs", "stok terbatas", "hampir habis" | 🔥 + label kuning "STOK TINGGAL 5" | notifikasi |
+| "**bisa buat** baju basah, minuman, sama laptop", "muat 5–6 outfit" | "BISA BUAT:" / "MUAT:" + **chip putih dengan emoji** per barang (👕 baju basah, 🥤 minuman, 💻 laptop), muncul saat disebut. Angka ikut tampil ("5–6 outfit"). | swipe + pop per chip |
+| "waterproof / nggak bocor", "best seller", "gratis ongkir", "original", "garansi", "COD", "diskon 50 persen", "awet", "premium" | **Badge** berwarna (💧 ANTI BOCOR, ⭐ BEST SELLER, 🚚 GRATIS ONGKIR, 🏷️ DISKON 50%, …), sekali per video | success / ding / kaching |
+| "oops", "wow", "waduh" (Story Pop saja) | Kata besar kuning miring | boing / success |
+
+- Warna yang juga kata sehari-hari (cream, gold, coklat, mint, olive, …) baru dianggap warna kalau kalimatnya membahas warna ("warna", "varian", "pilihan") atau menyebut warna lain. "Cream soup" bukan warna. Nama produk seperti "Olive Bag" juga bukan warna.
+- Momen tampil satu per satu. Kalau dua momen jatuh berdekatan, yang lebih penting didahulukan (timer > warna/stok > bisa buat > klaim > reaksi) dan yang lain menunggu gilirannya kalau sebentar lagi.
+- **Harga tetap prioritas.** Momen yang disebut saat label harga tampil menunggu harga selesai, atau selesai sebelum harga muncul. Kalau harga tidak pernah disebut, label harga dicarikan celah di antara momen.
+- Kata kunci pilihan Claude (`plan.keywords`) menang atas momen otomatis. Kata kunci otomatis memberi jalan ke momen.
+- Semua momen ikut aturan "tidak menutupi orang": dipindah ke latar kosong, dan judul atau label boleh dipecah baris.
+- **Editorial Review** memakai gaya kalem: nama warna Instrument Serif miring krem, chip krem, label timer Anton krem, tanpa reaksi. Subtitle diam selama momen tampil, supaya hanya ada satu pesan sekali tampil.
+- **Showcase Clean:** varian yang namanya warna ("Hitam, Cream, Dusty Pink") mendapat bulatan warnanya di tiap bagian. Bagian penutup menampilkan semua bulatan berurutan.
+- Lewat Claude: `plan.moments` untuk memilih sendiri, misalnya `{ "type": "color", "start": 12.4, "colors": ["hitam", "#F3E5C8"] }` atau `{ "type": "timer", "start": 30, "text": "TINGGAL 2 HARI" }`. `[]` mematikan semua momen. `add_sticker` dengan `color_circle` ("sage", "#B2BFA4") membuat bulatan warna sendiri.
+- Bulatan warna bisa diedit di panel stiker (warna, nama, warna nama). Bulatannya digambar oleh mesin Najja, jadi pratinjau sama dengan hasil ekspor.
+
 ### SFX di tiap teks dan gerakan
 
 | Kejadian | Suara |
@@ -116,10 +139,11 @@ Semua efek, transisi, animasi, dan alat MCP yang sudah ada tetap sama. Proyek la
 | `public/js/styles.js` | Mesin (tanpa browser, diuji di Node): kecocokan bahan, rencana otomatis, peta potongan, ketiga konsep |
 | `public/js/stylerun.js` | Transkripsi bahan, cari wajah, salinan proyek, musik, SFX, satu langkah undo |
 | `public/js/stylefx.js` | (v1.12.4/5) Teks menghindari orang (peta wajah + badan) dan SFX per teks/transisi (tanpa browser, diuji di Node) |
+| `public/js/moments.js` | (v1.12.6) Momen dari ucapan: warna, timer, stok, bisa buat, klaim, reaksi (tanpa browser, diuji di Node) |
 | `public/js/faces.js` | (v1.12.4/5) Deteksi wajah dan badan orang di perangkat (UltraFace RFB-320 + MediaPipe Selfie Segmentation, onnxruntime-web WebAssembly) |
 | `public/js/stylepanel.js` | Lembar Style |
 | `public/js/api.js`, `mcp/tools.js`, `mcp/protocol.js` | Alat dan prompt MCP |
-| `test/styles.test.js`, `test/stylefx.test.js`, `test/e2e/styles.mjs`, `test/e2e/stylefx.mjs` | Tes |
+| `test/styles.test.js`, `test/stylefx.test.js`, `test/moments.test.js`, `test/e2e/styles.mjs`, `test/e2e/stylefx.mjs` | Tes |
 
 ## Batasan
 
