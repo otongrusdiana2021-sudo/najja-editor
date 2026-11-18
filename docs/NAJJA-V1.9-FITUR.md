@@ -153,7 +153,7 @@ Bisa digabung dengan animasi Masuk/Keluar/Kombo klip yang sudah ada. Ganti gaya 
 - **Editorial Review:** harga menghitung naik, huruf merek meluncur masuk di akhir.
 - **Showcase Clean:** nama varian naik per kata, harga akhir menghitung naik.
 
-Sejak v1.12.4, tiap teks yang muncul di Style Konsep juga diberi SFX yang sesuai gerakannya (pop per kata, swipe, ketik, kaching saat harga selesai menghitung), dan teks otomatis dipindah supaya tidak menutupi wajah. Lihat [STYLE-KONSEP.md](STYLE-KONSEP.md).
+Sejak v1.12.4, tiap teks yang muncul di Style Konsep juga diberi SFX yang sesuai gerakannya (pop per kata, swipe, ketik, kaching saat harga selesai menghitung), dan teks otomatis dipindah ke latar kosong supaya tidak menutupi orangnya, baik wajah maupun badan (v1.12.5). Lihat [STYLE-KONSEP.md](STYLE-KONSEP.md).
 
 **MCP:** `add_text`/`update_clip` dengan `text_motion` (+ `text_motion_spring`, `text_motion_stagger`, `text_motion_speed`, `text_motion_color`, `text_motion_out`). `add_subtitles` menerima `text_motion` dan `words` (waktu tiap kata dari `get_transcript`). `get_project` menampilkan `text_motion`.
 

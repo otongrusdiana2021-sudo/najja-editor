@@ -19,7 +19,7 @@ Style Konsep (ready-made edits of a product video):
 - list_styles shows the three styles (showcase, editorial, storypop), how well the project's material fits each, and the recommended one.
 - For editorial and storypop call get_transcript first, then decide like an editor: the strongest 1-3 words of a sentence as keywords, the moment the price is said, retakes to cut, which shot (media id) goes over which sentence, a hook for Story Pop. Pass these as the plan of apply_style; what you leave out is chosen automatically.
 - apply_style makes a new project (a copy) by default, so the user's project stays as it is; the user can ask for all three styles and pick one.
-- Every style edit is complete: subtitles from the transcript, kinetic text, a sound effect on every text and transition, and no text over a face (texts are moved off faces automatically). plan.sfx tones the sounds down (graphics, none).
+- Every style edit is complete: subtitles from the transcript, kinetic text, a sound effect on every text and transition, and no text over a person (texts move to the free background beside or above the people, automatically). plan.sfx tones the sounds down (graphics, none).
 - Afterwards check the edit with get_frame (the title, a keyword, the price, the end).`;
 
 
@@ -47,9 +47,9 @@ ${facts ? `\nInfo produk:\n${facts}\n` : '\nKalau info produk (nama, varian, har
 Langkah:
 1. list_styles: cek kecocokan bahan. Kalau bahan kurang untuk style ini, bilang dan sarankan yang cocok.
 2. Untuk editorial/storypop: get_transcript, lalu baca kalimatnya dan tentukan rencana edit: kata kunci terkuat (1-3 kata, tiap 4-8 detik), momen harga disebut, bagian salah/ulang yang dipotong, B-roll (media_id) untuk kalimat yang cocok, dan hook untuk Story Pop.
-3. apply_style dengan rencana itu (proyek baru, proyek asli tidak diubah). Hasilnya sudah lengkap: subtitle dari transkrip, teks kinetik, SFX di tiap teks dan transisi, dan teks otomatis digeser supaya tidak menutupi wajah.
-4. Cek hasilnya dengan get_frame di beberapa titik (judul, kata kunci, harga, akhir): pastikan tidak ada teks di wajah, dan rapikan kalau perlu.
-5. Ringkas hasilnya dalam bahasa Indonesia: durasi, apa yang dipotong, kata kunci, harga, jumlah SFX, teks yang digeser dari wajah.`;
+3. apply_style dengan rencana itu (proyek baru, proyek asli tidak diubah). Hasilnya sudah lengkap: subtitle dari transkrip, teks kinetik, SFX di tiap teks dan transisi, dan teks otomatis digeser ke latar kosong supaya tidak menutupi orangnya (badan dan wajah).
+4. Cek hasilnya dengan get_frame di beberapa titik (judul, kata kunci, harga, akhir): pastikan tidak ada teks yang menutupi orangnya, dan rapikan kalau perlu.
+5. Ringkas hasilnya dalam bahasa Indonesia: durasi, apa yang dipotong, kata kunci, harga, jumlah SFX, teks yang digeser supaya tidak menutupi orang.`;
   return { description: pr.description, messages: [{ role: 'user', content: { type: 'text', text } }] };
 }
 

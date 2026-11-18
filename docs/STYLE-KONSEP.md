@@ -19,25 +19,32 @@ Style Konsep menyusun edit lengkap video produk dalam salah satu dari tiga konse
 5. Ketuk **Generate**. Hasilnya **proyek baru** bernama "‹proyek› · ‹konsep›", dan proyek asli tidak diubah. Centang **Buat ketiganya** untuk membuat 3 proyek sekaligus. Yang disarankan langsung dibuka, yang lain ada di Beranda.
 6. Hasilnya bisa diedit seperti biasa. Satu kali **Urung** mengembalikan seluruh edit style.
 
-## Hasil selalu lengkap (v1.12.4)
+## Hasil selalu lengkap (v1.12.4, v1.12.5)
 
 Tiap konsep, dari tombol **Generate** maupun dari prompt ke Claude, langsung menghasilkan:
 
 - **subtitle dari transkrip** (Editorial dan Story Pop) dengan teks kinetik yang bergerak saat katanya diucapkan;
 - **teks kinetik** untuk judul, kata kunci, harga (Angka berjalan), dan hook;
 - **SFX di tiap teks dan gerakan**, di track audio **SFX** tersendiri (track kedua/ketiga hanya dipakai kalau suara panjang masih berbunyi);
-- **teks tidak menutupi wajah.**
+- **teks tidak menutupi orangnya**, baik wajah maupun badan.
 
-### Teks tidak menutupi wajah
+### Teks tidak menutupi orang
 
-1. Sebelum menyusun edit, Najja mencari wajah di tiap video dan foto bahan, kira-kira 2 kali per detik. Detektornya UltraFace RFB-320 (Apache-2.0, 1,3 MB) yang berjalan **di perangkat** lewat onnxruntime-web WebAssembly, jadi tidak butuh GPU. Model diambil dari server Najja (`/vendor/ultraface-320/`). Hasilnya disimpan di proyek (`media.faces`), jadi tiap video cukup diperiksa sekali. Style kedua dan seterusnya langsung memakai data itu.
-2. Setelah edit tersusun, tiap teks dan stiker dicek terhadap posisi wajah sepanjang waktu tampilnya. Ukuran teks diukur dengan font aslinya, dan punch-in, posisi, serta cermin klip ikut dihitung.
-3. Teks yang tampil bersamaan dan berdekatan (judul + nama varian, harga coret + harga) dipindah sebagai satu kelompok, jadi tata letaknya tetap. Kelompok yang kena wajah dipindah ke tempat kosong terdekat di atas atau bawah wajah. Kalau ruangnya kurang, ukurannya diperkecil (sampai 50%). Kalau masih tidak muat, teks-teks di momen itu dipindah sebagai satu blok, lalu dicoba ke samping wajah. Subtitle lebih dulu dicoba ke bawah wajah. Teks lain tidak masuk ke 20% bawah layar, tempat tombol dan caption aplikasi.
-4. Teks tidak pernah dipindah ke atas teks lain yang tampil bersamaan.
-5. Kalau perangkat tidak bisa memuat model, edit tetap dibuat. Posisi wajah di video ngomong ditebak (kepala dan bahu di tengah atas), dan hasilnya memberi tahu hal itu.
-6. Untuk close-up ekstrem (wajah memenuhi layar), teks ditaruh di tempat yang paling sedikit menutupi wajah.
+1. Sebelum menyusun edit, Najja mencari orang di tiap video dan foto bahan, kira-kira 2 kali per detik. Dua model kecil berjalan **di perangkat** lewat onnxruntime-web WebAssembly, jadi tidak butuh GPU:
+   - **wajah:** UltraFace RFB-320 (Apache-2.0, 1,3 MB);
+   - **seluruh badan:** MediaPipe Selfie Segmentation 256 (Apache-2.0, 0,46 MB).
 
-Ringkasan `apply_style` berisi `faces: { checked, moved, scaled, partly, left }` dan `sfx` (jumlah efek suara).
+   Kedua model diambil dari server Najja (`/vendor/ultraface-320/`, `/vendor/selfie-256/`). Hasilnya disimpan di proyek: kotak wajah (`media.faces`) dan peta badan kasar 18×32 sel per frame (`media.people`, ±100 byte per frame). Jadi tiap video cukup diperiksa sekali, dan style kedua dan seterusnya langsung memakai data itu.
+2. Setelah edit tersusun, Najja membuat peta "di mana ada orang" di kanvas selama waktu tampil tiap teks. Punch-in, posisi, cermin klip, dan B-roll layar penuh yang menutupi video ikut dihitung. Ukuran teks diukur dengan font aslinya.
+3. Teks yang tampil bersamaan dan berdekatan (judul + nama varian, harga coret + harga, judul + stiker) dipindah sebagai satu kelompok, jadi tata letaknya tetap. Subtitle dalam satu shot memakai satu posisi yang sama, jadi tidak lompat-lompat.
+4. Kelompok yang menutupi orang dipindah ke **latar kosong** terdekat dari posisi aslinya, misalnya di samping kepala, di atas meja, atau di atas kepala.
+   - Kalau kolom kosongnya sempit, judul dipecah jadi 2–3 baris supaya tetap besar ("TRAVEL / BAG MINI"). Kalau masih kurang, ukurannya diperkecil: judul sampai 45%, subtitle paling kecil 75% supaya tetap terbaca.
+   - Teks lain tidak masuk ke 20% bawah layar, tempat tombol dan caption aplikasi.
+   - Teks tidak pernah ditaruh di atas teks lain yang tampil bersamaan.
+5. Kalau orangnya memenuhi layar dan tidak ada latar kosong, teks ditaruh di bagian yang paling tidak penting: pangkuan atau kaki, bukan wajah, bahu, atau dada. Ringkasan menghitungnya sebagai `partly`.
+6. Kalau perangkat tidak bisa memuat model, edit tetap dibuat. Posisi orang di video ngomong ditebak (kepala di tengah atas, badan di bawahnya), dan hasilnya memberi tahu hal itu.
+
+Ringkasan `apply_style` berisi `faces: { checked, moved, scaled, wrapped, partly, left }` dan `sfx` (jumlah efek suara).
 
 ### SFX di tiap teks dan gerakan
 
@@ -95,6 +102,7 @@ Waktunya memakai "waktu ucapan": semua video ngomong disambung berurutan, sebelu
 - **Data proyek baru:**
   - `speech`: transkrip per video;
   - `media[].faces`: posisi wajah per video/foto (v1.12.4);
+  - `media[].people`: peta badan orang per video/foto (v1.12.5);
   - `style`: konsep dan info produk hasil edit;
   - `styleSource`: proyek asal;
   - `styleProduct`: isi form terakhir.
@@ -107,8 +115,8 @@ Semua efek, transisi, animasi, dan alat MCP yang sudah ada tetap sama. Proyek la
 |---|---|
 | `public/js/styles.js` | Mesin (tanpa browser, diuji di Node): kecocokan bahan, rencana otomatis, peta potongan, ketiga konsep |
 | `public/js/stylerun.js` | Transkripsi bahan, cari wajah, salinan proyek, musik, SFX, satu langkah undo |
-| `public/js/stylefx.js` | (v1.12.4) Teks menghindari wajah dan SFX per teks/transisi (tanpa browser, diuji di Node) |
-| `public/js/faces.js` | (v1.12.4) Deteksi wajah di perangkat (UltraFace RFB-320, onnxruntime-web WebAssembly) |
+| `public/js/stylefx.js` | (v1.12.4/5) Teks menghindari orang (peta wajah + badan) dan SFX per teks/transisi (tanpa browser, diuji di Node) |
+| `public/js/faces.js` | (v1.12.4/5) Deteksi wajah dan badan orang di perangkat (UltraFace RFB-320 + MediaPipe Selfie Segmentation, onnxruntime-web WebAssembly) |
 | `public/js/stylepanel.js` | Lembar Style |
 | `public/js/api.js`, `mcp/tools.js`, `mcp/protocol.js` | Alat dan prompt MCP |
 | `test/styles.test.js`, `test/stylefx.test.js`, `test/e2e/styles.mjs`, `test/e2e/stylefx.mjs` | Tes |
@@ -117,5 +125,6 @@ Semua efek, transisi, animasi, dan alat MCP yang sudah ada tetap sama. Proyek la
 
 - Garis ukuran dibuat dari teks (panah + ukuran). Logo yang digambar dan tepi teks kasar (grunge) dari sampel belum ada.
 - Orang yang dipotong dari latar di atas grid (sampel 2 dan 3) belum ada. Sebagai gantinya ada sisipan klip produk atau punch-in.
-- Wajah dicari kira-kira 2 kali per detik. Gerakan kepala yang sangat cepat di antara dua titik bisa sedikit tersentuh teks (ada ruang ±12–18% di sekitar wajah). Pencarian pertama butuh beberapa detik per menit video (±18 dtk untuk video 50 dtk di laptop tanpa GPU).
+- Orang dicari kira-kira 2 kali per detik, dan peta badannya kasar (sel ±60 px di kanvas 1080). Gerakan yang sangat cepat di antara dua titik bisa sedikit tersentuh teks. Pencarian pertama butuh beberapa detik per menit video (±21 dtk untuk video 50 dtk di laptop tanpa GPU).
+- Model badan dilatih untuk selfie/setengah badan. Orang yang sangat kecil dan jauh di latar bisa tidak terdeteksi.
 - Pemilihan B-roll otomatis bergantian per kalimat. Pemilihan B-roll yang sesuai isi kalimat dilakukan oleh AI lewat `plan.broll`.

@@ -8,7 +8,7 @@ import { mixForSpeech } from './fastexport.js';
 import { wav16, transcribeWav, transcribeStatus } from './captions.js';
 import { STYLES, styleById, buildStyle, checkMaterial, speechTimeline } from './styles.js';
 import { makeClip } from './store.js';
-import { findFaces } from './faces.js';
+import { findPeople } from './faces.js';
 import { sfxCues } from './stylefx.js';
 import { baseSize, preloadFonts } from './render.js';
 import { clone, uid } from './util.js';
@@ -105,9 +105,10 @@ export async function generateStyle(styleId, { product = {}, plan = null, target
   if (signal?.aborted) throw new Error('Dibatalkan');
   const check = checkMaterial(store.P);
   if (check.styles[styleId].ok === 'no') throw new Error(check.styles[styleId].note);
-  // (v1.12.4) where the faces are, so no text covers one: each video once, kept in the project
-  onProgress(0.8, 'Mencari wajah…');
-  const faces = await findFaces(store.P, { onProgress: (p) => onProgress(0.8 + p * 0.04, 'Mencari wajah…'), signal });
+  // (v1.12.4 faces, v1.12.5 the whole person) where the people are, so no text covers one: each video once, kept in
+  // the project
+  onProgress(0.8, 'Mencari orang di video…');
+  const faces = await findPeople(store.P, { onProgress: (p) => onProgress(0.8 + p * 0.04, 'Mencari orang di video…'), signal });
   if (faces.looked) store.scheduleSave();
   if (signal?.aborted) throw new Error('Dibatalkan');
   onProgress(0.84, 'Menyusun edit…');
@@ -145,7 +146,8 @@ export async function generateStyle(styleId, { product = {}, plan = null, target
     P.style.product = { ...product };
     return s;
   });
-  if (!faces.looked && faces.failed) summary.faces = { ...summary.faces, detection: `tidak jalan di perangkat ini (${faces.reason}); posisi wajah ditebak` };
+  if (!faces.looked && faces.failed) summary.faces = { ...summary.faces, detection: `tidak jalan di perangkat ini (${faces.reason}); posisi orang ditebak` };
+  else if (faces.looked && faces.partial) summary.faces = { ...summary.faces, detection: `sebagian (${faces.reason})` };
   const { engine, timeline } = actions.app;
   store.select(null);
   engine?.seek(0);

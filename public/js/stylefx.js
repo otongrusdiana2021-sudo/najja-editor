@@ -1,33 +1,67 @@
-// Style Konsep, the finishing touches (v1.12.4) — after a style is built:
-//   1. no text over a face: every text / sticker that would cover a face (detected per media, see faces.js) moves to
-//      the free space above or below it (or beside it); a group shown together moves together, so its layout stays;
+// Style Konsep, the finishing touches — after a style is built:
+//   1. (v1.12.4 faces, v1.12.5 the whole person) no text over a person: where people are in each video is known per
+//      media (faces.js: m.faces boxes, m.people masks); every text / sticker that would cover a person moves to the
+//      free background (beside the head, over the table, above), smaller if it must be; texts shown together move
+//      together, so their layout stays; subtitles of one shot share one place;
 //   2. a sound for every text that appears and every move: a pop when words pop in, a swipe when they slide, a
 //      "ka-ching" when the price counts, typing for a typewriter, a bubble for a sticker, a whoosh on a transition, a
 //      soft click per subtitle line — on "SFX" audio tracks (a second/third only while a longer sound still plays).
-// Pure: the face boxes come from the project's media (m.faces), the sounds from media made by the caller.
+// Pure: the face boxes and person masks come from the project's media, the sounds from media made by the caller.
 import { makeClip, kfValue } from './store.js';
 import { uid } from './util.js';
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
 // ---------------------------------------------------------------------------------------------
-// Faces
+// Where the people are
 
-/** A head-and-shoulders guess for a talking video whose faces were not found (no face model on this device). */
+/** A head-and-shoulders guess for a talking video nobody looked at (no model on this device): face, then body. */
 export const TALK_FACE_GUESS = [0.3, 0.12, 0.7, 0.48];
+export const TALK_BODY_GUESS = [0.14, 0.12, 0.86, 1];
 
-/** The faces of a media at source time t: [[x1,y1,x2,y2], …] (0–1 of the picture), or null when not known. */
-export function facesAt(m, t) {
-  const f = m?.faces;
-  if (!f?.samples?.length) return null;
-  const step = 1 / Math.max(0.1, f.fps || 2);
+const nearest = (samples, fps, t) => {
+  if (!samples?.length) return null;
+  const step = 1 / Math.max(0.1, fps || 2);
   let best = null;
   let bd = Infinity;
-  for (const s of f.samples) {
+  for (const s of samples) {
     const d = Math.abs(s[0] - t);
     if (d < bd) { bd = d; best = s; }
   }
   return best && bd <= step * 1.6 ? best[1] : null;
+};
+
+/** The faces of a media at source time t: [[x1,y1,x2,y2], …] (0–1 of the picture), or null when not known. */
+export const facesAt = (m, t) => nearest(m?.faces?.samples, m?.faces?.fps, t);
+
+/** The cells of a person mask (cols × rows, row by row) ⇄ base64 bits. */
+export function encodeCells(cells) {
+  const bytes = new Uint8Array(Math.ceil(cells.length / 8));
+  for (let i = 0; i < cells.length; i++) if (cells[i]) bytes[i >> 3] |= 1 << (i & 7);
+  let str = '';
+  for (const b of bytes) str += String.fromCharCode(b);
+  return btoa(str);
+}
+export function decodeCells(b64, n) {
+  const str = atob(b64);
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) out[i] = (str.charCodeAt(i >> 3) >> (i & 7)) & 1;
+  return out;
+}
+const cellCache = new Map();
+/** Where a person is in a media at source time t: { cols, rows, cells } (1 = person), or null when not known. */
+export function peopleAt(m, t) {
+  const p = m?.people;
+  const b64 = nearest(p?.samples, p?.fps, t);
+  if (b64 == null) return null;
+  const key = `${p.cols}x${p.rows}:${b64}`;
+  let cells = cellCache.get(key);
+  if (!cells) {
+    cells = decodeCells(b64, p.cols * p.rows);
+    if (cellCache.size > 4000) cellCache.clear();
+    cellCache.set(key, cells);
+  }
+  return { cols: p.cols, rows: p.rows, cells };
 }
 
 /** Where a visual clip's picture is on the canvas at timeline time t: { cx, cy, w, h, flip } (canvas pixels). */
@@ -39,43 +73,156 @@ function pictureRect(P, c, m, t) {
   const mw = m?.width || W;
   const mh = m?.height || H;
   const k = Math.min(W / mw, H / mh) * (v('scale') ?? 1);
-  return { cx: W / 2 + (v('x') || 0) * W, cy: H / 2 + (v('y') || 0) * H, w: mw * k, h: mh * k, flip: !!c.flipH };
+  return { cx: W / 2 + (v('x') || 0) * W, cy: H / 2 + (v('y') || 0) * H, w: mw * k, h: mh * k, flip: !!c.flipH, opacity: v('opacity') ?? 1 };
 }
 
+/** The videos and photos seen at time t, top layer first; below a picture that fills the canvas nothing is seen. */
+function picturesAt(P, t) {
+  const media = new Map((P.media || []).map((m) => [m.id, m]));
+  const order = new Map(P.tracks.map((tr, i) => [tr.id, i]));
+  const hidden = new Set(P.tracks.filter((tr) => tr.hidden).map((tr) => tr.id));
+  const list = P.clips.filter((c) => (c.type === 'video' || c.type === 'image') && !hidden.has(c.trackId) && t >= c.start - 1e-3 && t <= c.start + c.duration + 1e-3)
+    .sort((a, b) => (order.get(a.trackId) ?? 0) - (order.get(b.trackId) ?? 0));
+  const out = [];
+  for (const c of list) {
+    const m = media.get(c.mediaId);
+    const r = pictureRect(P, c, m, t);
+    out.push({ c, m, r, src: c.type === 'video' ? (c.in || 0) + (t - c.start) * (c.speed || 1) : 0 });
+    const opaque = r.opacity >= 0.99 && !c.chroma?.enabled && !c.cutout?.enabled && (!c.blend || c.blend === 'source-over');
+    if (opaque && r.cx - r.w / 2 <= 1 && r.cy - r.h / 2 <= 1 && r.cx + r.w / 2 >= P.width - 1 && r.cy + r.h / 2 >= P.height - 1) break;
+  }
+  return out;
+}
+const faceRoom = (X1, Y1, X2, Y2) => {
+  const fw = X2 - X1;
+  const fh = Y2 - Y1;
+  return [X1 - fw * 0.12, Y1 - fh * 0.18, X2 + fw * 0.12, Y2 + fh * 0.12];
+};
+const toCanvas = (r, [a, b, c, d]) => {
+  const x1 = r.flip ? 1 - c : a;
+  const x2 = r.flip ? 1 - a : c;
+  return [r.cx + (x1 - 0.5) * r.w, r.cy + (b - 0.5) * r.h, r.cx + (x2 - 0.5) * r.w, r.cy + (d - 0.5) * r.h];
+};
+
 /**
- * The faces on the canvas at timeline time t, as canvas rectangles {x1,y1,x2,y2}, from every visible video or photo
- * (main track and overlays). A little room is added around each face (hair, chin). guess: a talking video without
+ * The faces on the canvas at timeline time t, as canvas rectangles {x1,y1,x2,y2}, from every video or photo seen
+ * (main track and overlays), with a little room around each face (hair, chin). talking(m): a talking video without
  * face data is given TALK_FACE_GUESS.
  */
 export function faceRectsAt(P, t, { talking = () => false } = {}) {
   const out = [];
-  const media = new Map((P.media || []).map((m) => [m.id, m]));
-  for (const c of P.clips) {
-    if ((c.type !== 'video' && c.type !== 'image') || t < c.start - 1e-3 || t > c.start + c.duration + 1e-3) continue;
-    const tr = P.tracks.find((x) => x.id === c.trackId);
-    if (tr?.hidden) continue;
-    const m = media.get(c.mediaId);
-    const src = c.type === 'video' ? (c.in || 0) + (t - c.start) * (c.speed || 1) : 0;
+  for (const { c, m, r, src } of picturesAt(P, t)) {
     let boxes = facesAt(m, src);
-    if (!boxes && c.type === 'video' && talking(m)) boxes = [TALK_FACE_GUESS];
-    if (!boxes?.length) continue;
-    const r = pictureRect(P, c, m, t);
-    for (const [a, b, cc, d] of boxes) {
-      const x1 = r.flip ? 1 - cc : a;
-      const x2 = r.flip ? 1 - a : cc;
-      let X1 = r.cx + (x1 - 0.5) * r.w;
-      let X2 = r.cx + (x2 - 0.5) * r.w;
-      let Y1 = r.cy + (b - 0.5) * r.h;
-      let Y2 = r.cy + (d - 0.5) * r.h;
-      const fw = X2 - X1;
-      const fh = Y2 - Y1;
-      X1 -= fw * 0.12; X2 += fw * 0.12; Y1 -= fh * 0.18; Y2 += fh * 0.12;
-      // (only what is on the canvas)
+    if (!boxes && c.type === 'video' && !m?.people && talking(m)) boxes = [TALK_FACE_GUESS];
+    for (const box of boxes || []) {
+      const [X1, Y1, X2, Y2] = faceRoom(...toCanvas(r, box));
       const R = { x1: Math.max(0, X1), y1: Math.max(0, Y1), x2: Math.min(P.width, X2), y2: Math.min(P.height, Y2) };
       if (R.x2 > R.x1 + 2 && R.y2 > R.y1 + 2) out.push(R);
     }
   }
   return out;
+}
+
+/**
+ * Where people are on the canvas over [start, end]: a grid of nx × ny cells (about 20 px), each the share of the time
+ * a person (body) or a face covers it. From the person masks (m.people), else a body guessed from the faces, else
+ * (a talking video nobody looked at) TALK_BODY_GUESS.
+ */
+export function occupancy(P, start, end, { talking = () => false, nx = 54 } = {}) {
+  const W = P.width;
+  const H = P.height;
+  const ny = Math.max(8, Math.round((nx * H) / W));
+  const cw = W / nx;
+  const ch = H / ny;
+  const body = new Float32Array(nx * ny);
+  const face = new Float32Array(nx * ny);
+  const upper = new Float32Array(nx * ny); // (head, shoulders and chest: the part of a person a text must not cover most)
+  const n = Math.min(24, Math.max(2, Math.ceil((end - start) / 0.25)));
+  const b1 = new Uint8Array(nx * ny);
+  const f1 = new Uint8Array(nx * ny);
+  const u1 = new Uint8Array(nx * ny);
+  const mark = (arr, X1, Y1, X2, Y2) => {
+    const i1 = Math.max(0, Math.floor(X1 / cw));
+    const i2 = Math.min(nx - 1, Math.ceil(X2 / cw) - 1);
+    const j1 = Math.max(0, Math.floor(Y1 / ch));
+    const j2 = Math.min(ny - 1, Math.ceil(Y2 / ch) - 1);
+    for (let j = j1; j <= j2; j++) for (let i = i1; i <= i2; i++) arr[j * nx + i] = 1;
+  };
+  let any = false;
+  for (let s = 0; s <= n; s++) {
+    const t = start + ((end - start) * s) / n;
+    b1.fill(0);
+    f1.fill(0);
+    u1.fill(0);
+    for (const { c, m, r, src } of picturesAt(P, t)) {
+      const faces = facesAt(m, src);
+      const mask = peopleAt(m, src);
+      const guess = !faces && !mask && c.type === 'video' && talking(m);
+      for (const [a, b, cc, d] of faces || (guess ? [TALK_FACE_GUESS] : [])) {
+        mark(f1, ...faceRoom(...toCanvas(r, [a, b, cc, d])));
+        const fw = cc - a;
+        const fh = d - b;
+        mark(u1, ...toCanvas(r, [Math.max(0, a - fw * 0.9), b, Math.min(1, cc + fw * 0.9), Math.min(1, d + fh * 1.4)]));
+      }
+      if (mask) {
+        // (each canvas cell: the mask cell under its centre)
+        const x0 = r.cx - r.w / 2;
+        const y0 = r.cy - r.h / 2;
+        const i1 = Math.max(0, Math.floor(x0 / cw));
+        const i2 = Math.min(nx - 1, Math.ceil((x0 + r.w) / cw));
+        const j1 = Math.max(0, Math.floor(y0 / ch));
+        const j2 = Math.min(ny - 1, Math.ceil((y0 + r.h) / ch));
+        for (let j = j1; j <= j2; j++) {
+          const v = ((j + 0.5) * ch - y0) / r.h;
+          if (v < 0 || v >= 1) continue;
+          const row = Math.floor(v * mask.rows) * mask.cols;
+          for (let i = i1; i <= i2; i++) {
+            let u = ((i + 0.5) * cw - x0) / r.w;
+            if (u < 0 || u >= 1) continue;
+            if (r.flip) u = 1 - u - 1e-9;
+            if (mask.cells[row + Math.floor(u * mask.cols)]) b1[j * nx + i] = 1;
+          }
+        }
+      } else {
+        // (no mask: a body under each face — shoulders about three faces wide — down to the bottom of the picture)
+        const boxes = faces || (guess ? [TALK_FACE_GUESS] : []);
+        for (const [a, b, cc] of boxes) {
+          const fw = cc - a;
+          mark(b1, ...toCanvas(r, [Math.max(0, a - fw), b, Math.min(1, cc + fw), 1]));
+        }
+        if (guess) mark(b1, ...toCanvas(r, TALK_BODY_GUESS));
+      }
+    }
+    for (let i = 0; i < b1.length; i++) {
+      if (b1[i] || f1[i]) any = true;
+      body[i] += b1[i] || f1[i];
+      face[i] += f1[i];
+      upper[i] += (b1[i] && u1[i]) || f1[i];
+    }
+  }
+  for (let i = 0; i < body.length; i++) { body[i] /= n + 1; face[i] /= n + 1; upper[i] /= n + 1; }
+  const sat = (a) => {
+    const S = new Float64Array((nx + 1) * (ny + 1));
+    for (let j = 0; j < ny; j++) {
+      let row = 0;
+      for (let i = 0; i < nx; i++) { row += a[j * nx + i]; S[(j + 1) * (nx + 1) + i + 1] = S[j * (nx + 1) + i + 1] + row; }
+    }
+    return S;
+  };
+  const SB = sat(body);
+  const SF = sat(face);
+  const SU = sat(upper);
+  /** The share of a canvas rectangle over a person (body), their head-shoulders-chest (upper) and face, 0–1 each. */
+  const cover = (b) => {
+    const i1 = Math.max(0, Math.min(nx, Math.floor(b.x1 / cw)));
+    const i2 = Math.max(0, Math.min(nx, Math.ceil(b.x2 / cw)));
+    const j1 = Math.max(0, Math.min(ny, Math.floor(b.y1 / ch)));
+    const j2 = Math.max(0, Math.min(ny, Math.ceil(b.y2 / ch)));
+    const cells = Math.max(1, (i2 - i1) * (j2 - j1));
+    const q = (S) => S[j2 * (nx + 1) + i2] - S[j1 * (nx + 1) + i2] - S[j2 * (nx + 1) + i1] + S[j1 * (nx + 1) + i1];
+    return { body: q(SB) / cells, upper: q(SU) / cells, face: q(SF) / cells };
+  };
+  return { any, nx, ny, body, face, upper, cover };
 }
 
 const CHAR_W = { Anton: 0.46, 'Bebas Neue': 0.42, Oswald: 0.48, 'Instrument Serif': 0.47, 'Playfair Display': 0.55 };
@@ -136,164 +283,152 @@ function moveGroup(P, group, from, to) {
 
 const timeOverlap = (a, b) => Math.min(a.end, b.end) - Math.max(a.start, b.start) > 0.05;
 
+/** A line of words broken into n lines as even as the words allow ("TRAVEL BAG MINI", 2 → "TRAVEL BAG\nMINI"), or null. */
+export function wrapWords(text, n) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  if (n < 2 || words.length < n) return null;
+  let best = null;
+  const len = (a, b) => words.slice(a, b).join(' ').length;
+  const tryCuts = (cuts) => {
+    const at = [0, ...cuts, words.length];
+    const widest = Math.max(...at.slice(1).map((e, i) => len(at[i], e)));
+    if (!best || widest < best.widest) best = { widest, at };
+  };
+  if (n === 2) for (let i = 1; i < words.length; i++) tryCuts([i]);
+  else for (let i = 1; i < words.length - 1; i++) for (let j = i + 1; j < words.length; j++) tryCuts([i, j]);
+  return best.at.slice(1).map((e, i) => words.slice(best.at[i], e).join(' ')).join('\n');
+}
+
 /**
- * Keep texts and stickers off faces. Texts shown together and near each other (a title and the line under it, a
- * price and its old price) form a group and move together, keeping their layout; each subtitle line is its own
- * group. A group on a face goes to the nearest free place above or below it (smaller when the room is short, beside
- * the face as a last resort), never onto another text shown at the same time.
- * Returns { checked, moved, scaled, partly, left } (partly: moved where it covers the least of a face that fills the
- * picture; left: no better place, it stays).
+ * Keep texts and stickers off the people in the picture (their faces above all). Texts shown together and near each
+ * other (a title and the line under it, a price and its old price) form a group and move together, keeping their
+ * layout; the subtitle lines of one shot form one group, so they stay in one place. A group over a person goes to
+ * the free background nearest to where the style put it — beside the head, over the table, above — broken into 2–3
+ * lines or smaller if it must be, never onto another text shown at the same time. When a person fills the picture, it goes
+ * where it covers the least of them, faces last.
+ * Returns { checked, moved, scaled, wrapped, partly, left } (checked: groups shown while someone is in the picture;
+ * wrapped: a title broken into lines to fit; partly: still over a little of the body; left: no better place, it stays).
  */
-export function avoidFaces(P, { measure = null, talking = () => false } = {}) {
+export function avoidPeople(P, { measure = null, talking = () => false } = {}) {
   const W = P.width;
   const H = P.height;
   const subtitleTracks = new Set(P.tracks.filter((t) => t.subtitle).map((t) => t.id));
   const hiddenTracks = new Set(P.tracks.filter((t) => t.hidden).map((t) => t.id));
   const items = P.clips.filter((c) => (c.type === 'text' || c.type === 'sticker') && !hiddenTracks.has(c.trackId));
   const rectOf = new Map(items.map((c) => [c, itemRect(P, c, measure)]));
-  // groups: near each other (less than 4% of the height apart) and shown together; subtitles alone
+  const isSub = (c) => subtitleTracks.has(c.trackId);
+  // groups: near each other (less than 4% of the height apart) and shown together
   const parent = items.map((_, i) => i);
   const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   const near = H * 0.04;
   for (let i = 0; i < items.length; i++) {
     const a = items[i];
-    if (subtitleTracks.has(a.trackId)) continue;
+    if (isSub(a)) continue;
     const ra = rectOf.get(a);
     for (let j = i + 1; j < items.length; j++) {
       const b = items[j];
-      if (subtitleTracks.has(b.trackId)) continue;
-      if (!timeOverlap({ start: a.start, end: a.start + a.duration }, { start: b.start, end: b.start + b.duration })) continue;
+      if (isSub(b) || !timeOverlap({ start: a.start, end: a.start + a.duration }, { start: b.start, end: b.start + b.duration })) continue;
       const rb = rectOf.get(b);
       const gx = Math.max(0, Math.max(ra.x1, rb.x1) - Math.min(ra.x2, rb.x2));
       const gy = Math.max(0, Math.max(ra.y1, rb.y1) - Math.min(ra.y2, rb.y2));
       if (gx < near * 2 && gy < near) parent[find(i)] = find(j);
     }
   }
+  // the subtitle lines of one shot (the main clip under their start): one group
+  const main = P.clips.filter((c) => c.trackId === 'main');
+  const shotOf = (c) => main.find((m) => c.start >= m.start - 1e-3 && c.start < m.start + m.duration)?.id || '';
+  const subRoot = new Map();
+  items.forEach((c, i) => {
+    if (!isSub(c)) return;
+    const key = `${c.trackId}|${shotOf(c)}`;
+    if (subRoot.has(key)) parent[i] = subRoot.get(key); else subRoot.set(key, i);
+  });
   const byRoot = new Map();
   items.forEach((c, i) => { const r = find(i); if (!byRoot.has(r)) byRoot.set(r, []); byRoot.get(r).push(c); });
   const groups = [...byRoot.values()].map((clips) => ({
     clips,
-    sub: subtitleTracks.has(clips[0].trackId),
+    sub: isSub(clips[0]),
     start: Math.min(...clips.map((c) => c.start)),
     end: Math.max(...clips.map((c) => c.start + c.duration)),
     box: union(clips.map((c) => rectOf.get(c))),
   })).sort((a, b) => a.sub - b.sub || a.start - b.start);
-  const res = { checked: 0, moved: 0, scaled: 0, partly: 0, left: 0 };
-  const gap = H * 0.015;
+  const res = { checked: 0, moved: 0, scaled: 0, wrapped: 0, partly: 0, left: 0 };
   const top = H * 0.05;
-  const facesIn = (start, end) => {
-    const out = [];
-    const n = Math.min(40, Math.max(2, Math.ceil((end - start) / 0.2)));
-    for (let i = 0; i <= n; i++) out.push(...faceRectsAt(P, start + ((end - start) * i) / n, { talking }));
-    return out;
-  };
-  const scaled = (b, f) => {
-    const cx = (b.x1 + b.x2) / 2;
-    const cy = (b.y1 + b.y2) / 2;
-    const w = (b.x2 - b.x1) * f;
-    const h = (b.y2 - b.y1) * f;
-    return { x1: cx - w / 2, x2: cx + w / 2, y1: cy - h / 2, y2: cy + h / 2 };
-  };
-  /** A free place for these groups together (their layout kept, smaller if it must be): the box, or null. */
-  const solve = (members, sizes, side = false) => {
-    const box = union(members.map((m) => m.box));
-    const start = Math.min(...members.map((m) => m.start));
-    const end = Math.max(...members.map((m) => m.end));
-    const sub = members[0].sub;
-    // (subtitles low, or high on a close-up; other texts anywhere but the bottom fifth: the app's buttons and the
-    // platform's caption are there)
-    const bottom = H * (sub ? 0.9 : 0.8);
-    const faces = facesIn(start, end);
-    const others = groups.filter((o) => !members.includes(o) && members.some((m) => timeOverlap(o, m))).map((o) => o.box);
-    // (a new place touches no face at all; the faces already have room around them)
-    const onFace = (b) => faces.some((f) => overlapArea(b, f) > area(b) * 0.005);
-    const onText = (b) => others.some((o) => overlapArea(b, o) > Math.min(area(o), area(b)) * 0.05);
-    const free = (b) => b.x1 >= -1 && b.x2 <= W + 1 && b.y1 >= top - 1 && b.y2 <= bottom + 1 && !onFace(b) && !onText(b);
-    for (const f of sizes) {
-      const b = f === 1 ? box : scaled(box, f);
-      const h = b.y2 - b.y1;
-      const ys = [];
-      for (const r of [...faces, ...others]) if (r.x2 > b.x1 && r.x1 < b.x2) ys.push(r.y1 - gap - h, r.y2 + gap);
-      ys.push(top, bottom - h);
-      const cand = ys.map((y) => y - b.y1);
-      // (the shortest move; a subtitle rather down than up)
-      cand.sort((p, q) => (sub ? (q > 0) - (p > 0) : 0) || Math.abs(p) - Math.abs(q));
-      for (const dy of cand) {
-        const to = { ...b, y1: b.y1 + dy, y2: b.y2 + dy };
-        if (free(to)) return { box, to };
-      }
-    }
-    if (side) {
-      // beside the faces: the wider side, as small as it must be (not under 45%)
-      const fu = union(faces);
-      const left = fu.x1 - gap - W * 0.03;
-      const right = W * 0.97 - (fu.x2 + gap);
-      const f = Math.min(1, Math.max(left, right) / (box.x2 - box.x1));
-      if (f >= 0.45) {
-        const b = scaled(box, f);
-        const w = b.x2 - b.x1;
-        const x1 = right >= left ? fu.x2 + gap : fu.x1 - gap - w;
-        const to = { ...b, x1, x2: x1 + w };
-        if (free(to)) return { box, to };
-      }
-    }
-    return null;
-  };
-  /** Last resort (a face fills the picture): the place that covers the least of it, smaller, if clearly better. */
-  const leastBad = (g) => {
-    const faces = facesIn(g.start, g.end);
-    const others = groups.filter((o) => o !== g && timeOverlap(o, g)).map((o) => o.box);
-    const covered = (b) => faces.reduce((a, f) => a + overlapArea(b, f), 0) / Math.max(1, area(b));
-    const now = covered(g.box);
-    let best = null;
-    for (const f of [0.75, 0.6, 0.5]) {
-      const b = scaled(g.box, f);
-      const h = b.y2 - b.y1;
-      for (let y = top; y + h <= H * 0.9; y += H * 0.01) {
-        const to = { ...b, y1: y, y2: y + h };
-        if (others.some((o) => overlapArea(to, o) > Math.min(area(o), area(to)) * 0.05)) continue;
-        const c = covered(to) + f * 0.02; // (the bigger size wins a tie)
-        if (!best || c < best.c - 1e-6) best = { c, to };
-      }
-    }
-    return best && best.c < now * 0.5 ? { box: g.box, to: best.to } : null;
-  };
+  const left = W * 0.03;
+  const right = W * 0.97;
   for (const g of groups) {
-    const faces = facesIn(g.start, g.end);
-    if (!faces.length) continue;
+    // (a subtitle stays readable: not under 75%; a title or a word may go down to 45%)
+    const SIZES = g.sub ? [1, 0.9, 0.8, 0.75] : [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.45];
+    const occ = occupancy(P, g.start, g.end, { talking });
+    if (!occ.any) continue;
     res.checked++;
-    // (on a face: one of its texts covers more than a touch of it)
-    if (!g.clips.some((c) => { const r = rectOf.get(c); return faces.some((f) => overlapArea(r, f) > Math.min(area(f), area(r)) * 0.04); })) continue;
-    let members = [g];
-    let sol = solve(members, [1, 0.85, 0.72, 0.6, 0.5]);
-    if (!sol && !g.sub) {
-      // no room for it alone: with the other texts of the moment, as one smaller block
-      const together = [g, ...groups.filter((o) => o !== g && !o.sub && timeOverlap(o, g))];
-      if (together.length > 1) { sol = solve(together, [1, 0.85, 0.72, 0.6, 0.5]); if (sol) members = together; }
-    }
-    if (!sol && !g.sub) sol = solve(members, [], true);
-    let partly = false;
-    if (!sol) { sol = leastBad(g); partly = !!sol; }
-    if (!sol) { res.left++; continue; }
-    if (partly) res.partly++;
-    const { box, to } = sol;
-    const k = (to.x2 - to.x1) / Math.max(1, box.x2 - box.x1);
-    const map = (r) => {
-      const fx = (box.x1 + box.x2) / 2;
-      const fy = (box.y1 + box.y2) / 2;
-      const tx = (to.x1 + to.x2) / 2;
-      const ty = (to.y1 + to.y2) / 2;
-      return { x1: tx + (r.x1 - fx) * k, x2: tx + (r.x2 - fx) * k, y1: ty + (r.y1 - fy) * k, y2: ty + (r.y2 - fy) * k };
+    // (subtitles may sit lower: the app's buttons and the platform's caption are in the bottom fifth)
+    const bottom = H * (g.sub ? 0.9 : 0.8);
+    const cost = (b, k) => {
+      const cv = occ.cover(b);
+      const cy = (b.y1 + b.y2) / 2;
+      const dx = Math.abs((b.x1 + b.x2) / 2 - (g.box.x1 + g.box.x2) / 2) / W;
+      const dy = Math.abs(cy - (g.box.y1 + g.box.y2) / 2) / H;
+      // faces count most, then head-shoulders-chest, then the rest of the body (a person filling the picture: the
+      // text goes over the lap or the legs); then how far it moves and how much smaller it gets (subtitles rather low)
+      return { c: 40 * cv.face + 8 * cv.upper + 4 * cv.body + 0.35 * dx + 0.5 * dy + (1 - k) + (g.sub ? 0.4 * Math.max(0, 0.6 - cy / H) : 0), cv };
     };
-    for (const m of members) {
-      moveGroup(P, m.clips, box, to);
-      m.box = map(m.box);
+    const now = occ.cover(g.box);
+    if (now.face < 0.005 && now.body < 0.04) continue;
+    const others = groups.filter((o) => o !== g && timeOverlap(o, g)).map((o) => o.box);
+    const onText = (b) => others.some((o) => overlapArea(b, o) > Math.min(area(o), area(b)) * 0.03);
+    const here = cost(g.box, 1);
+    // a title alone (with its stickers) may also be broken into 2 or 3 lines, to stay big in a narrow free column
+    const variants = [{ lines: 1, box: g.box }];
+    const tx = g.clips.filter((c) => c.type === 'text');
+    if (!g.sub && tx.length === 1 && !String(tx[0].text?.content).includes('\n') && tx[0].text?.motion?.type !== 'counter') {
+      for (const n of [2, 3]) {
+        const content = wrapWords(tx[0].text.content, n);
+        if (!content) continue;
+        const wrapped = { ...tx[0], text: { ...tx[0].text, content } };
+        variants.push({ lines: n, content, box: union(g.clips.map((c) => (c === tx[0] ? itemRect(P, wrapped, measure) : rectOf.get(c)))) });
+      }
     }
-    if (Math.abs(k - 1) > 1e-3) res.scaled++;
+    let best = null;
+    for (const v of variants) {
+      const bw = v.box.x2 - v.box.x1;
+      const bh = v.box.y2 - v.box.y1;
+      for (const k of SIZES) {
+        const w = bw * k;
+        const h = bh * k;
+        if (w > right - left || h > bottom - top) continue;
+        const xs = [];
+        for (let x = left; x + w <= right + 0.5; x += W * 0.025) xs.push(x);
+        xs.push(right - w, Math.min(right - w, Math.max(left, (g.box.x1 + g.box.x2) / 2 - w / 2)));
+        const ys = [];
+        for (let y = top; y + h <= bottom + 0.5; y += H * 0.01) ys.push(y);
+        ys.push(bottom - h, Math.min(bottom - h, Math.max(top, (g.box.y1 + g.box.y2) / 2 - h / 2)));
+        const extra = 0.12 * (v.lines - 1);
+        for (const x of xs) {
+          for (const y of ys) {
+            const b = { x1: x, y1: y, x2: x + w, y2: y + h };
+            const q = cost(b, k);
+            q.c += extra;
+            if (best && q.c >= best.c) continue;
+            if (onText(b)) continue;
+            best = { ...q, b, k, v };
+          }
+        }
+      }
+    }
+    if (!best || best.c > here.c - 0.05) { res.left++; continue; }
+    const to = best.b;
+    if (best.v.content) { tx[0].text.content = best.v.content; res.wrapped++; }
+    moveGroup(P, g.clips, best.v.box, to);
+    g.box = to;
     res.moved++;
+    if (best.k < 0.999) res.scaled++;
+    if (best.cv.face >= 0.005 || best.cv.body >= 0.04) res.partly++;
   }
   return res;
 }
+/** (v1.12.4 name) */
+export const avoidFaces = avoidPeople;
 
 // ---------------------------------------------------------------------------------------------
 // Sounds

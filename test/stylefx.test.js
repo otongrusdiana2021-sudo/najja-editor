@@ -1,10 +1,12 @@
-// Style Konsep finishing (v1.12.4): no text over a face, a sound for every text and transition; face boxes from the
-// face model (faces.js). Run with: npm test
+// Style Konsep finishing (v1.12.4/v1.12.5): no text over a person (the whole person, the face above all), a sound for
+// every text and transition; where the people are comes from the models of faces.js. Run with: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildStyle } from '../public/js/styles.js';
-import { avoidFaces, faceRectsAt, facesAt, itemBox, sfxCues, addStyleSfx, TALK_FACE_GUESS, STYLE_SFX } from '../public/js/stylefx.js';
-import { decodeFaces, nms, mediaWithoutFaces, FACES_VERSION } from '../public/js/faces.js';
+import {
+  avoidPeople, faceRectsAt, facesAt, peopleAt, occupancy, itemBox, sfxCues, addStyleSfx, encodeCells, decodeCells, STYLE_SFX,
+} from '../public/js/stylefx.js';
+import { decodeFaces, nms, mediaWithoutFaces, personCells, gridFor, FACES_VERSION, PEOPLE_VERSION } from '../public/js/faces.js';
 import { SFX } from '../public/js/presets.js';
 import { VENDOR } from '../lib/vendor.js';
 
@@ -15,16 +17,33 @@ const SAID = [
   'Harganya cuma 149 ribu, seharga tiket bioskop.',
   'Buruan checkout sebelum stok habis ya.',
 ];
-const faceTrack = (dur, box) => { const samples = []; for (let t = 0; t <= dur; t += 0.5) samples.push([t, box ? [box] : []]); return { v: 1, fps: 2, samples }; };
-/** The test project of styles.test.js, with a face in every video and photo (box: 0–1 of the picture). */
-function project(box = [0.3, 0.18, 0.7, 0.45], { faces = true } = {}) {
+/** A person mask (cols × rows) from rectangles 0–1 of the picture. */
+function mask(rects, cols = 18, rows = 32) {
+  const cells = new Uint8Array(cols * rows);
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const u = (i + 0.5) / cols;
+    const v = (j + 0.5) / rows;
+    if (rects.some(([a, b, c, d]) => u >= a && u <= c && v >= b && v <= d)) cells[j * cols + i] = 1;
+  }
+  return encodeCells(cells);
+}
+const track = (dur, value) => { const s = []; for (let t = 0; t <= dur + 0.01; t += 0.5) s.push([t, value]); return s; };
+/** A person in a media: face box + body box (0–1), the whole time. */
+function person(m, face, body, { faces = true, people = true } = {}) {
+  const dur = m.duration || 1;
+  if (faces) m.faces = { v: 1, fps: 2, samples: track(dur, face ? [face] : []) };
+  if (people) m.people = { v: 1, fps: 2, cols: 18, rows: 32, samples: track(dur, mask(face ? [face, body] : [])) };
+  return m;
+}
+/** The test project of styles.test.js; the talking video shows a person (face, body). */
+function project(face = [0.3, 0.18, 0.7, 0.45], body = [0.15, 0.4, 0.85, 1], opts = {}) {
   let t = 0.9;
   const words = [];
   for (const s of SAID) { for (const w of s.split(' ')) { words.push({ w, s: +t.toFixed(3), e: +(t + 0.3).toFixed(3) }); t += 0.36; } t += 1.3; }
   const dur = +(t + 1.2).toFixed(3);
   const media = [{ id: 'talk', type: 'video', name: 'ngomong.mp4', duration: dur, width: 1080, height: 1920, hasAudio: true }];
   for (let i = 0; i < 3; i++) media.push({ id: `shot${i}`, type: i === 2 ? 'image' : 'video', name: `produk${i}`, duration: i === 2 ? undefined : 5, width: i ? 1080 : 1920, height: i ? 1920 : 1080, hasAudio: i === 1 });
-  if (faces) for (const m of media) m.faces = faceTrack(m.duration || 1, box);
+  if (opts.data !== false) person(media[0], face, body, opts);
   return { id: 'p1', name: 'Tes', aspect: '16:9', width: 1920, height: 1080, fps: 30, background: { mode: 'color', color: '#000' }, magnet: true, tracks: [{ id: 'main', kind: 'main' }], clips: [], media, speech: { talk: { lang: 'id', words }, shot1: { lang: 'id', words: [] } } };
 }
 const PRODUCT = { name: 'Travel Bag', variant: 'Mini, Medium, Jumbo', size: '28 cm, 35 cm, 45 cm', price: '189rb', price_discount: '149rb' };
@@ -37,6 +56,7 @@ const rectOf = (P, c) => {
 };
 const ov = (a, b) => Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1)) * Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1));
 const ar = (a) => (a.x2 - a.x1) * (a.y2 - a.y1);
+const subTrackOf = (P) => new Set(P.tracks.filter((t) => t.subtitle).map((t) => t.id));
 /** Texts/stickers that cover a face at some moment: [description]. */
 function onFaces(P) {
   const bad = [];
@@ -48,6 +68,8 @@ function onFaces(P) {
   }
   return bad;
 }
+/** How much of each text/sticker lies over a person (share of its box, over its time): [{ c, body, upper, face }]. */
+const overPeople = (P) => P.clips.filter((x) => x.type === 'text' || x.type === 'sticker').map((c) => ({ c, ...occupancy(P, c.start, c.start + c.duration).cover(rectOf(P, c)) }));
 const tracksOverlap = (P) => {
   for (const tr of P.tracks) {
     const cs = P.clips.filter((c) => c.trackId === tr.id).sort((a, b) => a.start - b.start);
@@ -56,11 +78,14 @@ const tracksOverlap = (P) => {
   return null;
 };
 
-test('the face model: pinned file, decoded boxes in the picture, overlapping boxes merged', () => {
-  const x = VENDOR.ultraface.extra['model.onnx'];
-  assert.match(x.url, /^https:\/\/huggingface\.co\/onnxmodelzoo\/version-RFB-320\/resolve\/[0-9a-f]{40}\//);
-  assert.equal(x.sha256.length, 64);
-  assert.equal(VENDOR.ultraface.license, 'Apache-2.0');
+test('the models: pinned files; decoded face boxes; a person mask kept as a few bits per frame', () => {
+  for (const [name, mb] of [['ultraface', 1.3], ['selfie', 0.5]]) {
+    const x = VENDOR[name].extra['model.onnx'];
+    assert.match(x.url, /^https:\/\/huggingface\.co\/.+\/resolve\/[0-9a-f]{40}\//);
+    assert.equal(x.sha256.length, 64);
+    assert.ok(x.size < mb * 1.1e6, `${name} is small (${x.size} bytes)`);
+    assert.equal(VENDOR[name].license, 'Apache-2.0');
+  }
   // a 1080×1920 picture letterboxed into 320×240: 135 px wide, centred
   const lb = { dw: 135, dh: 240, ox: 92.5, oy: 0 };
   const scores = new Float32Array([0.1, 0.9, 0.2, 0.8, 0.95, 0.05, 0.1, 0.9]);
@@ -70,80 +95,121 @@ test('the face model: pinned file, decoded boxes in the picture, overlapping box
   assert.equal(f.length, 1, 'the same face twice is one face; the low score and the tiny box are not faces');
   assert.deepEqual(f[0], [0.278, 0.167, 0.722, 0.458]);
   assert.equal(nms([[0, 0, 1, 1, 0.5], [0, 0, 1, 1, 0.9], [2, 2, 3, 3, 0.4]]).length, 2);
+  // the person model's 256×256 answer → a grid along the picture (9:16: 18 × 32)
+  assert.deepEqual(gridFor(1080, 1920), { cols: 18, rows: 32 });
+  assert.deepEqual(gridFor(1920, 1080), { cols: 32, rows: 18 });
+  const alpha = new Float32Array(256 * 256);
+  for (let y = 128; y < 256; y++) for (let x = 0; x < 128; x++) alpha[y * 256 + x] = 0.95; // (lower left quarter)
+  const cells = personCells(alpha, 256, 18, 32);
+  assert.equal(cells.reduce((a, b) => a + b, 0), 9 * 16);
+  assert.equal(cells[31 * 18], 1);
+  assert.equal(cells[17], 0);
+  const b64 = encodeCells(cells);
+  assert.ok(b64.length <= 96, `small: ${b64.length} characters a frame`);
+  assert.deepEqual(decodeCells(b64, cells.length), cells);
   const P = project();
   assert.equal(mediaWithoutFaces(P).length, 0, 'already looked at');
   P.clips.push({ type: 'video', mediaId: 'talk' });
+  delete P.media[0].people;
+  assert.deepEqual(mediaWithoutFaces(P).map((m) => m.id), ['talk'], 'faces but no person mask yet: looked at again');
+  P.media[0].people = { v: PEOPLE_VERSION };
   P.media[0].faces = { v: FACES_VERSION - 1 };
   assert.deepEqual(mediaWithoutFaces(P).map((m) => m.id), ['talk'], 'an older look is done again; unused media are not looked at');
 });
 
-test('face boxes follow the clip: fit, punch-in, position, mirror; the nearest look in time', () => {
-  const m = { id: 'v', width: 1080, height: 1920, faces: { v: 1, fps: 2, samples: [[0, [[0.1, 0.1, 0.3, 0.3]]], [0.5, [[0.6, 0.1, 0.8, 0.3]]]] } };
-  assert.deepEqual(facesAt(m, 0.4), [[0.6, 0.1, 0.8, 0.3]]);
+test('where the person is on the canvas follows the clip: fit, punch-in, position, mirror, covered by a full-screen shot', () => {
+  const m = person({ id: 'v', width: 1080, height: 1920, duration: 2 }, [0.1, 0.1, 0.3, 0.25], [0, 0.25, 0.4, 1]);
+  assert.deepEqual(facesAt(m, 0.4), [[0.1, 0.1, 0.3, 0.25]]);
   assert.equal(facesAt(m, 9), null, 'too far from any look: not known');
-  const P = { width: 1080, height: 1920, tracks: [{ id: 'main' }], media: [m], clips: [{ id: 'c', type: 'video', mediaId: 'v', trackId: 'main', start: 0, duration: 1, in: 0, x: 0, y: 0, scale: 1 }] };
-  const [a] = faceRectsAt(P, 0);
-  assert.ok(Math.abs(a.x1 - (108 - 216 * 0.12)) < 1e-6 && Math.abs(a.y1 - (192 - 384 * 0.18)) < 1e-6, 'with room around the face');
-  P.clips[0].scale = 2;
+  assert.equal(peopleAt(m, 1).cells.length, 18 * 32);
+  const P = { width: 1080, height: 1920, tracks: [{ id: 'top' }, { id: 'main' }], media: [m, { id: 'shot', width: 1080, height: 1920 }], clips: [{ id: 'c', type: 'video', mediaId: 'v', trackId: 'main', start: 0, duration: 2, in: 0, x: 0, y: 0, scale: 1 }] };
+  const at = (P2, x, y) => occupancy(P2, 0.5, 0.6).cover({ x1: x * 1080 - 30, y1: y * 1920 - 30, x2: x * 1080 + 30, y2: y * 1920 + 30 });
+  assert.ok(at(P, 0.15, 0.6).body > 0.9 && at(P, 0.8, 0.6).body === 0, 'the person on the left, the right free');
+  assert.ok(at(P, 0.2, 0.17).face > 0.9);
   P.clips[0].flipH = true;
-  const [b] = faceRectsAt(P, 0);
-  assert.ok(b.x1 > 540, 'mirrored: the face on the left is on the right');
+  assert.ok(at(P, 0.85, 0.6).body > 0.9 && at(P, 0.15, 0.6).body === 0, 'mirrored: on the right');
   P.clips[0].flipH = false;
-  P.clips[0].x = 0.25;
-  assert.equal(faceRectsAt(P, 0)[0].x1, 0, 'cut at the canvas edge');
-  // a talking video nobody looked at: a guess
+  P.clips[0].x = 0.3;
+  assert.ok(at(P, 0.45, 0.6).body > 0.9 && at(P, 0.15, 0.6).body === 0, 'moved right');
+  P.clips[0].x = 0;
+  P.clips.push({ id: 'b', type: 'image', mediaId: 'shot', trackId: 'top', start: 0, duration: 2, x: 0, y: 0, scale: 1, opacity: 1 });
+  assert.equal(at(P, 0.15, 0.6).body, 0, 'a full-screen shot on top hides the person');
+  P.clips[1].scale = 0.5;
+  assert.ok(at(P, 0.15, 0.6).body > 0.9, 'a small picture-in-picture does not');
+  // a talking video nobody looked at: a guess; faces without a mask: a body under each face
+  P.clips.pop();
+  delete m.people;
+  assert.ok(at(P, 0.2, 0.8).body > 0.9 && at(P, 0.9, 0.8).body === 0, 'a body under the face');
   delete m.faces;
-  assert.equal(faceRectsAt(P, 0).length, 0);
+  assert.ok(!occupancy(P, 0, 1).any);
+  assert.ok(occupancy(P, 0, 1, { talking: () => true }).any);
   assert.equal(faceRectsAt(P, 0, { talking: () => true }).length, 1);
-  assert.deepEqual(TALK_FACE_GUESS.length, 4);
 });
 
-test('a text on a face moves off it; texts shown together move together and keep their layout', () => {
-  const P = { width: 1080, height: 1920, tracks: [{ id: 'main' }, { id: 'tx' }, { id: 'sub', subtitle: true }], media: [{ id: 'v', width: 1080, height: 1920, faces: faceTrack(6, [0.3, 0.2, 0.7, 0.45]) }], clips: [] };
-  P.clips.push({ id: 'v1', type: 'video', mediaId: 'v', trackId: 'main', start: 0, duration: 6, in: 0, x: 0, y: 0, scale: 1 });
-  const text = (id, content, y, start = 0.5, size = 120) => ({ id, type: 'text', trackId: 'tx', start, duration: 2, x: 0, y, scale: 1, text: { content, size, font: 'Anton', lineHeight: 1.1 } });
-  P.clips.push(text('t1', 'DISKON', -0.22), text('t2', '50%', -0.15));
-  P.clips.push({ ...text('s1', 'ini subtitle di wajah', -0.1, 3, 60), trackId: 'sub' });
-  P.clips.push(text('far', 'AMAN', 0.38, 3.2));
+test('a text over a person moves to the free background; texts shown together move together; one place for the subtitles of a shot', () => {
+  // the person on the left half, the right half free (like the sample videos)
+  const m = person({ id: 'v', width: 1080, height: 1920, duration: 8 }, [0.15, 0.15, 0.45, 0.32], [0, 0.3, 0.55, 1]);
+  const P = { width: 1080, height: 1920, tracks: [{ id: 'tx' }, { id: 'sub', subtitle: true }, { id: 'main' }], media: [m], clips: [] };
+  P.clips.push({ id: 'v1', type: 'video', mediaId: 'v', trackId: 'main', start: 0, duration: 8, in: 0, x: 0, y: 0, scale: 1 });
+  const text = (id, content, x, y, start = 0.5, size = 110) => ({ id, type: 'text', trackId: 'tx', start, duration: 2, x, y, scale: 1, text: { content, size, font: 'Anton', lineHeight: 1.1 } });
+  P.clips.push(text('t1', 'DISKON', -0.2, -0.1), text('t2', '50%', -0.2, -0.04));
+  P.clips.push(text('far', 'AMAN', 0.3, -0.38, 3.2, 80));
+  for (let i = 0; i < 3; i++) P.clips.push({ ...text(`s${i}`, 'ini baris subtitle', 0, 0.3, 3 + i * 1.5, 54), trackId: 'sub', duration: 1.5 });
   const before = P.clips.find((c) => c.id === 't2').y - P.clips.find((c) => c.id === 't1').y;
-  const r = avoidFaces(P);
-  assert.equal(r.moved, 2, JSON.stringify(r));
-  assert.deepEqual(onFaces(P), []);
+  const r = avoidPeople(P);
+  assert.ok(r.moved >= 2, JSON.stringify(r));
+  for (const x of overPeople(P)) assert.ok(x.body < 0.05 && x.face === 0, `"${x.c.text.content}" off the person (${x.body.toFixed(2)})`);
   const t1 = P.clips.find((c) => c.id === 't1');
   const t2 = P.clips.find((c) => c.id === 't2');
-  assert.ok(Math.abs((t2.y - t1.y) - before) < 0.002, 'the pair keeps its spacing');
-  assert.equal(P.clips.find((c) => c.id === 'far').y, 0.38, 'a text away from the face stays');
-  assert.ok(P.clips.find((c) => c.id === 's1').y > 0, 'a subtitle goes below the face');
+  assert.ok(t1.x > 0.05, 'to the free right side');
+  assert.ok(Math.abs((t2.y - t1.y) - before * t1.scale) < 0.003 && t2.x === t1.x, 'the pair keeps its layout');
+  assert.equal(P.clips.find((c) => c.id === 'far').y, -0.38, 'a text already on the background stays');
+  const subs = P.clips.filter((c) => c.trackId === 'sub');
+  assert.ok(subs.every((c) => c.x === subs[0].x && c.y === subs[0].y && c.scale >= 0.75), 'the subtitles of the shot: one place, still readable');
   // keyframed positions move too
-  const Q = { ...P, clips: [P.clips[0], { ...text('k', 'GERAK', -0.2), keyframes: [{ t: 0, x: 0, y: -0.2 }, { t: 1, x: 0, y: -0.18 }] }] };
-  avoidFaces(Q);
+  const Q = { ...P, clips: [P.clips[0], { ...text('k', 'GERAK', -0.2, 0), keyframes: [{ t: 0, x: -0.2, y: 0 }, { t: 1, x: -0.2, y: 0.02 }] }] };
+  avoidPeople(Q);
   const k = Q.clips[1];
-  assert.ok(Math.abs(k.y + 0.2) > 0.05 && Math.abs(k.keyframes[0].y - k.y) < 0.002 && Math.abs((k.keyframes[1].y - k.keyframes[0].y) - 0.02) < 0.002, 'keyframes moved with it');
+  assert.ok(k.x > 0 && Math.abs(k.keyframes[0].x - k.x) < 0.002 && Math.abs((k.keyframes[1].y - k.keyframes[0].y) - 0.02 * k.scale) < 0.002, 'keyframes moved with it');
 });
 
-for (const [name, box] of [['a usual talking head', [0.3, 0.18, 0.7, 0.45]], ['a face low in the picture', [0.2, 0.3, 0.8, 0.6]], ['a face to one side', [0.05, 0.2, 0.4, 0.45]], ['a face at the top', [0.35, 0.05, 0.65, 0.3]]]) {
-  test(`every style keeps every text off the faces: ${name}`, () => {
+for (const [name, face, body] of [
+  ['a person on the left', [0.2, 0.15, 0.45, 0.32], [0.02, 0.28, 0.6, 1]],
+  ['a person on the right', [0.55, 0.15, 0.8, 0.32], [0.4, 0.28, 0.98, 1]],
+  ['a small person in the middle', [0.4, 0.3, 0.6, 0.42], [0.3, 0.4, 0.7, 0.9]],
+]) {
+  test(`every style keeps every text off the person: ${name}`, () => {
     for (const st of ['editorial', 'showcase', 'storypop']) {
-      const P = project(box);
+      const P = project(face, body);
       const s = buildStyle(P, st, { product: PRODUCT, music: null, sfx: SOUNDS });
       assert.deepEqual(onFaces(P), [], `${st}: ${JSON.stringify(s.faces)}`);
+      const subs = subTrackOf(P);
+      for (const x of overPeople(P)) {
+        if (subs.has(x.c.trackId)) assert.ok(x.upper < 0.05, `${st}: subtitle "${x.c.text.content}" not over head or chest`);
+        else assert.ok(x.body < 0.05, `${st}: "${x.c.text?.content ?? x.c.sticker?.emoji}" off the person (${x.body.toFixed(2)}) ${JSON.stringify(s.faces)}`);
+      }
       assert.equal(tracksOverlap(P), null);
       for (const c of P.clips.filter((x) => x.type === 'text' || x.type === 'sticker')) {
         const r = rectOf(P, c);
-        assert.ok(r.y1 > -2 && r.y2 < P.height + 2, `${st}: "${c.text?.content ?? c.sticker?.emoji}" stays on the canvas`);
+        assert.ok(r.y1 > -2 && r.y2 < P.height + 2 && r.x1 > -2 && r.x2 < P.width + 2, `${st}: "${c.text?.content ?? c.sticker?.emoji}" stays on the canvas`);
       }
     }
   });
 }
 
-test('without face data a talking video is given a head-and-shoulders guess; a face filling the picture is covered the least', () => {
-  const P = project(null, { faces: false });
-  const s = buildStyle(P, 'storypop', { product: PRODUCT, music: null });
-  assert.ok(s.faces.checked > 0 && s.faces.moved > 0, JSON.stringify(s.faces));
-  const big = project([0.1, 0.1, 0.9, 0.7]);
-  const b = buildStyle(big, 'editorial', { product: PRODUCT, music: null });
-  assert.ok(b.faces.moved > 0 && b.faces.partly > 0, JSON.stringify(b.faces));
-  assert.equal(tracksOverlap(big), null);
+test('a person filling the picture: never the face; the head and chest spared where possible; no data: a guess', () => {
+  for (const st of ['editorial', 'showcase', 'storypop']) {
+    const P = project([0.35, 0.12, 0.65, 0.3], [0.15, 0.26, 0.85, 1]);
+    const s = buildStyle(P, st, { product: PRODUCT, music: null });
+    assert.deepEqual(onFaces(P), [], st);
+    assert.ok(s.faces.partly > 0, `${st}: reported as partly over the person ${JSON.stringify(s.faces)}`);
+    const upper = overPeople(P).filter((x) => x.upper > 0.2);
+    assert.ok(upper.length <= 1, `${st}: over the lap or legs rather than the chest (${upper.map((x) => x.c.text?.content).join(', ')})`);
+  }
+  const G = project(null, null, { data: false });
+  const g = buildStyle(G, 'storypop', { product: PRODUCT, music: null });
+  assert.ok(g.faces.checked > 0 && g.faces.moved > 0, JSON.stringify(g.faces));
+  assert.equal(tracksOverlap(G), null);
 });
 
 test('a sound for every text and every move: pop, swipe, typing, ka-ching, bubble, whoosh, soft subtitle clicks', () => {
