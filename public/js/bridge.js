@@ -58,6 +58,35 @@ export const bridge = {
     this.es = es;
   },
 
+  /**
+   * (v1.12.3) Run a tool here, without an AI client: commands pasted as JSON in the AI · MCP panel. Logged like the
+   * AI's own commands; returns the result or throws.
+   */
+  async runLocal(tool, args = {}) {
+    const entry = { id: `local_${Date.now()}`, tool, state: 'run', at: Date.now(), ms: 0, local: true };
+    this.state.log.unshift(entry);
+    if (this.state.log.length > 200) this.state.log.length = 200;
+    this.emit();
+    const t0 = performance.now();
+    try {
+      const fn = this.handlers?.tools?.[tool];
+      if (!fn) throw new Error(`Tool "${tool}" tidak ada di editor ini`);
+      const result = await fn(args);
+      entry.state = 'ok';
+      this.handlers?.onDone?.(tool, args, result);
+      return result;
+    } catch (err) {
+      entry.state = 'error';
+      entry.error = err?.message || String(err);
+      throw err;
+    } finally {
+      entry.ms = Math.round(performance.now() - t0);
+      this.emit();
+    }
+  },
+  /** The tool names this editor runs. */
+  toolNames() { return Object.keys(this.handlers?.tools || {}); },
+
   async run(cmd) {
     const entry = { id: cmd.id, tool: cmd.tool, state: 'run', at: Date.now(), ms: 0 };
     this.state.log.unshift(entry);

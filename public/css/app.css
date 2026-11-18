@@ -314,6 +314,20 @@ code { font-size: 11.5px; background: var(--panel-3); padding: 1px 5px; border-r
 .mcp-log .error .lt::before { content: '✕ '; color: var(--danger); }
 .mcp-log .error .ls { color: var(--danger); max-width: 60%; text-align: right; }
 .mcp-log .run .lt::before { content: '● '; color: var(--accent-2); }
+/* (v1.12.3) AI · MCP panel: tabs, cards, the prompt and JSON boxes */
+.ai-tabs { margin: 12px 0 4px; }
+.ai-card h4 .tag { font: 600 10px var(--font); color: var(--accent); background: var(--accent-soft); padding: 2px 6px; border-radius: 999px; margin-left: 6px; text-transform: none; letter-spacing: 0; vertical-align: 1px; }
+.ai-steps { margin: 0 0 8px; padding-left: 18px; font-size: 12px; color: var(--text-2); display: grid; gap: 4px; }
+.ai-steps b { color: var(--text); }
+details.ai-card summary { cursor: pointer; font-weight: 600; font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; }
+.ai-prompt, .ai-json { width: 100%; box-sizing: border-box; resize: vertical; min-height: 96px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); padding: 10px 12px; font: 13px/1.5 var(--font); }
+.ai-json { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height: 160px; }
+.ai-prompt:focus, .ai-json:focus { outline: none; border-color: var(--accent); }
+.lib-section .tok-actions { margin: 8px 0 6px; }
+.ai-group h5 { margin: 12px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.mcp-log .skip .ls, .mcp-log .wait .ls { color: var(--text-3); }
+.mcp-log .wait .lt::before { content: '… '; color: var(--text-3); }
+.mcp-log em { font-style: normal; color: var(--text-3); font-weight: 400; }
 @keyframes slideIn { from { opacity: 0; transform: translateY(-4px); } }
 .tools-list summary { cursor: pointer; font-weight: 600; font-size: 12px; color: var(--text-2); }
 .tools-list ul { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 7px; }

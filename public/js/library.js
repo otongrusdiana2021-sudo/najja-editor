@@ -19,6 +19,7 @@ import * as actions from './actions.js';
 import { toast, modal, confirmDialog } from './ui.js';
 import { bridge } from './bridge.js';
 import { account } from './account.js';
+import { PROMPT_GROUPS, fillPrompt, claudeUrl, parseToolCalls, guideForOtherAi, EXAMPLE_JSON } from './aicmds.js';
 
 const TITLES = {
   music: 'Suara', sfx: 'Efek suara', record: 'Rekam suara', templates: 'Template teks', caption: 'Keterangan',
@@ -47,12 +48,19 @@ export class Library {
     this.fileInput.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0';
     document.body.appendChild(this.fileInput);
     this.onClickH = (e) => this.onClick(e);
+    this.onInputH = (e) => this.onInput(e);
     this.onDragStartH = (e) => this.onDragStart(e);
     this.onDragEndH = () => setDragPayload(null);
     onMediaChange(() => { if (this.tab === 'music') this.render(); });
     store.on('selection', () => { if (['filter', 'transition'].includes(this.tab)) this.render(); });
     store.on('project', () => { if (['filter', 'transition'].includes(this.tab) && !store._live) this.render(); });
-    bridge.on(() => { if (this.tab === 'ai') this.render(); });
+    // (not while a box of the AI panel is being typed in: the redraw would lose the cursor)
+    bridge.on(() => {
+      if (this.tab !== 'ai') return;
+      const a = document.activeElement;
+      if (a?.dataset?.aiInput && this.panel?.contains(a)) return;
+      this.render();
+    });
   }
 
   static title(tab) { return TITLES[tab] || ''; }
@@ -64,6 +72,7 @@ export class Library {
     this.tab = tab;
     this.opts = opts;
     el.addEventListener('click', this.onClickH);
+    el.addEventListener('input', this.onInputH);
     el.addEventListener('dragstart', this.onDragStartH);
     el.addEventListener('dragend', this.onDragEndH);
     this.render();
@@ -72,6 +81,7 @@ export class Library {
   unmount(el = this.panel) {
     if (!el) return;
     el.removeEventListener('click', this.onClickH);
+    el.removeEventListener('input', this.onInputH);
     el.removeEventListener('dragstart', this.onDragStartH);
     el.removeEventListener('dragend', this.onDragEndH);
     if (this.panel === el) {
@@ -290,38 +300,124 @@ export class Library {
   }
 
   aiPanel() {
+    // (v1.12.3) Tabs: connect (ready to paste, no placeholders), prompts (write or pick, copy or open in Claude),
+    // paste JSON (tool calls from any AI, run here), activity.
     const st = bridge.state;
     const base = location.origin;
     const http = `${base}/mcp`;
-    const stdio = st.status?.mcp?.stdio;
     const auth = !!st.status?.auth;
-    const remote = auth || !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-    const desktopEntry = remote
-      ? { command: 'node', args: ['/path/ke/najja-editor/mcp-stdio.js'], env: { NAJJA_URL: base, ...(auth ? { NAJJA_TOKEN: '<TOKEN_AI_KAMU>' } : {}) } }
-      : (stdio ? { command: stdio.command, args: stdio.args } : { command: 'node', args: ['/path/ke/najja-editor/mcp-stdio.js'] });
-    const desktopCfg = JSON.stringify({ mcpServers: { 'najja-editor': desktopEntry } }, null, 2);
-    const ccCmd = `claude mcp add --transport http najja-editor ${http}${auth ? ' --header "Authorization: Bearer <TOKEN_AI_KAMU>"' : ''}`;
-    const log = st.log.slice(0, 30);
-    return `
+    const tab = this.aiTab || 'connect';
+    const copyRow = (text) => `<div class="copy-row"><code>${escapeHtml(text)}</code><button class="btn sm" data-copy="${escapeHtml(text)}" title="Salin">${icon('copy', 14)}</button></div>`;
+    const status = `
       <div class="mcp-status ${st.connected ? 'ok' : st.available === false ? 'off' : 'wait'}">
         <span class="dot"></span>
         <div><b>${st.connected ? 'Server MCP aktif' : st.available === false ? 'Mode offline' : 'Menghubungkan…'}</b>
         <span>${st.connected ? (st.clients.length ? `Agen terhubung: ${st.clients.map((c) => escapeHtml(c.name)).join(', ')}` : 'Menunggu AI agent terhubung') : st.available === false ? 'Jalankan <code>npm start</code> agar AI bisa mengedit lewat MCP.' : ''}</span></div>
       </div>
-      <div class="lib-section"><h4>Endpoint MCP (HTTP)</h4>
-        <div class="copy-row"><code>${escapeHtml(http)}</code><button class="btn sm" data-copy="${escapeHtml(http)}">${icon('copy', 14)}</button></div></div>
-      <div class="lib-section"><h4>Claude Code</h4>
-        <div class="copy-row"><code>${escapeHtml(ccCmd)}</code><button class="btn sm" data-copy="${escapeHtml(ccCmd)}">${icon('copy', 14)}</button></div></div>
-      <div class="lib-section"><h4>Claude Desktop / Cursor (stdio)</h4>
-        <pre class="code">${escapeHtml(desktopCfg)}</pre><button class="btn sm" data-copy="${escapeHtml(desktopCfg)}">${icon('copy', 14)} Salin konfigurasi</button>
-        ${remote ? '<p class="hint">mcp-stdio.js dijalankan dari salinan Najja di komputer kamu; ia meneruskan perintah ke server ini.</p>' : ''}</div>
-      ${auth ? `<p class="hint">Ganti <code>&lt;TOKEN_AI_KAMU&gt;</code> dengan token AI pribadimu: AI hanya bisa mengedit proyek di akunmu.</p><button class="btn sm" data-aitoken>${icon('ai', 14)} Buat / kelola token AI</button>` : ''}
-      <div class="lib-section"><h4>Contoh perintah ke AI</h4>
-        ${['Buat video promo 15 detik rasio 9:16 dengan judul "DISKON 50%" dan efek konfeti', 'Tambahkan subtitle dari naskah ini dan beri filter Sinematik ke semua klip', 'Potong klip pertama di detik 4, beri transisi Larut, lalu ekspor 1080p'].map((p) => `<button class="prompt-chip" data-copy="${escapeHtml(p)}">“${escapeHtml(p)}”</button>`).join('')}</div>
-      <div class="lib-section"><h4>Aktivitas AI ${log.length ? `<span class="count">${st.log.length}</span>` : ''}</h4>
-        ${log.length ? `<ul class="mcp-log">${log.map((l) => `<li class="${l.state}"><span class="lt">${escapeHtml(l.tool)}</span><span class="ls">${l.state === 'ok' ? `${l.ms} ms` : l.state === 'error' ? escapeHtml(l.error || 'gagal') : '…'}</span></li>`).join('')}</ul>` : '<p class="hint">Belum ada perintah dari AI.</p>'}</div>
-      <details class="lib-section tools-list"><summary>${(st.status?.tools || []).length} tool tersedia</summary>
-        <ul>${(st.status?.tools || []).map((t) => `<li><code>${t.name}</code><span>${escapeHtml(t.description.split('. ')[0])}.</span></li>`).join('')}</ul></details>`;
+      <div class="seg wide ai-tabs">${[['connect', 'Hubungkan'], ['prompt', 'Prompt'], ['json', 'Tempel JSON'], ['log', `Aktivitas${st.log.length ? ` (${st.log.length})` : ''}`]].map(([id, n]) => `<button class="${tab === id ? 'on' : ''}" data-aitab="${id}">${n}</button>`).join('')}</div>`;
+    let body = '';
+    if (tab === 'connect') {
+      const ccOauth = `claude mcp add --transport http najja-editor --scope user ${http}`;
+      const jsonUrl = JSON.stringify({ mcpServers: { 'najja-editor': { url: http } } }, null, 2);
+      const fresh = this.aiFresh;
+      const ccToken = fresh ? `claude mcp add --transport http najja-editor --scope user ${http} --header "Authorization: Bearer ${fresh}"` : '';
+      const stdio = st.status?.mcp?.stdio;
+      const desktopCfg = JSON.stringify({ mcpServers: { 'najja-editor': auth ? { command: 'node', args: ['C:\\najja-editor-main\\mcp-stdio.js'], env: { NAJJA_URL: base, NAJJA_TOKEN: fresh || '' } } : (stdio || { command: 'node', args: ['mcp-stdio.js'] }) } }, null, 2);
+      body = auth ? `
+        <div class="lib-section ai-card"><h4>1 · Claude: desktop, claude.ai, HP <span class="tag">paling mudah</span></h4>
+          <ol class="ai-steps"><li>Di Claude buka <b>Kustomisasi → Konektor → Tambahkan konektor kustom</b> (Settings → Connectors → Add custom connector).</li><li>Tempel alamat ini, kolom OAuth dikosongkan:</li></ol>
+          ${copyRow(http)}
+          <ol class="ai-steps" start="3"><li>Klik <b>Hubungkan</b>, masuk dengan akun Najja, lalu <b>Izinkan</b>.</li><li>Biarkan tab editor ini terbuka; buka tab <b>Prompt</b> untuk perintah siap pakai.</li></ol></div>
+        <div class="lib-section ai-card"><h4>2 · Claude Code (terminal)</h4>
+          <p class="hint">Jalankan di PowerShell/Terminal, lalu di Claude Code ketik <code>/mcp</code> → najja-editor → <b>Authenticate</b>.</p>
+          ${copyRow(ccOauth)}</div>
+        <div class="lib-section ai-card"><h4>3 · JSON untuk Cursor, VS Code, Windsurf, dll.</h4>
+          <pre class="code">${escapeHtml(jsonUrl)}</pre><button class="btn sm" data-copy="${escapeHtml(jsonUrl)}">${icon('copy', 14)} Salin JSON</button></div>
+        <details class="lib-section ai-card" ${fresh ? 'open' : ''}><summary>Cara lama: pakai token AI</summary>
+          <p class="hint">Untuk aplikasi yang tidak bisa login OAuth. Tombol ini membuat token baru dan mengisinya langsung ke perintah di bawah (token lama dicabut). Token hanya tampil sekali.</p>
+          ${fresh ? `<p class="hint ok">Token baru dibuat. Salin sekarang.</p>${copyRow(ccToken)}<p class="hint">Claude Desktop lewat file konfigurasi (butuh Node.js dan folder najja-editor di <code>C:\\najja-editor-main</code>):</p><pre class="code">${escapeHtml(desktopCfg)}</pre><button class="btn sm" data-copy="${escapeHtml(desktopCfg)}">${icon('copy', 14)} Salin JSON</button>` : ''}
+          <div class="tok-actions"><button class="btn sm" data-ai-filltoken>${icon('ai', 14)} Buat token & isi otomatis</button><button class="btn sm ghost" data-aitoken>Kelola token & aplikasi terhubung</button></div></details>`
+        : `
+        <div class="lib-section ai-card"><h4>Claude Code</h4>${copyRow(`claude mcp add --transport http najja-editor ${http}`)}</div>
+        <div class="lib-section ai-card"><h4>Claude Desktop / Cursor (stdio)</h4><pre class="code">${escapeHtml(desktopCfg)}</pre><button class="btn sm" data-copy="${escapeHtml(desktopCfg)}">${icon('copy', 14)} Salin JSON</button></div>`;
+    } else if (tab === 'prompt') {
+      const proj = store.P?.name || 'proyek ini';
+      const text = this.aiPrompt ?? '';
+      body = `
+        <div class="lib-section"><h4>Tulis perintah</h4>
+          <textarea class="ai-prompt" data-ai-input="prompt" rows="5" placeholder="Contoh: Edit proyek ini pakai Story Pop, produk Olive Bag, harga 149 ribu…">${escapeHtml(text)}</textarea>
+          <div class="tok-actions"><button class="btn btn-primary sm" data-ai-open ${text.trim() ? '' : 'disabled'}>${icon('ai', 14)} Buka di Claude</button><button class="btn sm" data-ai-copyprompt ${text.trim() ? '' : 'disabled'}>${icon('copy', 14)} Salin</button>${text ? '<button class="btn sm ghost" data-ai-clear>Kosongkan</button>' : ''}</div>
+          <p class="hint">"Buka di Claude" membuka chat baru di claude.ai dengan perintah ini sudah terisi (juga disalin). Claude-nya harus sudah tersambung ke Najja, dan tab editor ini tetap terbuka.</p></div>
+        <div class="lib-section"><h4>Perintah siap pakai</h4><p class="hint">Ketuk untuk memasukkan ke kotak di atas, lalu ganti bagian <b>[...]</b>.</p>
+          ${PROMPT_GROUPS.map(([g, list]) => `<div class="ai-group"><h5>${escapeHtml(g)}</h5>${list.map((p) => { const f = fillPrompt(p, proj); return `<button class="prompt-chip" data-ai-tpl="${escapeHtml(f)}">${escapeHtml(f)}</button>`; }).join('')}</div>`).join('')}</div>`;
+    } else if (tab === 'json') {
+      const text = this.aiJson ?? '';
+      const res = this.aiResults || [];
+      body = `
+        <div class="lib-section"><h4>Tempel perintah JSON</h4>
+          <p class="hint">Perintah dari AI mana pun (ChatGPT, Claude tanpa konektor) atau tulisan sendiri langsung dijalankan di editor ini. Formatnya <code>{"tool": "...", "arguments": {...}}</code>, atau daftar <code>[...]</code> yang dijalankan berurutan.</p>
+          <textarea class="ai-json" data-ai-input="json" rows="9" spellcheck="false" placeholder='[ { "tool": "add_text", "arguments": { "text": "DISKON 50%", "start": 0 } } ]'>${escapeHtml(text)}</textarea>
+          <div class="tok-actions"><button class="btn btn-primary sm" data-ai-run ${text.trim() && !this.aiRunning ? '' : 'disabled'}>${icon('play', 14)} ${this.aiRunning ? 'Menjalankan…' : 'Jalankan'}</button><button class="btn sm" data-ai-example>Contoh</button><button class="btn sm" data-ai-guide>${icon('copy', 14)} Salin panduan untuk AI lain</button>${text ? '<button class="btn sm ghost" data-ai-jsonclear>Kosongkan</button>' : ''}</div>
+          <p class="hint">"Salin panduan" menyalin daftar tool beserta formatnya. Tempel ke ChatGPT/Claude, tulis permintaanmu di akhir, lalu tempel jawabannya di sini. Setiap perintah bisa dibatalkan dengan Urungkan.</p></div>
+        ${res.length ? `<div class="lib-section"><h4>Hasil</h4><ul class="mcp-log">${res.map((r) => `<li class="${r.state}"><span class="lt">${escapeHtml(r.tool)}</span><span class="ls">${r.state === 'ok' ? `${r.ms} ms${r.note ? ` · ${escapeHtml(r.note)}` : ''}` : r.state === 'skip' ? 'dilewati' : escapeHtml(r.error || 'gagal')}</span></li>`).join('')}</ul></div>` : ''}`;
+    } else {
+      const log = st.log.slice(0, 40);
+      body = `
+        <div class="lib-section"><h4>Aktivitas AI</h4>
+          ${log.length ? `<ul class="mcp-log">${log.map((l) => `<li class="${l.state}"><span class="lt">${escapeHtml(l.tool)}${l.local ? ' <em>(JSON)</em>' : ''}</span><span class="ls">${l.state === 'ok' ? `${l.ms} ms` : l.state === 'error' ? escapeHtml(l.error || 'gagal') : '…'}</span></li>`).join('')}</ul>` : '<p class="hint">Belum ada perintah dari AI.</p>'}</div>
+        <details class="lib-section tools-list"><summary>${(st.status?.tools || []).length} tool tersedia</summary>
+          <ul>${(st.status?.tools || []).map((t) => `<li><code>${t.name}</code><span>${escapeHtml(t.description.split('. ')[0])}.</span></li>`).join('')}</ul></details>`;
+    }
+    return status + body;
+  }
+
+  /** (v1.12.3) Text typed in the AI · MCP panel is kept between redraws. */
+  onInput(e) {
+    const k = e.target?.dataset?.aiInput;
+    if (!k) return;
+    if (k === 'prompt') this.aiPrompt = e.target.value;
+    if (k === 'json') this.aiJson = e.target.value;
+    // (the buttons follow without redrawing the box being typed in)
+    const has = !!e.target.value.trim();
+    for (const b of this.panel.querySelectorAll(k === 'prompt' ? '[data-ai-open],[data-ai-copyprompt]' : '[data-ai-run]')) b.disabled = !has || (k === 'json' && !!this.aiRunning);
+  }
+
+  /** Full input schemas of the tools (for "Salin panduan untuk AI lain"), from this server's MCP endpoint. */
+  async aiToolSchemas() {
+    if (this.aiSchemas) return this.aiSchemas;
+    try {
+      const r = await fetch('/mcp', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) });
+      const j = await r.json();
+      if (j.result?.tools?.length) this.aiSchemas = j.result.tools;
+    } catch { /* fall back to names and descriptions */ }
+    return this.aiSchemas || (bridge.state.status?.tools || []);
+  }
+
+  /** Run the pasted JSON tool calls one after another; stops at the first error. */
+  async aiRunJson() {
+    let calls;
+    try { calls = parseToolCalls(this.aiJson, bridge.toolNames()); } catch (err) { toast(err.message, { type: 'error', timeout: 6000 }); return; }
+    this.aiRunning = true;
+    this.aiResults = calls.map((c) => ({ tool: c.tool, state: 'wait' }));
+    this.render();
+    let failed = false;
+    for (let i = 0; i < calls.length; i++) {
+      const r = this.aiResults[i];
+      if (failed) { r.state = 'skip'; continue; }
+      const t0 = performance.now();
+      try {
+        const out = await bridge.runLocal(calls[i].tool, calls[i].args);
+        Object.assign(r, { state: 'ok', ms: Math.round(performance.now() - t0), note: out?.data?.id ? out.data.id : '' });
+      } catch (err) {
+        Object.assign(r, { state: 'error', error: err.message });
+        failed = true;
+      }
+      if (this.tab === 'ai') this.render();
+    }
+    this.aiRunning = false;
+    if (this.tab === 'ai') this.render();
+    const ok = this.aiResults.filter((r) => r.state === 'ok').length;
+    toast(failed ? `${ok} dari ${calls.length} perintah jalan; berhenti di yang gagal` : `${ok} perintah dijalankan`, { type: failed ? 'warn' : 'ok', timeout: 4500 });
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -488,6 +584,42 @@ export class Library {
       } catch (err) { toast(err.message, { type: 'error', timeout: 4000 }); }
     };
     if ('aitoken' in d) { account.aiToken(); return; }
+    // (v1.12.3) AI · MCP panel
+    if (d.aitab) { this.aiTab = d.aitab; this.render(); return; }
+    if (d.aiTpl) { this.aiPrompt = d.aiTpl; this.render(); const ta = this.panel.querySelector('.ai-prompt'); if (ta) { ta.focus(); const i = ta.value.indexOf('['); if (i >= 0) ta.setSelectionRange(i, ta.value.indexOf(']', i) + 1); } return; }
+    if ('aiCopyprompt' in d || 'aiOpen' in d) {
+      const text = (this.aiPrompt || '').trim();
+      if (!text) return;
+      navigator.clipboard?.writeText(text).catch(() => {});
+      if ('aiOpen' in d) window.open(claudeUrl(text), '_blank', 'noopener');
+      toast('aiOpen' in d ? 'Membuka Claude (perintah juga disalin)' : 'Perintah disalin, tempel di Claude', { type: 'ok' });
+      return;
+    }
+    if ('aiClear' in d) { this.aiPrompt = ''; this.render(); return; }
+    if ('aiJsonclear' in d) { this.aiJson = ''; this.aiResults = []; this.render(); return; }
+    if ('aiExample' in d) { this.aiJson = EXAMPLE_JSON; this.render(); return; }
+    if ('aiRun' in d) { this.aiRunJson(); return; }
+    if ('aiGuide' in d) {
+      this.aiToolSchemas().then((tools) => navigator.clipboard?.writeText(guideForOtherAi(tools, store.P?.name)))
+        .then(() => toast('Panduan disalin. Tempel ke AI lain, tambahkan permintaanmu di akhir.', { type: 'ok', timeout: 5000 }))
+        .catch(() => toast('Gagal menyalin', { type: 'error' }));
+      return;
+    }
+    if ('aiFilltoken' in d) {
+      (async () => {
+        let info = {};
+        try { info = await (await fetch('/api/me/token', { credentials: 'same-origin' })).json(); } catch { /* ignore */ }
+        if (info.exists && !(await confirmDialog('Buat token baru?', 'Token AI yang lama dicabut; aplikasi yang memakainya harus diatur ulang. Konektor Claude (OAuth) tidak terpengaruh.', 'Buat baru'))) return;
+        try {
+          const r = await fetch('/api/me/token', { method: 'POST', credentials: 'same-origin' });
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+          this.aiFresh = j.token; // (only in this page's memory: gone on reload)
+          this.render();
+        } catch (err) { toast(err.message, { type: 'error' }); }
+      })();
+      return;
+    }
     if (d.copy) { navigator.clipboard?.writeText(d.copy).then(() => toast('Disalin', { type: 'ok' })).catch(() => toast('Gagal menyalin', { type: 'error' })); return; }
     if (d.mfilter) { this.mediaFilter = d.mfilter; this.render(); return; }
     if (d.fxcat) { this.fxCat = d.fxcat; this.render(); return; }

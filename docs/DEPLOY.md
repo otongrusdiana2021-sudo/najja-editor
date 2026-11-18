@@ -313,6 +313,8 @@ Token server dipakai untuk membuat akun admin pertama dan sebagai token MCP mili
 - Server menyimpan hanya hash token di `<folder data>/oauth.json`.
 - Di belakang aaPanel, nginx biasanya menahan semua jalur `/.well-known/` untuk sertifikat SSL (404 dari nginx). Itu tidak masalah: `/mcp` menunjuk ke `/oauth/protected-resource`, dan klien yang tidak menemukan metadata server memakai `/register`, `/authorize`, dan `/token`, yang semuanya dilayani Najja. Cek: `https://editor.domainkamu.com/oauth/authorization-server` harus menampilkan JSON.
 
+**Panel AI · MCP di editor (v1.12.3):** semua cara di atas ada di tombol **MCP** di kanan atas editor, siap salin tanpa placeholder. Tab **Prompt** berisi perintah siap pakai dan tombol **Buka di Claude**. Tab **Tempel JSON** menjalankan perintah tool yang ditempel (misalnya jawaban ChatGPT) langsung di editor tanpa konektor.
+
 **Token AI pribadi:** menu akun → **Token AI (MCP)** → **Buat token**. Token berawalan `najja_pat_`, hanya ditampilkan sekali, dan server hanya menyimpan hash-nya. AI yang memakai token ini hanya bisa mengedit proyek di akun kamu, lewat editor yang kamu buka. Bisa dicabut kapan saja dari menu yang sama. Token server (`NAJJA_TOKEN`) tetap berlaku dan bertindak sebagai admin pertama.
 
 **Claude Code:**

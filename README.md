@@ -6,6 +6,8 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.12.3:** Panel **AI · MCP** dirombak jadi siap tempel. Tab **Hubungkan** berisi alamat konektor, perintah Claude Code tanpa token, dan JSON untuk Cursor/VS Code (token bisa diisi otomatis untuk cara lama). Tab **Prompt** berisi perintah siap pakai berisi nama proyek, plus tombol **Buka di Claude** yang membuka chat dengan perintahnya sudah terisi. Tab **Tempel JSON** menjalankan perintah dari AI mana pun (ChatGPT, Claude tanpa konektor) langsung di editor, dan **Salin panduan untuk AI lain** menyalin daftar tool beserta formatnya.
+
 **Baru di v1.12.1:** **Hubungkan Claude tanpa token.** Di Claude (desktop, claude.ai, atau HP): Settings → Connectors → Add custom connector, tempel `https://editor.domainkamu.com/mcp`, masuk, lalu Izinkan. Najja sekarang mendukung OAuth standar MCP; aplikasi terhubung bisa dilihat dan diputus di menu Token AI.
 
 **Baru di v1.12.0:** **Teks kinetik** ala motion graphics: kata dan huruf bergerak sendiri-sendiri dengan gerak pegas (Pop per kata, Huruf jatuh, Sorot per kata, Stabilo, Angka berjalan, dan lainnya, 17 pilihan). Subtitle otomatis bergerak tepat saat katanya diucapkan. Tetap bisa diedit, pratinjau sama dengan ekspor, jalan di iPad, juga lewat MCP dan Style Konsep.
