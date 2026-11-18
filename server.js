@@ -615,7 +615,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     if (req.method !== 'OPTIONS' && !who) {
       // (a Claude connector reads resource_metadata, then signs the user in with OAuth)
       return sendJson(res, 401, { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized: connect with OAuth, or send "Authorization: Bearer <token>"' } },
-        { ...cors, 'Access-Control-Expose-Headers': 'WWW-Authenticate, Mcp-Session-Id', 'WWW-Authenticate': `Bearer realm="najja-editor", resource_metadata="${baseUrlOf(req)}/.well-known/oauth-protected-resource"` });
+        { ...cors, 'Access-Control-Expose-Headers': 'WWW-Authenticate, Mcp-Session-Id', 'WWW-Authenticate': `Bearer realm="najja-editor", resource_metadata="${baseUrlOf(req)}/oauth/protected-resource"` });
     }
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
@@ -667,8 +667,10 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
     const fail = (err) => sendJson(res, err.status || 400, { error: err.oauth || 'invalid_request', error_description: err.message }, open);
     if (req.method === 'OPTIONS') { res.writeHead(204, open); return res.end(); }
     // discovery (RFC 9728, RFC 8414; the OpenID path too, for clients that look there)
-    if (p === '/.well-known/oauth-protected-resource' || p === '/.well-known/oauth-protected-resource/mcp') return sendJson(res, 200, protectedResourceMetadata(base), open);
-    if (p === '/.well-known/oauth-authorization-server' || p === '/.well-known/openid-configuration') return sendJson(res, 200, authorizationServerMetadata(base), open);
+    // (also outside /.well-known/: a panel's nginx, e.g. aaPanel, may keep every /.well-known/ path for itself — the 401
+    // of /mcp points here, and clients that find no server metadata use /register, /authorize and /token, below)
+    if (p === '/.well-known/oauth-protected-resource' || p === '/.well-known/oauth-protected-resource/mcp' || p === '/oauth/protected-resource') return sendJson(res, 200, protectedResourceMetadata(base), open);
+    if (p === '/.well-known/oauth-authorization-server' || p === '/.well-known/openid-configuration' || p === '/oauth/authorization-server') return sendJson(res, 200, authorizationServerMetadata(base), open);
     if (p.startsWith('/.well-known/')) return false;
     // (clients that find no metadata try /register, /authorize and /token at the server's root)
     const what = p.replace(/^\/oauth\//, '/');

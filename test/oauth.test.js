@@ -81,7 +81,9 @@ after(() => { srv?.child.kill(); fs.rmSync(dir, { recursive: true, force: true }
 test('discovery: /mcp says where to sign in; the metadata lists the endpoints', async () => {
   const r = await mcp(null, 'initialize');
   assert.equal(r.status, 401);
-  assert.match(r.headers['www-authenticate'], new RegExp(`resource_metadata="${BASE}/\\.well-known/oauth-protected-resource"`));
+  // (outside /.well-known/: a panel's nginx may keep those paths for itself)
+  assert.match(r.headers['www-authenticate'], new RegExp(`resource_metadata="${BASE}/oauth/protected-resource"`));
+  assert.equal((await call(null, 'GET', '/oauth/protected-resource')).json().resource, `${BASE}/mcp`);
   const prm = (await call(null, 'GET', '/.well-known/oauth-protected-resource')).json();
   assert.deepEqual([prm.resource, prm.authorization_servers], [`${BASE}/mcp`, [BASE]]);
   assert.equal((await call(null, 'GET', '/.well-known/oauth-protected-resource/mcp')).json().resource, `${BASE}/mcp`);
@@ -91,6 +93,25 @@ test('discovery: /mcp says where to sign in; the metadata lists the endpoints', 
   assert.deepEqual([m.issuer, m.authorization_endpoint, m.token_endpoint, m.registration_endpoint], [BASE, `${BASE}/oauth/authorize`, `${BASE}/oauth/token`, `${BASE}/oauth/register`]);
   assert.deepEqual(m.code_challenge_methods_supported, ['S256']);
   assert.equal((await call(null, 'GET', '/.well-known/openid-configuration')).json().issuer, BASE);
+});
+
+test('without any metadata (a proxy that keeps /.well-known/ to itself): /register, /authorize, /token at the root work', async () => {
+  // what an MCP client does when it finds no authorization server metadata: the default endpoints
+  const reg = await call(null, 'POST', '/register', JSON.stringify({ client_name: 'Claude', redirect_uris: [CALLBACK] }), JSONH);
+  assert.equal(reg.status, 201);
+  const id = reg.json().client_id;
+  const { verifier, challenge } = pkce();
+  const ask = authorizeUrl(id, { challenge }).replace('/oauth/authorize', '/authorize');
+  const first = await call(null, 'GET', ask);
+  const next = new URL(first.headers.location, BASE).searchParams.get('next');
+  assert.ok(next.startsWith('/oauth/authorize?'), 'the login comes back to the allow page');
+  const page = await call(A, 'GET', ask);
+  assert.equal(page.status, 200);
+  const nonce = /name="nonce" value="([^"]+)"/.exec(page.text)[1];
+  const code = new URL((await call(A, 'POST', '/oauth/authorize', form({ nonce, decision: 'allow' }), FORM)).headers.location).searchParams.get('code');
+  const tok = await call(null, 'POST', '/token', form({ grant_type: 'authorization_code', code, redirect_uri: CALLBACK, client_id: id, code_verifier: verifier }), FORM);
+  assert.equal(tok.status, 200, tok.text);
+  assert.equal((await mcp(tok.json().access_token, 'tools/list')).status, 200);
 });
 
 test('registration: https and this-computer addresses only; the metadata comes back', async () => {

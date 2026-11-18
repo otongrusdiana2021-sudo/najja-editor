@@ -311,7 +311,7 @@ Token server dipakai untuk membuat akun admin pertama dan sebagai token MCP mili
 - AI yang terhubung dengan cara ini hanya bisa mengedit proyek akun yang mengizinkannya, sama seperti token AI pribadi.
 - Daftar aplikasi terhubung dan tombol **Putuskan** ada di menu akun → **Token AI (MCP)**. Ganti password memutus semua aplikasi.
 - Server menyimpan hanya hash token di `<folder data>/oauth.json`.
-- Di belakang reverse proxy (aaPanel/nginx), jalur `/.well-known/` dan `/oauth/` harus ikut diteruskan ke Najja. Cek: `https://editor.domainkamu.com/.well-known/oauth-authorization-server` harus menampilkan JSON. Kalau malah 404 dari nginx, atur reverse proxy-nya supaya semua jalur (`/`) diteruskan.
+- Di belakang aaPanel, nginx biasanya menahan semua jalur `/.well-known/` untuk sertifikat SSL (404 dari nginx). Itu tidak masalah: `/mcp` menunjuk ke `/oauth/protected-resource`, dan klien yang tidak menemukan metadata server memakai `/register`, `/authorize`, dan `/token`, yang semuanya dilayani Najja. Cek: `https://editor.domainkamu.com/oauth/authorization-server` harus menampilkan JSON.
 
 **Token AI pribadi:** menu akun → **Token AI (MCP)** → **Buat token**. Token berawalan `najja_pat_`, hanya ditampilkan sekali, dan server hanya menyimpan hash-nya. AI yang memakai token ini hanya bisa mengedit proyek di akun kamu, lewat editor yang kamu buka. Bisa dicabut kapan saja dari menu yang sama. Token server (`NAJJA_TOKEN`) tetap berlaku dan bertindak sebagai admin pertama.
 
