@@ -130,3 +130,28 @@ test('layers: effects among the pictures, bottom to top; an old project keeps it
   const R = { tracks: [{ id: 'fxTop', kind: 'effect' }, { id: 'tx', kind: 'text' }, { id: 'main', kind: 'main' }], clips: [] };
   assert.equal(findOrCreateTrack(R, 'effect', 0, 3).id, 'fxTop', 'the effect track on top is used as before');
 });
+
+test('(v1.12.7) preview elements: the stretches of one file share a few elements in turn; never two at once', async () => {
+  const { compilePlan, POOL } = await import('../public/js/plan.js');
+  const v = (id, start, dur, inPt, extra = {}) => ({ id, type: 'video', mediaId: 'm', trackId: 'main', start, duration: dur, in: inPt, speed: 1, ...extra });
+  // 30 jump cuts of one recording: POOL elements, in turn
+  const cuts = Array.from({ length: 30 }, (_, i) => v(`c${i}`, i * 0.45, 0.45, i * 1.1));
+  const p1 = compilePlan({ clips: cuts, tracks: [{ id: 'main', kind: 'main' }] });
+  const keys = cuts.map((c) => p1.elKeys.get(c.id));
+  assert.equal(new Set(keys).size, POOL, `${POOL} elements for 30 cuts`);
+  for (let i = 1; i < keys.length; i++) assert.notEqual(keys[i], keys[i - 1], 'the next cut is on another element (already waiting there)');
+  assert.equal(p1.groups.size, POOL);
+  for (const g of p1.groups.values()) for (let i = 1; i < g.length; i++) assert.ok(g[i].start >= g[i - 1].start + g[i - 1].duration, 'one stretch at a time per element, in time order');
+  // a split clip (one continuous stretch) stays on one element; a transition keeps both pictures on two
+  const split = [v('a', 0, 2, 5), v('b', 2, 2, 7), v('c', 4, 2, 20, { transition: { type: 'blur', duration: 0.6 } })];
+  const p2 = compilePlan({ clips: split, tracks: [{ id: 'main', kind: 'main' }] });
+  assert.equal(p2.elKeys.get('a'), p2.elKeys.get('b'));
+  assert.notEqual(p2.elKeys.get('b'), p2.elKeys.get('c'));
+  // the same file on two tracks at once: two elements; another file: its own
+  const two = [v('m1', 0, 4, 0), { ...v('o1', 1, 2, 10), trackId: 'ov' }, { ...v('x', 4, 2, 0), mediaId: 'other' }];
+  const p3 = compilePlan({ clips: two, tracks: [{ id: 'ov', kind: 'overlay' }, { id: 'main', kind: 'main' }] });
+  assert.notEqual(p3.elKeys.get('m1'), p3.elKeys.get('o1'));
+  assert.ok(p3.elKeys.get('x').startsWith('other~'));
+  // the export still groups by continuous stretch (fastexport decodes one stretch per source)
+  assert.equal(p1.chainKeys.get('c1'), 'c1');
+});

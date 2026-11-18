@@ -17,7 +17,7 @@ import { toMarkdown } from './report.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || '').split('=').slice(1).join('=') || d;
-const ONLY = arg('only', 'B0,B1,B2,B3,B4,B5,B6,B7,B8').split(',').map((s) => s.trim().toUpperCase());
+const ONLY = arg('only', 'B0,B1,B2,B3,B4,B5,B6,B7,B8,B9').split(',').map((s) => s.trim().toUpperCase());
 const PROFILE = arg('profile', 'desktop');
 const LABEL = arg('label', 'run');
 const FIX = path.resolve(arg('fixtures', path.join(ROOT, 'bench', '.fixtures')));
@@ -608,6 +608,47 @@ await run('B7', async () => {
   while (/asli/.test(switched) && Date.now() - t0 < 600000) { await sleep(500); switched = await sourceNow(); }
   const switchMs = Date.now() - t0;
   return { source: src, playback: original, light: { source: switched, after_ms: switchMs, playback: await measurePlayback(page, 12, 1) } };
+});
+
+// B9 (v1.12.7) — cut to cut: one recording cut into 30 short pieces (0.45 s each), each jumping 0.65 s ahead in the
+// file (the silences cut out), the way a talking video is edited. Every cut starts a new stretch of the file.
+await run('B9', async () => {
+  await mcp('new_project', { name: 'B9 cut to cut', aspect_ratio: '16:9' });
+  const m = await mcp('import_media', { path: rel(fixtures.b0) });
+  await waitMediaReady(page);
+  await page.evaluate(async (mediaId) => {
+    const { store, makeClip } = await import('/js/store.js');
+    store.mutate('B9', (P) => {
+      P.clips = P.clips.filter((c) => c.trackId !== 'main');
+      for (let i = 0; i < 30; i++) P.clips.push(makeClip('video', { mediaId, trackId: 'main', start: Math.round(i * 0.45 * 1000) / 1000, duration: 0.45, in: Math.round(i * 1.1 * 1000) / 1000, name: `potong ${i + 1}` }));
+    });
+  }, m.media_id);
+  // the picture actually moving: the longest time without a new frame of the main video, the media elements made
+  const watch = () => page.evaluate(() => {
+    const E = window.najja.engine;
+    const st = { maxEls: 0, made: 0, freezes: [], last: null, lastMaster: null, cuts: 0 };
+    const create = E.createEl.bind(E);
+    E.createEl = (...a) => { st.made++; return create(...a); };
+    let on = true;
+    const loop = (t) => {
+      if (!on) return;
+      st.maxEls = Math.max(st.maxEls, E.els.size);
+      const M = E.masterEl();
+      if (E.playing && M) {
+        const sig = `${M.clip.id}:${M.frames}`;
+        if (M.clip.id !== st.lastMaster) { st.cuts++; st.lastMaster = M.clip.id; }
+        if (sig !== st.sig) { if (st.last != null && t - st.last > 100) st.freezes.push(Math.round(t - st.last)); st.sig = sig; st.last = t; }
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+    window.__b9 = { stop: () => { on = false; E.createEl = create; return st; } };
+  });
+  await watch();
+  const playback = await measurePlayback(page, 12);
+  const st = await page.evaluate(() => window.__b9.stop());
+  st.freezes.sort((a, b) => b - a);
+  return { project: { clips: 30, duration: 13.5 }, playback, cuts: { cuts_seen: st.cuts, media_elements_made: st.made, media_elements_max: st.maxEls, picture_freezes_over_100ms: st.freezes.length, picture_freeze_total_ms: st.freezes.reduce((a, b) => a + b, 0), picture_freeze_max_ms: st.freezes[0] || 0 } };
 });
 
 results.page_errors = mainEditor.errors;

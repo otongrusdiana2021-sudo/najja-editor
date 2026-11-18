@@ -38,6 +38,48 @@ function chainKeysOf(byTrack) {
   return keys;
 }
 
+/**
+ * (v1.12.7) The preview's media elements: a few per file, taken in turn. Before, every stretch of a file (a jump cut)
+ * had its own element, all kept loaded around the playhead — 30 cuts of one recording were 30 <video> elements of
+ * the same file, which an iPad cannot keep decoding: it froze at every cut. Now the stretches of one file share POOL
+ * elements in turn: while one plays, the next ones wait already positioned on their first frame. Stretches shown at
+ * the same time (a transition, the same file on two tracks) never share one. Map clipId -> element key.
+ */
+export const POOL = 3;
+const PREP = 0.6; // (seconds an element is free before its next stretch: time to seek there)
+function elementKeysOf(P, chainKeys, mainClips) {
+  // margins: the halves of the transitions around a main clip (both pictures are seen then)
+  const pre = new Map();
+  const post = new Map();
+  const half = (c) => (c?.transition?.type && c.transition.type !== 'none' ? (c.transition.duration || 0.6) / 2 : 0);
+  mainClips.forEach((c, i) => { pre.set(c.id, half(c)); post.set(c.id, half(mainClips[i + 1])); });
+  const chains = new Map();
+  for (const c of P.clips) {
+    if (c.type !== 'video' && c.type !== 'audio') continue;
+    const k = chainKeys.get(c.id) || c.id;
+    const a = c.start - (pre.get(c.id) || 0);
+    const b = c.start + c.duration + (post.get(c.id) || 0);
+    const ch = chains.get(k);
+    if (ch) { ch.start = Math.min(ch.start, a); ch.end = Math.max(ch.end, b); ch.ids.push(c.id); } else chains.set(k, { pool: `${c.mediaId}~${c.type}`, start: a, end: b, ids: [c.id] });
+  }
+  const byPool = new Map();
+  for (const ch of chains.values()) { if (!byPool.has(ch.pool)) byPool.set(ch.pool, []); byPool.get(ch.pool).push(ch); }
+  const keys = new Map();
+  for (const [pool, list] of byPool) {
+    list.sort((a, b) => a.start - b.start);
+    const slots = [];
+    for (const ch of list) {
+      // an element free for a while (the longest), else a new one while the pool has room, else the first one free
+      let slot = slots.filter((x) => x.until <= ch.start - PREP).sort((a, b) => a.until - b.until)[0];
+      if (!slot && slots.length >= POOL) slot = slots.filter((x) => x.until <= ch.start + 1e-6).sort((a, b) => a.until - b.until)[0];
+      if (!slot) { slot = { n: slots.length, until: -Infinity }; slots.push(slot); }
+      slot.until = ch.end;
+      for (const id of ch.ids) keys.set(id, `${pool}~${slot.n}`);
+    }
+  }
+  return keys;
+}
+
 export function compilePlan(P) {
   const lists = new Map();
   for (const c of P.clips) {
@@ -53,15 +95,18 @@ export function compilePlan(P) {
   let maxHalf = 0;
   for (const c of main.clips) if (c.transition?.type && c.transition.type !== 'none') maxHalf = Math.max(maxHalf, (c.transition.duration || 0.6) / 2);
   const chainKeys = chainKeysOf(byTrack);
-  // media elements: clips (video/audio) grouped by element key, in project order (as Engine.sync built them)
+  const elKeys = elementKeysOf(P, chainKeys, main.clips);
+  // media elements: clips (video/audio) grouped by element key, in time order (the engine finds the one on screen,
+  // else the next to come)
   const groups = new Map();
   for (const c of P.clips) {
     if (c.type !== 'video' && c.type !== 'audio') continue;
-    const k = chainKeys.get(c.id) || c.id;
+    const k = elKeys.get(c.id) || c.id;
     let g = groups.get(k);
     if (!g) groups.set(k, (g = []));
     g.push(c);
   }
+  for (const g of groups.values()) g.sort((a, b) => a.start - b.start);
   return {
     project: P,
     track,
@@ -73,6 +118,7 @@ export function compilePlan(P) {
     layers: layersOf(P, track),
     mainHidden: !!P.tracks.find((tr) => tr.kind === 'main')?.hidden,
     chainKeys,
+    elKeys,
     groups,
   };
 }

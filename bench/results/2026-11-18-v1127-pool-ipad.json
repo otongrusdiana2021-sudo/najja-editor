@@ -1,0 +1,86 @@
+{
+  "label": "v1127-pool",
+  "profile": "ipad",
+  "at": "2026-11-18T08:05:58.012Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B9": {
+      "ok": true,
+      "project": {
+        "clips": 30,
+        "duration": 13.5
+      },
+      "playback": {
+        "timeline_ms_per_s": 41.4,
+        "timeline_ms_per_frame": 0.72,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 4.6,
+          "updateTime": 0.6,
+          "onScroll": 13.7,
+          "paintRuler": 7.4,
+          "paintMedia": 14.1,
+          "placeOverlays": 1
+        },
+        "raf_p95_ms": 16.8,
+        "frame_hitches_over_25ms": 24,
+        "seconds": 12,
+        "fps_rendered": 32.5,
+        "frames_missed_pct": 0.4,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 13.1,
+        "frame_draw_p95_ms": 19.6,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 99.1,
+        "video_presented_fps": 34,
+        "drift_seeks": 0,
+        "video_rate_changes": 13,
+        "picture_behind_sound_p50_ms": 33.9,
+        "picture_behind_sound_p95_ms": 56.8,
+        "buffer_causes": {},
+        "long_tasks": 0,
+        "preview_canvas": "1240x698"
+      },
+      "cuts": {
+        "cuts_seen": 27,
+        "media_elements_made": 1,
+        "media_elements_max": 3,
+        "picture_freezes_over_100ms": 0,
+        "picture_freeze_total_ms": 0,
+        "picture_freeze_max_ms": 0
+      },
+      "seconds": 26
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1194x834@2x",
+    "touch": true,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 10,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}

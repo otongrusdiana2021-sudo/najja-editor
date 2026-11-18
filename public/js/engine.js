@@ -18,6 +18,8 @@ const VIDEO_LEAD = 0.15;
 // A media element is started this much before its clip (its measured start delay, at most this), so that its
 // picture (and, without the audio clock, its sound) begins on the cut instead of after it.
 const PRESTART_MAX = 0.2;
+// (v1.12.7) seconds an element keeps the last picture of the stretch it just played (the next cut may need it)
+const LINGER = 0.25;
 // With the audio clock, a video more than NUDGE_START from the sound runs 3–12% faster or slower until it is within
 // NUDGE_STOP; the rate changes at most every NUDGE_MIN_MS (v1.8.1: was 6/15 ms, every tick, up to 20%).
 const NUDGE_START = 0.04;
@@ -384,8 +386,21 @@ export class Engine {
     if (clip.type === 'video') {
       const E = this.els.get(this.keyFor(clip));
       const v = E?.el;
-      if (v && v.readyState >= 2 && v.videoWidth && !v.seeking) return { el: v, w: v.videoWidth, h: v.videoHeight };
-      return E?.hold || null; // while seeking or stalled: the last picture instead of a black gap
+      // (the element may be serving another stretch of its file now: then it has nothing of this clip to show)
+      const mine = E && this.sameStretch(E.clip, clip);
+      if (mine && v.readyState >= 2 && v.videoWidth && !v.seeking) return { el: v, w: v.videoWidth, h: v.videoHeight };
+      if (mine && E.hold) return E.hold; // while seeking or stalled: the last picture instead of a black gap
+      // (v1.12.7) a cut whose picture is not there yet: the main clip before it stays a moment (its element lingers)
+      if (clip.trackId === 'main') {
+        const plan = store.plan();
+        const prev = plan.main.clips[(plan.mainIndex.get(clip.id) ?? 0) - 1];
+        const PE = prev && prev.type === 'video' && this.els.get(this.keyFor(prev));
+        const pmine = PE && this.sameStretch(PE.clip, prev);
+        const pv = pmine && PE.el;
+        if (pv && pv.readyState >= 2 && pv.videoWidth && !pv.seeking) { metrics.count('cut_held_previous_picture'); return { el: pv, w: pv.videoWidth, h: pv.videoHeight }; }
+        if (pmine && PE.hold) return PE.hold;
+      }
+      return null;
     }
     return null;
   }
@@ -415,7 +430,15 @@ export class Engine {
   chainKeys(P) {
     return (P === store.P ? store.plan() : compilePlan(P)).chainKeys;
   }
+  /** (v1.12.7) The element showing a clip: a few per file, taken in turn (plan.js elementKeysOf). */
   keyFor(clip) { return this.keys?.get(clip.id) || clip.id; }
+  /** Two clips of one continuous stretch of a file (or the same clip): one element plays them straight through. */
+  sameStretch(a, b) {
+    if (!a || !b) return false;
+    if (a === b || a.id === b.id) return true;
+    const ck = store.plan().chainKeys;
+    return (ck.get(a.id) || a.id) === (ck.get(b.id) || b.id);
+  }
 
   /** The file an element plays: the preview copy, or the full-quality one during a real-time export. */
   urlFor(rt) { return (this.useExportSources && rt?.exportUrl) || rt?.url; }
@@ -485,7 +508,8 @@ export class Engine {
     } catch { /* keep the previous picture */ }
   }
   seekEl(E, t) {
-    this.holdFrame(E);
+    // (the first seek after the element moved on to another stretch: its picture is the old stretch's, not kept)
+    if (E.skipHold) E.skipHold = false; else this.holdFrame(E);
     const el = E.el;
     // While a finger scrubs the timeline, Safari's fastSeek (nearest keyframe) keeps the picture moving with the
     // finger; the exact frame follows when the scrub stops (see scrub()).
@@ -543,7 +567,7 @@ export class Engine {
     // Element groups, chain keys and the main track order come from the compiled plan (once per project change,
     // not on every tick).
     const plan = store.plan();
-    this.keys = plan.chainKeys;
+    this.keys = plan.elKeys;
     const mainList = plan.main.clips;
     const margins = (clip) => {
       if (clip.trackId !== 'main') return [0, 0];
@@ -563,10 +587,14 @@ export class Engine {
     const alive = new Set();
     for (const [key, clips] of groups) {
       // The clip driving this element now: the one on screen, else the next to start, else the one just ended.
+      // (v1.12.7: an element serves several stretches of its file in turn — plan.js elementKeysOf. One that just
+      // ended keeps its last picture a moment, while its next stretch is still far: the cut can fall back on it.)
       const win = (c) => { const [pre, post] = margins(c); return [c.start - pre, c.start + c.duration + post]; };
-      const clip = clips.find((c) => { const [a, b] = win(c); return t >= a && t < b; })
-        || clips.find((c) => { const [a] = win(c); return t < a && t >= a - lookahead; })
-        || clips.find((c) => { const [, b] = win(c); return t >= b && t <= b + 1; });
+      const onNow = clips.find((c) => { const [a, b] = win(c); return t >= a && t < b; });
+      const next = !onNow && clips.find((c) => { const [a] = win(c); return t < a && t >= a - lookahead; });
+      const ended = !onNow && clips.findLast((c) => { const [, b] = win(c); return t >= b && t <= b + 1; });
+      const linger = ended && this.playing && t < win(ended)[1] + LINGER && (!next || win(next)[0] - t > 0.5);
+      const clip = onNow || (linger ? ended : next) || ended;
       if (!clip) {
         const E = this.els.get(key);
         if (E && clips.some((c) => t >= c.start - 12 && t <= c.start + c.duration + 12)) {
@@ -606,6 +634,11 @@ export class Engine {
       }
       if (!E) E = this.createEl(key, clip);
       if (!E) continue;
+      if (E.clip && !this.sameStretch(E.clip, clip)) {
+        // the element moves on to the next stretch it shows: what it measured and held belongs to the last one
+        Object.assign(E, { hold: null, skipHold: true, starvedSince: null, dpf: null, startFrom: null, lagSeeks: null, nudge: 1 });
+        metrics.count('element_reused');
+      }
       E.clip = clip;
       alive.add(key);
       const el = E.el;

@@ -588,3 +588,45 @@ Tes ulang dengan kode v1.8.5 (`test/e2e/export.mjs` M): 96/180 frame tepat, **84
 | Waktu sampel ±39 jam | dilewati diam-diam | ditolak |
 
 Ekspor lama tidak ikut berubah, karena gambar yang hilang tidak pernah tertulis ke filenya. **Ekspor ulang.**
+
+## 17. "Edit lag lagi pas cut to cut" (v1.12.7)
+
+### Analisa rekaman pengguna
+
+Rekaman layar iPad (9 dtk, 60 fps): proyek 3:24 yang awalnya dipotong-potong pendek dari satu video (jump cut).
+
+- Mulai play di detik ke-2, gambar pratinjau berulang kali berhenti 180–420 ms. Ada 10 kali macet dalam 3 dtk, tepat di bagian yang potongannya rapat.
+- Penunjuk waktu hanya maju dari 00:00 ke 00:02 dalam 3 dtk lebih.
+- Di bagian tanpa potongan, gambar jalan normal.
+
+### Penyebab: satu elemen video per potongan
+
+Pratinjau memutar video lewat elemen `<video>` browser. Sejak v1.7, potongan dari bagian file yang bersambung berbagi satu elemen. Tapi setiap potongan yang **melompat** (jump cut) mendapat elemen sendiri, dan semua elemen di sekitar playhead (±12 dtk) tetap dimuat.
+
+Akibatnya, 30 potongan dari satu rekaman menjadi 30 elemen `<video>` berisi file yang sama sekaligus. Browser PC sanggup, tapi iPad tidak bisa men-decode sebanyak itu bersamaan. Elemen saling berebut decoder dan memori, dan setiap potongan harus dimuat dan di-seek dari awal. Hasilnya macet di setiap potongan.
+
+Diukur dengan skenario lab baru **B9** (`bench/run.mjs`): 1 rekaman 1080p dipotong jadi 30 potongan 0,45 dtk yang masing-masing melompat 0,65 dtk, profil iPad.
+
+| B9 cut to cut | v1.12.6 | v1.12.7 |
+|---|---|---|
+| Elemen video hidup bersamaan | **30** | **3** |
+| Elemen dibuat selama 12 dtk putar | 28 | 1 |
+| Gambar macet > 100 ms | 1 (400–520 ms) | 0 |
+| Kecepatan putar | 96–97% | 99,1% |
+| Gambar per detik dari decoder | 26–27 | 34 |
+
+### Perbaikan v1.12.7
+
+1. **Elemen dipakai bergiliran.** Potongan dari satu file berbagi paling banyak **3 elemen** (`plan.js elementKeysOf`).
+   - Saat satu potongan tayang, potongan-potongan berikutnya sudah menunggu di elemen lain, sudah di-seek ke gambar pertamanya.
+   - Elemen baru dipakai lagi hanya kalau sudah bebas cukup lama (0,6 dtk) untuk sempat seek.
+   - Potongan yang tampil bersamaan (transisi, file sama di dua track) tidak pernah berbagi elemen.
+2. **Tidak ada gambar basi.** Saat elemen pindah ke potongan lain, gambar yang ditahannya dibuang. Gambar itu milik potongan sebelumnya.
+3. **Di potongan yang gambarnya belum siap**, gambar terakhir potongan sebelumnya ditahan sebentar (elemennya menunggu 0,25 dtk sebelum pindah), bukan layar hitam.
+4. Ekspor tidak berubah. Ekspor cepat tetap membaca file per bagian bersambung.
+
+Skenario lain di profil iPad tidak memburuk: B0, B1, B2, dan sinkron suara B8 sama atau sedikit lebih baik. Hitch frame turun di B0 (15 → 4), B1 (22 → 11), dan B2 (101 → 63). Hasilnya di `bench/results/2026-11-18-v1126-base-all-ipad.*` dan `2026-11-18-v1126-base-b9-ipad.*` (sebelum), serta `2026-11-18-v1127-pool-all-ipad.*` dan `2026-11-18-v1127-pool-ipad.*` (sesudah).
+
+### Cara cek
+
+Diagnostik → penghitung `element_reused` (elemen pindah ke potongan berikutnya) dan `cut_held_previous_picture` (gambar sebelumnya ditahan di potongan). Lab: `node bench/run.mjs --only=B9 --profile=ipad`.

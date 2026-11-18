@@ -1,0 +1,296 @@
+{
+  "label": "v1127-pool-all",
+  "profile": "ipad",
+  "at": "2026-11-18T08:06:48.378Z",
+  "machine": {
+    "cpus": 4,
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "memGB": 17
+  },
+  "runs": {
+    "B0": {
+      "ok": true,
+      "import": {
+        "import_visible_p95_ms": 293.7,
+        "upload_ms": 856.8,
+        "upload_mbps": 860.1,
+        "asset_ready_ms": 11886.7,
+        "until_steady_ms": 12750,
+        "wait_after_upload_ms": 11944
+      },
+      "playback": {
+        "timeline_ms_per_s": 25,
+        "timeline_ms_per_frame": 0.42,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 11.1,
+          "updateTime": 0.9,
+          "onScroll": 3.7,
+          "paintRuler": 6.7,
+          "paintMedia": 2.2,
+          "placeOverlays": 0.4
+        },
+        "raf_p95_ms": 16.8,
+        "frame_hitches_over_25ms": 4,
+        "seconds": 15,
+        "fps_rendered": 29.9,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 13.8,
+        "frame_draw_p95_ms": 17.9,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 99.3,
+        "video_presented_fps": 29.8,
+        "drift_seeks": 0,
+        "video_rate_changes": 0,
+        "picture_behind_sound_p50_ms": -13.4,
+        "picture_behind_sound_p95_ms": -11,
+        "buffer_causes": {},
+        "long_tasks": 0,
+        "preview_canvas": "1240x698"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 31.8,
+        "p95_ms": 91.5,
+        "max_ms": 91.5
+      },
+      "export": null,
+      "seconds": 30
+    },
+    "B1": {
+      "ok": true,
+      "project": {
+        "clips": 9,
+        "duration": 60
+      },
+      "playback": {
+        "timeline_ms_per_s": 30.4,
+        "timeline_ms_per_frame": 0.52,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 5.1,
+          "updateTime": 0.8,
+          "onScroll": 14.8,
+          "paintRuler": 3.6,
+          "paintMedia": 4.6,
+          "placeOverlays": 1.4
+        },
+        "raf_p95_ms": 16.8,
+        "frame_hitches_over_25ms": 11,
+        "seconds": 15,
+        "fps_rendered": 29.6,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 4.6,
+        "frame_draw_p50_ms": 14.7,
+        "frame_draw_p95_ms": 20.1,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 99.2,
+        "video_presented_fps": 28.8,
+        "drift_seeks": 0,
+        "video_rate_changes": 3,
+        "picture_behind_sound_p50_ms": 10.4,
+        "picture_behind_sound_p95_ms": 54.1,
+        "buffer_causes": {},
+        "long_tasks": 1,
+        "preview_canvas": "221x393"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 41,
+        "p95_ms": 114.2,
+        "max_ms": 114.2
+      },
+      "export": null,
+      "seconds": 29
+    },
+    "B2": {
+      "ok": true,
+      "project": {
+        "clips": 9,
+        "duration": 34
+      },
+      "playback": {
+        "timeline_ms_per_s": 24.8,
+        "timeline_ms_per_frame": 0.45,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 4,
+          "updateTime": 0.5,
+          "onScroll": 12.1,
+          "paintRuler": 4.4,
+          "paintMedia": 3.2,
+          "placeOverlays": 0.6
+        },
+        "raf_p95_ms": 33.3,
+        "frame_hitches_over_25ms": 63,
+        "seconds": 15,
+        "fps_rendered": 29.9,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 1.2,
+        "frame_draw_p50_ms": 15.8,
+        "frame_draw_p95_ms": 24.5,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 99.4,
+        "video_presented_fps": 29.3,
+        "drift_seeks": 0,
+        "video_rate_changes": 3,
+        "picture_behind_sound_p50_ms": 22.8,
+        "picture_behind_sound_p95_ms": 39,
+        "buffer_causes": {},
+        "long_tasks": 0,
+        "preview_canvas": "620x349"
+      },
+      "seek": {
+        "n": 20,
+        "p50_ms": 51.7,
+        "p95_ms": 286.2,
+        "max_ms": 286.2
+      },
+      "export": null,
+      "seconds": 29
+    },
+    "B8": {
+      "ok": true,
+      "project": {
+        "clips": 17,
+        "duration": 35.2
+      },
+      "cuts": {
+        "seconds": 15,
+        "beeps_expected": 17,
+        "beeps_heard": 17,
+        "beeps_missing": 0,
+        "beeps_extra": 0,
+        "offset_p50_ms": -38.5,
+        "offset_abs_p95_ms": 49,
+        "offset_abs_max_ms": 49,
+        "offset_spread_ms": 17.1,
+        "cut_offset_p50_ms": -38.5,
+        "cut_offset_max_ms": -36.4,
+        "output_latency_ms": 42,
+        "heard_offset_p50_ms": 3.5,
+        "audio_mode": "scheduled",
+        "playback_speed_pct": 98.5,
+        "fps_rendered": 29.5,
+        "buffer_waits": 0,
+        "drift_seeks": 0,
+        "audio_underruns": 0,
+        "audio_late_joins": 0,
+        "audio_start_wait_ms": 113.7,
+        "picture_behind_sound_p50_ms": 32.4,
+        "picture_behind_sound_p95_ms": 53,
+        "clip_start_latency_p50_ms": 53.1,
+        "audio_counters": {},
+        "late_join_ms": null,
+        "late_events": [],
+        "t_from": 0.5
+      },
+      "music": {
+        "seconds": 15,
+        "beeps_expected": 15,
+        "beeps_heard": 15,
+        "beeps_missing": 0,
+        "beeps_extra": 0,
+        "offset_p50_ms": -39.9,
+        "offset_abs_p95_ms": 41.4,
+        "offset_abs_max_ms": 41.4,
+        "offset_spread_ms": 3.4,
+        "cut_offset_p50_ms": null,
+        "cut_offset_max_ms": null,
+        "output_latency_ms": 42,
+        "heard_offset_p50_ms": 2.1,
+        "audio_mode": "scheduled",
+        "playback_speed_pct": 98.7,
+        "fps_rendered": 30.3,
+        "buffer_waits": 0,
+        "drift_seeks": 0,
+        "audio_underruns": 0,
+        "audio_late_joins": 0,
+        "audio_start_wait_ms": 97.6,
+        "picture_behind_sound_p50_ms": 26.3,
+        "picture_behind_sound_p95_ms": 58.4,
+        "clip_start_latency_p50_ms": 38.2,
+        "audio_counters": {},
+        "late_join_ms": null,
+        "late_events": [],
+        "t_from": 0.5
+      },
+      "seconds": 34
+    },
+    "B9": {
+      "ok": true,
+      "project": {
+        "clips": 30,
+        "duration": 13.5
+      },
+      "playback": {
+        "timeline_ms_per_s": 41.2,
+        "timeline_ms_per_frame": 0.69,
+        "timeline_ms_per_s_by_part": {
+          "syncScroll": 4.9,
+          "updateTime": 0.9,
+          "onScroll": 12.8,
+          "paintRuler": 6.9,
+          "paintMedia": 14.5,
+          "placeOverlays": 1.3
+        },
+        "raf_p95_ms": 16.8,
+        "frame_hitches_over_25ms": 5,
+        "seconds": 12,
+        "fps_rendered": 32.3,
+        "frames_missed_pct": 0,
+        "video_dropped_pct": 0,
+        "frame_draw_p50_ms": 11.3,
+        "frame_draw_p95_ms": 16,
+        "buffer_waits": 0,
+        "buffer_wait_total_ms": 0,
+        "playback_speed_pct": 99.1,
+        "video_presented_fps": 34.4,
+        "drift_seeks": 0,
+        "video_rate_changes": 3,
+        "picture_behind_sound_p50_ms": 25.4,
+        "picture_behind_sound_p95_ms": 42,
+        "buffer_causes": {},
+        "long_tasks": 0,
+        "preview_canvas": "620x349"
+      },
+      "cuts": {
+        "cuts_seen": 27,
+        "media_elements_made": 1,
+        "media_elements_max": 3,
+        "picture_freezes_over_100ms": 1,
+        "picture_freeze_total_ms": 150,
+        "picture_freeze_max_ms": 150
+      },
+      "seconds": 26
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "platform": "Linux",
+    "cores": 4,
+    "deviceMemoryGB": 16,
+    "screen": "1194x834@2x",
+    "touch": true,
+    "webcodecs": {
+      "decoder": true,
+      "encoder": true,
+      "h264": true,
+      "hevc": false
+    },
+    "opfs": true,
+    "rvfc": true,
+    "sharedArrayBuffer": false,
+    "gpu": {
+      "webgl2": true,
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+    },
+    "connection": {
+      "type": "4g",
+      "downlinkMbps": 9.3,
+      "rttMs": 0
+    }
+  },
+  "page_errors": []
+}

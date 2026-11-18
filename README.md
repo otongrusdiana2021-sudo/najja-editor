@@ -6,6 +6,8 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.12.7:** **Pratinjau tidak lag lagi di edit cut to cut.** Potongan-potongan pendek dari satu video sekarang diputar bergiliran oleh 3 elemen video. Potongan berikutnya sudah siap di gambar pertamanya sebelum waktunya tayang. Sebelumnya setiap potongan punya elemen sendiri, sehingga 30 potongan berarti 30 video dimuat sekaligus dan iPad macet di setiap potongan. Lihat [docs/ANALISA-LAG-IPAD.md](docs/ANALISA-LAG-IPAD.md#17-edit-lag-lagi-pas-cut-to-cut-v1127).
+
 **Baru di v1.12.6:** **Momen dari ucapan** di Style Konsep, seperti kerja editor. Saat talent menyebut warna, muncul **bulatan warna** satu per satu. Saat bilang "tinggal 2 hari", muncul **⏰ bergetar** dengan **SFX timer berdetak**. Saat bilang "bisa buat baju basah, minuman", muncul **chip berisi emoji**. Klaim seperti anti bocor, best seller, gratis ongkir, dan diskon N% jadi badge, dan "oops"/"wow" jadi kata besar dengan SFX kartun. Semuanya otomatis dari transkrip, atau dipilih Claude lewat `plan.moments`. Lihat [docs/STYLE-KONSEP.md](docs/STYLE-KONSEP.md).
 
 **Baru di v1.12.5:** **Teks Style Konsep tidak menutupi orangnya**, baik badan maupun wajah. Seluruh badan dideteksi di perangkat (MediaPipe Selfie Segmentation, 0,46 MB, tanpa GPU), lalu teks dipindah ke latar kosong: samping kepala, atas meja, atau atas kepala. Judul yang tidak muat dipecah jadi 2–3 baris supaya tetap besar, dan subtitle satu shot tetap di satu tempat. Lihat [docs/STYLE-KONSEP.md](docs/STYLE-KONSEP.md).
