@@ -69,6 +69,9 @@ try {
   const d0 = await D((a) => ({ w: a.design.width, h: a.design.height, kind: a.design.kind, pages: a.design.pages.length, tab: a.ui.tab, id: a.design.id }));
   check(d0.w === 1080 && d0.h === 1080 && d0.kind === 'design' && d0.pages === 1, `desain baru 1080×1080 (${JSON.stringify(d0)})`);
   check(d0.tab === 'tpl', 'panel Template terbuka untuk halaman kosong');
+  check(await p.evaluate(() => document.querySelector('.ds-logo')?.naturalWidth > 0), 'logo Najja Desain tampil');
+  const nTpl = await p.locator('[data-tpl]').count();
+  check(nTpl >= 27, `${nTpl} template di panel`);
   const saved0 = await (await p.request.get(`${BASE}/api/projects/${d0.id}`)).json();
   check(saved0.kind === 'design' && saved0.pages?.length === 1, 'desain langsung tersimpan di server');
 
@@ -111,6 +114,12 @@ try {
   const found = await p.locator('[data-iconres] [data-add^="icon:"]').count();
   check(found > 0, `cari ikon dalam bahasa Indonesia: "tas" → ${found} ikon`);
   if (found) await p.click('[data-iconres] [data-add^="icon:"] >> nth=0');
+  await p.fill('[data-iconq]', '');
+  await p.click('[data-expand="shapes"]');
+  await p.click('[data-expand="frames"]');
+  const nShapes = await p.locator('[data-add^="shape:"]').count();
+  const nFrames = await p.locator('[data-add^="frame:"]').count();
+  check(nShapes >= 34 && nFrames >= 24, `bentuk ${nShapes}, bingkai foto ${nFrames}`);
   const kinds = await D((a) => a.page.els.map((e) => (e.type === 'sticker' ? (e.sticker.icon ? 'icon' : e.sticker.badge ? 'badge' : 'sticker') : e.type)));
   check(kinds.includes('shape') && kinds.includes('badge') && (kinds.includes('icon') || !found), `elemen di halaman: ${kinds.join(', ')}`);
 
@@ -137,12 +146,16 @@ try {
   const from = await scr(b0.cx, b0.cy);
   // to 6 page px right of the centre line: it snaps onto it
   const to = await scr(540 + 6, b0.cy + 120);
+  const pageRect = () => p.evaluate(() => { const s = document.querySelector('.ds-stage'); const r = document.querySelector('.ds-page').getBoundingClientRect(); return { over: Math.max(s.scrollHeight - s.clientHeight, s.scrollWidth - s.clientWidth), page: [r.left, r.top, r.width, r.height] }; });
+  const still0 = await pageRect();
   await p.mouse.move(from.x, from.y);
   await p.mouse.down();
   await p.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 4 });
   await p.mouse.move(to.x, to.y, { steps: 4 });
   const guides = await p.locator('.ds-guide').count();
+  const still1 = await pageRect();
   await p.mouse.up();
+  check(still1.over <= 0 && still1.page.every((v, i) => Math.abs(v - still0.page[i]) < 0.5), `halaman diam saat menggeser dengan garis bantu (area gulir +${still1.over} px)`);
   await settle();
   const b1 = await boxOf(img.id);
   check(Math.abs(b1.cx - 540) < 0.6 && b1.cy > b0.cy + 100, `geser + menempel ke tengah halaman (cx ${b1.cx.toFixed(1)}, garis bantu ${guides})`);
@@ -186,6 +199,62 @@ try {
   check(Math.abs(filled.box.w - sb.w) < 2 && Math.abs(filled.box.h - sb.h) < 2, `foto pas seukuran bingkai (${Math.round(filled.box.w)}×${Math.round(filled.box.h)} vs ${Math.round(sb.w)}×${Math.round(sb.h)})`);
   check(filled.crop.t > 0 || filled.crop.l > 0, 'foto dipotong ke bentuk bingkai (tidak gepeng)');
 
+  // ---- v1.13.1: each colour picker changes only its own element; a photo dragged onto a frame goes into it
+  step('halaman 3: warna tidak tercampur + geser foto ke bingkai');
+  const pick = (c) => p.locator(`.ds-pop [data-c="${c}"]`).first().click();
+  await p.click('[data-pgadd]');
+  await D((a) => a.ui.openTab('tpl'));
+  await p.click('[data-tpl="restock"]');
+  await settle();
+  await D((a) => a.select([]));
+  await p.click('.ds-ctx [data-act="pagebg"]');
+  await pick('#FFD400');
+  await p.keyboard.press('Escape');
+  const sw = await D((a) => a.page.els.find((e) => e.sticker?.swatch).id);
+  await D((a, id) => a.select([id]), sw);
+  await p.click('.ds-ctx [data-act="swcolor"]');
+  await pick('#E53935');
+  await p.keyboard.press('Escape');
+  const c1 = await D((a, id) => ({ bg: a.page.bg.color, sw: a.page.els.find((e) => e.id === id).sticker.swatch.color }), sw);
+  check(c1.bg === '#FFD400' && c1.sw === '#E53935', `warna varian berubah, latar tetap (${JSON.stringify(c1)})`);
+  await p.click('.ds-ctx [data-act="swlcolor"]');
+  await pick('#5B3FD1');
+  await p.keyboard.press('Escape');
+  const tid = await D((a) => a.page.els.find((e) => e.type === 'text').id);
+  await D((a, id) => a.select([id]), tid);
+  await p.click('.ds-ctx [data-act="color"]');
+  await pick('#129AA9');
+  await p.keyboard.press('Escape');
+  const c2 = await D((a, [s0, t0]) => { const e = (id) => a.page.els.find((x) => x.id === id); return { bg: a.page.bg.color, sw: e(s0).sticker.swatch.color, label: e(s0).sticker.swatch.labelColor, text: e(t0).text.color }; }, [sw, tid]);
+  check(c2.text === '#129AA9' && c2.label === '#5B3FD1' && c2.sw === '#E53935' && c2.bg === '#FFD400', `warna teks & nama varian berubah, yang lain tetap (${JSON.stringify(c2)})`);
+  const slot3 = await D((a) => a.page.els.find((e) => e.slot).id);
+  const n0 = await D((a) => a.page.els.length);
+  await p.click('[data-tab="up"]');
+  await p.locator('[data-media]').first().click();
+  await settle();
+  const im3 = await D((a) => a.sel[0]);
+  const ib = await boxOf(im3);
+  const f0 = await scr(ib.cx, ib.cy);
+  const f1 = await scr(560, 720);
+  await p.mouse.move(f0.x, f0.y);
+  await p.mouse.down();
+  await p.mouse.move(f1.x, f1.y, { steps: 6 });
+  const dropShown = await p.locator('.ds-box.drop').count();
+  await p.mouse.up();
+  await settle();
+  const st3 = () => D((a, [sl, im]) => { const e = a.page.els.find((x) => x.id === sl); return { n: a.page.els.length, slot: e?.type, framed: !!e?.fromSlot, img: !!a.page.els.find((x) => x.id === im), sel: a.sel.slice() }; }, [slot3, im3]);
+  const a3 = await st3();
+  check(dropShown === 1, 'bingkai disorot saat foto digeser di atasnya');
+  check(a3.n === n0 && a3.slot === 'image' && a3.framed && !a3.img && a3.sel[0] === slot3, `foto masuk ke bingkai saat dilepas (${JSON.stringify(a3)})`);
+  await p.keyboard.press('Control+z');
+  const u3 = await st3();
+  await p.keyboard.press('Control+Shift+z');
+  const r3 = await st3();
+  check(u3.slot === 'shape' && u3.img && r3.slot === 'image' && !r3.img, 'urungkan / ulangi masuk bingkai');
+  await p.click('.ds-pg.on');
+  await p.locator('.ds-pop .ds-mi', { hasText: 'Hapus halaman' }).click();
+  check(await D((a) => a.design.pages.length === 2 && a.pageIndex === 1), 'halaman 3 dihapus lewat menu halaman');
+
   // ---- export
   step('ekspor: PNG halaman ini, ZIP semua halaman');
   await p.click('[data-cmd="export"]');
@@ -216,6 +285,22 @@ try {
     names = JSON.parse(execFileSync('python3', ['-I', '-c', 'import sys,zipfile,json;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;print(json.dumps(z.namelist()))', zipPath]).toString());
   } catch (err) { names = zbuf.subarray(0, 2).toString() === 'PK' ? ['?'] : []; console.log('   (python3 tidak ada / zip error)', err.message.split('\n')[0]); }
   check(dl2.suggestedFilename().endsWith('.zip') && names.length === 2 && names.every((n) => n.endsWith('.jpg')), `ZIP berisi 2 JPG (${names.join(', ')})`);
+
+  // ---- v1.13.1: another page size while editing
+  step('ubah ukuran kanvas');
+  const sz = () => D((a) => { const t = a.design.pages[0].els.find((e) => e.type === 'text'); const r = document.querySelector('.ds-page').getBoundingClientRect(); return { w: a.design.width, h: a.design.height, t: t.scale, x: t.x, ratio: r.width / r.height }; });
+  const z0 = await sz();
+  await p.click('[data-cmd="resize"]');
+  await p.click('.ds-modal [data-z="banner"]');
+  await p.click('.ds-modal [data-go]');
+  await settle();
+  const z1 = await sz();
+  check(z1.w === 1920 && z1.h === 640 && Math.abs(z1.ratio - 3) < 0.02, `ukuran jadi Banner 1920×640 (halaman ${z1.ratio.toFixed(2)}:1)`);
+  check(Math.abs(z1.t - (z0.t * 640) / 1080) < 1e-3 && z1.x === z0.x, 'elemen ikut menyesuaikan (ukuran ikut sisi pendek, posisi tetap)');
+  await p.keyboard.press('Control+z');
+  await settle();
+  const z2 = await sz();
+  check(z2.w === 1080 && z2.h === 1080 && Math.abs(z2.t - z0.t) < 1e-6 && Math.abs(z2.ratio - 1) < 0.02, 'urungkan ubah ukuran');
 
   // ---- reload keeps everything; back home
   step('muat ulang + kembali ke beranda');

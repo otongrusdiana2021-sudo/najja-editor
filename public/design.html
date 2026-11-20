@@ -6,9 +6,9 @@
   <title>Najja Desain</title>
   <meta name="description" content="Najja Desain — editor desain untuk foto produk marketplace, banner, story, dan kartu.">
   <meta name="theme-color" content="#ffffff">
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icons/najja-desain-64.png" type="image/png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" href="/icons/najja-desain-192.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Najja">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,13 +19,13 @@
 <body class="ds">
   <header class="ds-top">
     <button class="ds-ib" data-cmd="home" aria-label="Kembali ke Beranda"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
-    <span class="ds-logo" aria-hidden="true">N</span>
+    <img class="ds-logo" src="/icons/najja-desain-192.png" alt="Najja Desain" width="32" height="32">
     <input class="ds-name" aria-label="Nama desain" maxlength="80" spellcheck="false">
     <span class="ds-save" aria-live="polite"></span>
     <span class="ds-grow"></span>
     <button class="ds-ib" data-cmd="undo" aria-label="Urungkan" title="Urungkan (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg></button>
     <button class="ds-ib" data-cmd="redo" aria-label="Ulangi" title="Ulangi (Ctrl+Shift+Z)"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/></svg></button>
-    <span class="ds-size"></span>
+    <button class="ds-size" data-cmd="resize" title="Ubah ukuran desain"></button>
     <button class="ds-primary" data-cmd="export"><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg><span>Ekspor</span></button>
   </header>
   <div class="ds-main">
@@ -45,7 +45,7 @@
   <div class="ds-pop" hidden></div>
   <div class="ds-toasts" aria-live="polite"></div>
   <input type="file" class="ds-file" accept="image/*" multiple hidden>
-  <div class="ds-boot"><span>Memuat desain…</span></div>
+  <div class="ds-boot"><div class="ds-bootin"><img src="/icons/najja-desain-192.png" alt="" width="72" height="72"><span>Memuat desain…</span></div></div>
   <script type="module" src="js/design/app.js"></script>
 </body>
 </html>

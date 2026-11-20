@@ -63,11 +63,14 @@ export class Stage {
   layout() {
     const d = this.design;
     if (!d) return;
+    // (never while an element is being dragged: the page would move under the finger; done after it)
+    if (this.op?.moved && this.op.kind !== 'pinch') { this.layoutLater = true; return; }
+    this.layoutLater = false;
     const sw = this.el.clientWidth;
     const sh = this.el.clientHeight;
     const padX = sw < 600 ? 18 : 48;
     const padTop = 66; // (room for the element toolbar)
-    const padBottom = 26;
+    const padBottom = 46; // (room for the turn handle under an element at the page's bottom)
     if (this.fit) this.zoom = Math.max(0.02, Math.min((sw - padX * 2) / d.width, (sh - padTop - padBottom) / d.height));
     const pw = d.width * this.zoom;
     const ph = d.height * this.zoom;
@@ -188,6 +191,10 @@ export class Stage {
         html += boxHtml({ cx: (u.x1 + u.x2) / 2, cy: (u.y1 + u.y2) / 2, w: u.x2 - u.x1, h: u.y2 - u.y1, rot: 0 }, 'multi', hs);
       }
     }
+    if (this.op?.dropFrame) {
+      const b = this.boxes.get(this.op.dropFrame);
+      if (b) html += boxHtml(b, 'drop', '<span class="ds-droptag">Lepas untuk mengisi bingkai</span>');
+    }
     for (const g of this.guides) html += g.axis === 'x' ? `<div class="ds-guide x" style="left:${g.at * z}px"></div>` : `<div class="ds-guide y" style="top:${g.at * z}px"></div>`;
     if (this.marq) { const m = this.marq; html += `<div class="ds-marq" style="left:${Math.min(m.x1, m.x2) * z}px;top:${Math.min(m.y1, m.y2) * z}px;width:${Math.abs(m.x2 - m.x1) * z}px;height:${Math.abs(m.y2 - m.y1) * z}px"></div>`; }
     if (this.tag) html += `<div class="ds-tag" style="left:${this.tag.x * z}px;top:${this.tag.y * z + 12}px">${this.tag.text}</div>`;
@@ -199,6 +206,17 @@ export class Stage {
   }
 
   // ---- hit tests
+  /** The photo frame under a point (an empty slot, or a frame with a photo in it), not `exceptId`. */
+  frameAt(pt, exceptId) {
+    const els = this.page.els;
+    for (let i = els.length - 1; i >= 0; i--) {
+      const e = els[i];
+      if (e.id === exceptId || e.hidden || e.locked || !(e.slot || (e.type === 'image' && e.fromSlot))) continue;
+      const b = this.boxes.get(e.id);
+      if (b && hit(b, pt.x, pt.y)) return e;
+    }
+    return null;
+  }
   hitAt(pt) {
     const els = this.page.els;
     for (let i = els.length - 1; i >= 0; i--) {
@@ -277,6 +295,7 @@ export class Stage {
     const op = this.op;
     if (op?.kind === 'pinch') { if (this.pointers.size < 2) this.op = null; return; }
     this.op = null;
+    if (this.layoutLater) this.layout();
     if (!op) return;
     if (op.kind === 'marq') {
       const m = this.marq;
@@ -294,6 +313,11 @@ export class Stage {
     this.tag = null;
     if (op.moved) {
       this.layers = null;
+      if (op.kind === 'move' && op.dropFrame) {
+        const one = op.items[0].el;
+        one.opacity = op.op0;
+        this.app.dropIntoFrame(one.id, op.dropFrame);
+      }
       this.app.end(op.before, op.label || 'Ubah');
       this.invalidate(true);
       return;
@@ -360,7 +384,18 @@ export class Stage {
     let dx = dx0;
     let dy = dy0;
     this.guides = [];
-    if (!e.altKey) {
+    // (v1.13.1) one photo dragged over a photo frame: it goes into the frame when let go (like a tablet design app)
+    // (a framed photo moves with its frame: only a loose photo goes into a frame)
+    const one = op.items.length === 1 && op.items[0].el.type === 'image' && op.items[0].el.mediaId && !op.items[0].el.fromSlot ? op.items[0].el : null;
+    if (one) {
+      const f = this.frameAt(pt, one.id);
+      if ((f?.id || null) !== op.dropFrame) {
+        op.dropFrame = f?.id || null;
+        if (op.op0 == null) op.op0 = one.opacity ?? 1;
+        one.opacity = op.dropFrame ? Math.round(op.op0 * 0.45 * 100) / 100 : op.op0;
+      }
+    }
+    if (!e.altKey && !op.dropFrame) {
       const b = op.bounds;
       const s = snap({ x1: b.x1 + dx, y1: b.y1 + dy, x2: b.x2 + dx, y2: b.y2 + dy }, op.others, this.design, 7 / this.zoom);
       dx += s.dx;

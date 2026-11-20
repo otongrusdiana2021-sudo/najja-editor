@@ -6,7 +6,7 @@ import { remote } from '../remote.js';
 import { onFontsLoaded, preloadFonts, baseSize } from '../render.js';
 import { clone } from '../util.js';
 import {
-  newDesign, normalizeDesign, newPage, sizeById, History, snapshotOf, imageEl, fillSlot, slotEl, textEl, TEXT_KINDS,
+  newDesign, normalizeDesign, newPage, sizeById, History, snapshotOf, imageEl, fillSlot, slotEl, slotOf, textEl, TEXT_KINDS, resizeDesign, aspectOf,
   duplicateEls, duplicatePage, moveEl, alignMoves, distributeMoves, aabb,
 } from './model.js';
 import { Assets } from './assets.js';
@@ -116,6 +116,10 @@ class DesignApp {
     const o = JSON.parse(json);
     this.design.pages = o.pages;
     this.design.media = o.media;
+    if (o.width && o.height && (o.width !== this.design.width || o.height !== this.design.height)) {
+      Object.assign(this.design, { width: o.width, height: o.height, aspect: aspectOf(o.width, o.height), sizeId: o.sizeId ?? null });
+      this.sizeChanged();
+    }
     this.pageIndex = Math.min(this.pageIndex, this.design.pages.length - 1);
     const ids = new Set(this.page.els.map((e) => e.id));
     this.sel = this.sel.filter((id) => ids.has(id));
@@ -371,9 +375,7 @@ class DesignApp {
   /** Another photo in an image element: the same place and size (and frame, for a filled slot). */
   swapMedia(el, m) {
     if (el.fromSlot) {
-      const f = el.fromSlot;
-      const slot = { id: el.id, x: el.x, y: el.y, rotation: el.rotation, scale: f.scale, opacity: el.opacity, shape: { kind: f.kind, w: f.w, h: f.h, radius: f.radius }, slot: { label: f.label } };
-      Object.assign(el, fillSlot(this.design, slot, m), { filter: el.filter, adjust: el.adjust, dropShadow: el.dropShadow });
+      Object.assign(el, fillSlot(this.design, slotOf(el), m), { filter: el.filter, adjust: el.adjust, dropShadow: el.dropShadow });
       return;
     }
     const env = envFor(this.design, 1, this.assets.sources);
@@ -385,12 +387,31 @@ class DesignApp {
     const after = baseSize(el, env, null);
     el.scale = r4(oldSide / Math.max(1, Math.max(after.w, after.h)));
   }
+  /**
+   * (v1.13.1) A photo dragged onto a photo frame goes into it: the frame (empty, or with a photo, which it replaces)
+   * gets the photo, cropped to it; the dragged photo is no longer a separate element. Part of the drag's undo step.
+   */
+  dropIntoFrame(imgId, frameId) {
+    const page = this.page;
+    const img = page.els.find((e) => e.id === imgId);
+    const fi = page.els.findIndex((e) => e.id === frameId);
+    const m = img && this.design.media.find((x) => x.id === img.mediaId);
+    const slot = fi >= 0 ? slotOf(page.els[fi]) : null;
+    if (!img || !m || !slot) return false;
+    const filled = fillSlot(this.design, slot, m);
+    Object.assign(filled, { filter: img.filter, adjust: img.adjust, flipH: !!img.flipH, flipV: !!img.flipV });
+    page.els[fi] = filled;
+    page.els = page.els.filter((e) => e.id !== imgId);
+    this.sel = [filled.id];
+    return true;
+  }
   /** A filled frame back to an empty one. */
   unslot(el) {
     const f = el.fromSlot;
     if (!f) return;
     const s = slotEl(this.design, f.kind, 100, 100, {}, f.label);
-    Object.assign(s, { id: el.id, x: el.x, y: el.y, rotation: el.rotation, scale: f.scale, opacity: el.opacity });
+    const at = slotOf(el);
+    Object.assign(s, { id: el.id, x: el.x, y: el.y, rotation: el.rotation, scale: at.scale, opacity: el.opacity });
     s.shape.w = f.w;
     s.shape.h = f.h;
     s.shape.radius = f.radius;
@@ -436,6 +457,40 @@ class DesignApp {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // size of the page (v1.13.1)
+  /** Another page size for this design (undoable). */
+  resize(w, h, sizeId = null) {
+    if (this.stage.editing) this.stage.endEdit();
+    if (w === this.design.width && h === this.design.height) return;
+    this.change('Ubah ukuran', () => resizeDesign(this.design, w, h, sizeId), { coalesce: false });
+    this.sizeChanged();
+    this.toast(`Ukuran desain: ${this.design.width} × ${this.design.height} px`, 'ok');
+  }
+  /** A copy of this design in another size (opened), this one as it is. */
+  async copyResized(w, h, sizeId = null) {
+    if (this.stage.editing) this.stage.endEdit();
+    await this.save().catch(() => {});
+    const copy = JSON.parse(JSON.stringify(this.design));
+    const fresh = newDesign({ w, h });
+    copy.id = fresh.id;
+    delete copy.rev;
+    delete copy.ownerId;
+    copy.createdAt = copy.updatedAt = Date.now();
+    resizeDesign(copy, w, h, sizeId);
+    const size = sizeById(sizeId);
+    copy.name = `${this.design.name || 'Desain'} · ${size?.name || `${copy.width}×${copy.height}`}`.slice(0, 80);
+    copy.thumb = undefined;
+    try {
+      await storage.putProject(copy, { baseRev: storage.server ? 0 : null });
+    } catch (err) { this.toast(`Salinan tidak bisa dibuat: ${err.message}`, 'err'); return; }
+    location.href = `/design?id=${encodeURIComponent(copy.id)}`;
+  }
+  sizeChanged() {
+    this.stage.zoomFit();
+    this.ui.init(false);
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // pages
   gotoPage(i) {
     if (i < 0 || i >= this.design.pages.length) return;
@@ -457,8 +512,15 @@ class DesignApp {
   }
   deletePage(i) {
     if (this.design.pages.length < 2) return;
-    this.change('Hapus halaman', () => { this.design.pages.splice(i, 1); }, { coalesce: false });
-    this.gotoPage(Math.min(i, this.design.pages.length - 1));
+    if (this.stage.editing) this.stage.endEdit();
+    // (the page shown moves with the deletion in the same step: the last page deleted while on it left the editor
+    // pointing past the end — v1.13.1)
+    this.change('Hapus halaman', () => {
+      this.design.pages.splice(i, 1);
+      this.pageIndex = Math.min(this.pageIndex > i ? this.pageIndex - 1 : this.pageIndex, this.design.pages.length - 1);
+      this.sel = [];
+    }, { coalesce: false });
+    this.gotoPage(this.pageIndex);
   }
   movePage(i, d) {
     const j = i + d;

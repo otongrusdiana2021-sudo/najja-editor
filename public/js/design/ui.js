@@ -6,7 +6,7 @@ import { FONTS, FILTERS, ADJUSTMENTS, STICKERS, GRADIENTS } from '../presets.js'
 import { escapeHtml, clone, clamp } from '../util.js';
 import { fontWeightFor, shapePath } from '../render.js';
 import { drawPage, boxOf, envFor } from './draw.js';
-import { textEl, shapeEl, slotEl, iconEl, emojiEl, badgeEl, swatchEl, TEXT_KINDS, SHAPE_NAMES, aabb, union } from './model.js';
+import { textEl, shapeEl, slotEl, iconEl, emojiEl, badgeEl, swatchEl, TEXT_KINDS, SHAPE_NAMES, SIZES, aabb, union } from './model.js';
 import { templatesFor, COMBOS, ICON_NODES } from './templates.js';
 import { searchIcons } from './assets.js';
 
@@ -83,8 +83,15 @@ const PALETTE = ['#000000', '#3A3F47', '#7A828E', '#BFC5CD', '#E9ECF0', '#FFFFFF
   '#FF6B5B', '#F06292', '#C2185B', '#8E5CF7', '#5B3FD1', '#129AA9', '#47C9D7',
   '#9BE3EA', '#2D8CFF', '#1F4FB8', '#1F2A44', '#00A86B', '#7BC67E', '#D8F06B',
   '#FFD400', '#FFB547', '#FF7A1A', '#8B5A2B', '#C9A27C', '#E8D8C3', '#F6EFE7'];
-const SHAPES = ['rect', 'rounded', 'circle', 'triangle', 'diamond', 'star', 'burst', 'heart', 'tag', 'bubble', 'arrow', 'pill', 'line'];
-const FRAMES = [['rect', 'Persegi'], ['rounded', 'Sudut bulat'], ['circle', 'Lingkaran'], ['pill', 'Kapsul'], ['diamond', 'Belah ketupat'], ['heart', 'Hati'], ['star', 'Bintang'], ['burst', 'Lencana']];
+const SHAPES = ['rect', 'rounded', 'circle', 'triangle', 'rtriangle', 'diamond', 'pentagon', 'hexagon', 'octagon', 'parallelogram', 'trapezoid', 'star', 'star4', 'star6',
+  'burst', 'scallop', 'heart', 'cross', 'arch', 'semicircle', 'drop', 'blob', 'cloud', 'shield', 'tag', 'ticket', 'ribbon', 'chevron', 'bubble', 'bubble2', 'arrow',
+  'darrow', 'pill', 'line'];
+const FRAMES = [['rect', 'Persegi'], ['rounded', 'Sudut bulat'], ['circle', 'Lingkaran'], ['pill', 'Kapsul'], ['arch', 'Lengkung'], ['hexagon', 'Segi enam'],
+  ['octagon', 'Segi delapan'], ['pentagon', 'Segi lima'], ['diamond', 'Belah ketupat'], ['heart', 'Hati'], ['star', 'Bintang'], ['star4', 'Bintang 4'],
+  ['burst', 'Lencana'], ['scallop', 'Bunga'], ['blob', 'Blob'], ['drop', 'Tetes'], ['shield', 'Perisai'], ['semicircle', 'Setengah lingkaran'],
+  ['triangle', 'Segitiga'], ['cloud', 'Awan'], ['ticket', 'Kupon'], ['parallelogram', 'Jajar genjang'], ['bubble2', 'Balon'], ['cross', 'Plus']];
+/** A photo frame's size when added (1080 px page). */
+const FRAME_DIMS = { pill: [700, 420], arch: [480, 640], semicircle: [640, 320], drop: [440, 580], shield: [460, 560], parallelogram: [640, 440], ticket: [700, 380], cloud: [640, 440], bubble2: [600, 460] };
 const MP_BADGES = [
   { text: 'GRATIS ONGKIR', icon: '🚚', bg: '#00A86B', fg: '#FFFFFF' },
   { text: 'BEST SELLER', icon: '⭐', bg: '#FFB800', fg: '#1B1B1B' },
@@ -103,8 +110,11 @@ const MP_SWATCHES = [['#141414', 'Hitam'], ['#F5F5F0', 'Putih'], ['#8B5A2B', 'Co
 const POPULAR_ICONS = ['shopping-bag', 'shopping-cart', 'truck', 'package', 'gift', 'tag', 'badge-percent', 'percent', 'star', 'heart', 'thumbs-up', 'sparkles', 'zap', 'flame', 'clock', 'timer', 'shield-check', 'circle-check', 'check', 'award', 'crown', 'gem', 'store', 'wallet', 'credit-card', 'banknote', 'map-pin', 'phone', 'message-circle', 'mail', 'camera', 'sun', 'moon', 'leaf', 'droplets', 'feather', 'briefcase', 'backpack', 'luggage', 'shirt', 'watch', 'ruler', 'scissors', 'smile', 'arrow-right', 'arrow-down', 'chevron-right', 'plus'];
 const EFFECTS = [['none', 'Tidak ada'], ['shadow', 'Bayangan'], ['lift', 'Angkat'], ['hollow', 'Berongga'], ['splice', 'Sambung'], ['outline', 'Garis tepi'], ['echo', 'Gema'], ['glitch', 'Glitch'], ['neon', 'Neon'], ['bg', 'Latar']];
 const FX_COLOR = { shadow: '#000000', splice: '#47C9D7', echo: '', glitch: '#00E5FF' };
-const MASKS = ['none', 'rect', 'circle', 'pill', 'diamond', 'heart', 'star', 'triangle', 'burst', 'bubble'];
-const MASK_NAMES = { none: 'Tanpa', rect: 'Sudut', circle: 'Lingkaran', pill: 'Kapsul', diamond: 'Ketupat', heart: 'Hati', star: 'Bintang', triangle: 'Segitiga', burst: 'Lencana', bubble: 'Balon' };
+const MASKS = ['none', 'rect', 'circle', 'pill', 'arch', 'hexagon', 'octagon', 'pentagon', 'diamond', 'heart', 'star', 'star4', 'burst', 'scallop', 'blob', 'drop',
+  'shield', 'semicircle', 'triangle', 'cloud', 'ticket', 'bubble2'];
+const MASK_NAMES = { none: 'Tanpa', rect: 'Sudut', circle: 'Lingkaran', pill: 'Kapsul', arch: 'Lengkung', hexagon: 'Segi 6', octagon: 'Segi 8', pentagon: 'Segi 5', diamond: 'Ketupat',
+  heart: 'Hati', star: 'Bintang', star4: 'Bintang 4', burst: 'Lencana', scallop: 'Bunga', blob: 'Blob', drop: 'Tetes', shield: 'Perisai', semicircle: 'Setengah', triangle: 'Segitiga',
+  cloud: 'Awan', ticket: 'Kupon', bubble2: 'Balon' };
 const MINI = { width: 1080, height: 1080, media: [] };
 
 /** Draw elements (made for a 1080 px page) centred into a canvas, filling `fill` of it. */
@@ -148,7 +158,10 @@ export class UI {
     this.tab = null;
     this.iconQuery = '';
     this.allIcons = false;
+    this.expand = { shapes: false, frames: false };
     this.popKey = null;
+    this.tileRun = 0;
+    this.tplRun = 0;
     this.railEl.innerHTML = TABS.map(([id, label, ic]) => `<button class="ds-rb" data-tab="${id}" aria-label="${label}">${I(ic)}<span>${label}</span></button>`).join('');
     this.railEl.addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) this.openTab(this.tab === b.dataset.tab ? null : b.dataset.tab); });
     this.panelEl.addEventListener('click', (e) => this.onPanelClick(e));
@@ -167,7 +180,6 @@ export class UI {
       if (a && a.dataset.act === this.popKey) return;
       this.closePop();
     }, true);
-    this.popEl.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') this.closePop(); });
     this.nameEl.addEventListener('change', () => this.app.rename(this.nameEl.value));
     this.nameEl.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') this.nameEl.blur(); });
     window.addEventListener('resize', () => this.closePop());
@@ -175,14 +187,15 @@ export class UI {
 
   // ---------------------------------------------------------------------------------------------
   // top bar, toasts
-  init() {
+  init(first = true) {
     const d = this.app.design;
     this.nameEl.value = d.name || '';
     $('.ds-size').textContent = `${d.width} × ${d.height} px`;
     document.title = `${d.name || 'Desain'} · Najja Desain`;
     this.renderPages();
     this.refreshContext();
-    this.openTab(narrow() ? null : d.pages.length === 1 && !d.pages[0].els.length ? 'tpl' : null);
+    if (first) this.openTab(narrow() ? null : d.pages.length === 1 && !d.pages[0].els.length ? 'tpl' : null);
+    else if (this.tab) this.renderPanel();
   }
   updateTop() {
     $('[data-cmd="undo"]').disabled = !this.app.history.canUndo;
@@ -221,6 +234,7 @@ export class UI {
       case 'undo': return this.app.undo();
       case 'redo': return this.app.redo();
       case 'export': return this.exportDialog();
+      case 'resize': return this.resizeDialog();
       case 'zoomIn': return st.setZoom(st.zoom * 1.25);
       case 'zoomOut': return st.setZoom(st.zoom / 1.25);
       case 'zoomFit': return st.zoomFit();
@@ -260,35 +274,53 @@ export class UI {
   renderPanel() {
     const t = TABS.find((x) => x[0] === this.tab);
     if (!t) return;
-    const keep = $('.ds-pb', this.panelEl)?.scrollTop || 0;
+    const keep = this.shownTab === this.tab ? $('.ds-pb', this.panelEl)?.scrollTop || 0 : 0;
+    this.shownTab = this.tab;
     const body = { tpl: () => this.panelTemplates(), el: () => this.panelElements(), text: () => this.panelText(), up: () => this.panelUploads(), bg: () => this.panelBg(), layers: () => this.panelLayers() }[this.tab]();
     this.panelEl.innerHTML = `<div class="ds-ph"><h2>${t[3]}</h2><button class="ds-ib sm" data-close aria-label="Tutup panel">${I('x')}</button></div><div class="ds-pb">${body}</div>`;
-    if (this.tab === 'layers') $('.ds-pb', this.panelEl).scrollTop = keep;
+    if (keep) $('.ds-pb', this.panelEl).scrollTop = keep;
     this.drawPanelCanvases();
     if (this.tab === 'el') this.fillIcons();
   }
   drawPanelCanvases() {
     const d = this.app.design;
     const dpr = DPR();
-    for (const c of $$('canvas[data-tplc]', this.panelEl)) {
-      const t = templatesFor(d.sizeId).find((x) => x.id === c.dataset.tplc);
-      if (!t) continue;
-      const W = Math.round(150 * dpr);
-      const k = W / d.width;
-      c.width = W;
-      c.height = Math.max(1, Math.round(d.height * k));
-      const tmp = { width: d.width, height: d.height, sizeId: d.sizeId, media: [] };
-      const out = t.make(tmp);
-      drawPage(c.getContext('2d'), tmp, { bg: out.bg, els: out.els }, { scale: k });
-    }
-    for (const c of $$('canvas[data-draw]', this.panelEl)) {
-      const els = this.specEls(c.dataset.draw, MINI);
-      if (!els) continue;
-      const wide = /^(badge|combo):/.test(c.dataset.draw);
-      c.width = Math.round((wide ? 160 : 80) * dpr);
-      c.height = Math.round((wide ? (c.dataset.draw.startsWith('combo') ? 100 : 56) : 80) * dpr);
-      drawEls(c, els, { fill: wide ? 0.9 : 0.78 });
-    }
+    // template pictures: a few per frame (27 templates; the panel opens at once)
+    const tpls = $$('canvas[data-tplc]', this.panelEl);
+    const tplRun = ++this.tplRun;
+    const list = templatesFor(d.sizeId);
+    const drawTpl = (i) => {
+      if (tplRun !== this.tplRun) return;
+      for (const c of tpls.slice(i, i + 4)) {
+        const t = list.find((x) => x.id === c.dataset.tplc);
+        if (!t) continue;
+        const W = Math.round(150 * dpr);
+        const k = W / d.width;
+        c.width = W;
+        c.height = Math.max(1, Math.round(d.height * k));
+        const tmp = { width: d.width, height: d.height, sizeId: d.sizeId, media: [] };
+        const out = t.make(tmp);
+        drawPage(c.getContext('2d'), tmp, { bg: out.bg, els: out.els }, { scale: k });
+      }
+      if (i + 4 < tpls.length) requestAnimationFrame(() => drawTpl(i + 4));
+    };
+    drawTpl(0);
+    // (drawn a few per frame: a long panel opens at once, its pictures follow)
+    const tiles = $$('canvas[data-draw]', this.panelEl);
+    const run = ++this.tileRun;
+    const step = (i) => {
+      if (run !== this.tileRun) return;
+      for (const c of tiles.slice(i, i + 18)) {
+        const els = this.specEls(c.dataset.draw, MINI);
+        if (!els) continue;
+        const wide = /^(badge|combo):/.test(c.dataset.draw);
+        c.width = Math.round((wide ? 160 : 80) * dpr);
+        c.height = Math.round((wide ? (c.dataset.draw.startsWith('combo') ? 100 : 56) : 80) * dpr);
+        drawEls(c, els, { fill: wide ? 0.9 : 0.78 });
+      }
+      if (i + 18 < tiles.length) requestAnimationFrame(() => step(i + 18));
+    };
+    step(0);
     for (const c of $$('canvas[data-mthumb]', this.panelEl)) this.drawMediaThumb(c, c.dataset.mthumb);
     for (const c of $$('canvas[data-lthumb]', this.panelEl)) {
       const el = this.app.page.els.find((x) => x.id === c.dataset.lthumb);
@@ -323,10 +355,11 @@ export class UI {
     return `<input class="ds-search" type="search" placeholder="Cari ikon: tas, kirim, bintang, jam…" data-iconq value="${esc(this.iconQuery)}" enterkeyhint="search">
       <div data-iconres></div>
       <div data-elbody${this.iconQuery ? ' hidden' : ''}>
-        <div class="ds-sec">Bentuk</div>
-        <div class="ds-grid g4">${SHAPES.map((k) => `<button class="ds-tile" data-add="shape:${k}" title="${SHAPE_NAMES[k] || k}"><canvas data-draw="shape:${k}"></canvas></button>`).join('')}</div>
-        <div class="ds-sec">Bingkai foto <small>isi dengan foto produk</small></div>
-        <div class="ds-grid g4">${FRAMES.map(([k, n]) => `<button class="ds-tile" data-add="frame:${k}" title="${n}"><canvas data-draw="frame:${k}"></canvas></button>`).join('')}</div>
+        <div class="ds-sec">Bentuk <button class="ds-link" data-expand="shapes">${this.expand.shapes ? 'Lebih sedikit' : `Lihat semua (${SHAPES.length})`}</button></div>
+        <div class="ds-grid g4">${(this.expand.shapes ? SHAPES : SHAPES.slice(0, 12)).map((k) => `<button class="ds-tile" data-add="shape:${k}" title="${SHAPE_NAMES[k] || k}" aria-label="${SHAPE_NAMES[k] || k}"><canvas data-draw="shape:${k}"></canvas></button>`).join('')}</div>
+        <div class="ds-sec">Bingkai foto <button class="ds-link" data-expand="frames">${this.expand.frames ? 'Lebih sedikit' : `Lihat semua (${FRAMES.length})`}</button></div>
+        <p class="ds-hint" style="margin-top:-4px">Isi dengan foto produk: ketuk bingkai lalu Pilih foto, atau geser foto ke atasnya.</p>
+        <div class="ds-grid g4">${(this.expand.frames ? FRAMES : FRAMES.slice(0, 8)).map(([k, n]) => `<button class="ds-tile" data-add="frame:${k}" title="${n}" aria-label="Bingkai ${n}"><canvas data-draw="frame:${k}"></canvas></button>`).join('')}</div>
         <div class="ds-sec">Label marketplace</div>
         <div class="ds-grid g2">${MP_BADGES.map((b, i) => `<button class="ds-tile" style="aspect-ratio:2.6" data-add="badge:${i}" title="${esc(b.text)}"><canvas data-draw="badge:${i}"></canvas></button>`).join('')}</div>
         <div class="ds-sec">Warna varian</div>
@@ -424,7 +457,7 @@ export class UI {
       case 'combo': return COMBOS.find((c) => c.id === arg)?.make(p) || null;
       case 'shape': return [arg === 'rounded' ? shapeEl(p, 'rect', { name: SHAPE_NAMES.rounded }, { radius: Math.round(70 * (Math.min(p.width, p.height) / 1080)) }) : shapeEl(p, arg)];
       case 'frame': {
-        const dims = { pill: [700, 420], rounded: [560, 560] }[arg] || [560, 560];
+        const dims = FRAME_DIMS[arg] || [560, 560];
         return [slotEl(p, arg === 'rounded' ? 'rect' : arg, dims[0], dims[1], { radius: arg === 'rounded' ? 60 : 0 })];
       }
       case 'badge': return [badgeEl(p, MP_BADGES[+arg])];
@@ -454,6 +487,7 @@ export class UI {
       return undefined;
     }
     if (t('[data-allicons]')) { this.allIcons = !this.allIcons; return this.renderPanel(); }
+    if ((b = t('[data-expand]'))) { this.expand[b.dataset.expand] = !this.expand[b.dataset.expand]; return this.renderPanel(); }
     if (t('[data-upload]')) return this.app.pickPhotos({ slot: this.app.one()?.slot ? this.app.one() : null });
     if ((b = t('[data-media]'))) { this.app.usePhoto(b.dataset.media); if (narrow()) this.openTab(null); return undefined; }
     if ((b = t('[data-bgc]'))) return this.setBg({ color: b.dataset.bgc });
@@ -532,7 +566,9 @@ export class UI {
       <button class="ds-cb" data-act="tab:tpl">${I('layout')}Template</button>
       <button class="ds-cb" data-act="addtext">${I('text')}Teks</button>
       <button class="ds-cb" data-act="tab:up">${I('image')}Foto</button>
-      <button class="ds-cb" data-act="tab:el">${I('shapes')}Elemen</button>`;
+      <button class="ds-cb" data-act="tab:el">${I('shapes')}Elemen</button>
+      <span class="ds-sep"></span>
+      <button class="ds-cb" data-act="resize" title="Ubah ukuran desain">${I('crop')}${this.app.design.width}×${this.app.design.height}</button>`;
   }
   ctxTail(el) {
     return `<span class="ds-sep"></span>
@@ -618,6 +654,7 @@ export class UI {
     const sel = app.selected();
     const ch = (label, fn) => app.change(label, fn);
     if (act.startsWith('tab:')) { this.openTab(act.slice(4)); return; }
+    if (act === 'resize') { this.resizeDialog(); return; }
     switch (act) {
       case 'addtext': app.addEls([textEl(app.design, { ...TEXT_KINDS.body })], { edit: true }); return;
       case 'pagebg': {
@@ -726,11 +763,14 @@ export class UI {
   // ---------------------------------------------------------------------------------------------
   // popovers
   openPop(anchor, key, html, bind, cls = '') {
-    const p = this.popEl;
+    // a new element each time: the listeners of the popover before it go with it (v1.13.1: they piled up on one
+    // element, so picking a colour for a variant circle also ran the page colour's picker opened earlier)
+    const p = document.createElement('div');
     p.className = `ds-pop ${cls}`;
-    p.style.width = '';
     p.innerHTML = html;
-    p.hidden = false;
+    p.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') this.closePop(); });
+    this.popEl.replaceWith(p);
+    this.popEl = p;
     this.popKey = key;
     bind?.(p);
     this.place(p, anchor);
@@ -748,8 +788,11 @@ export class UI {
   }
   closePop() {
     if (this.popEl.hidden) return;
-    this.popEl.hidden = true;
-    this.popEl.innerHTML = '';
+    const p = document.createElement('div');
+    p.className = 'ds-pop';
+    p.hidden = true;
+    this.popEl.replaceWith(p);
+    this.popEl = p;
     this.popKey = null;
   }
   bindRanges(p, handlers) {
@@ -1037,7 +1080,9 @@ export class UI {
         const k = c.dataset.mk;
         const s = 30 * dpr;
         if (k === 'none') { g.fillRect(-s * 0.9, -s * 0.65, s * 1.8, s * 1.3); continue; }
-        g.fill(shapePath(k, k === 'pill' ? s * 1.9 : s * 1.5, k === 'pill' ? s * 1.1 : s * 1.5, k === 'rect' ? s * 0.35 : 0));
+        const [fw, fh] = FRAME_DIMS[k] || [560, 560];
+        const fk = (s * 1.6) / Math.max(fw, fh);
+        g.fill(shapePath(k, fw * fk, fh * fk, k === 'rect' ? s * 0.35 : 0));
       }
     };
     this.openPop(anchor, key, '', (p) => {
@@ -1087,6 +1132,7 @@ export class UI {
       { label: 'Pilih semua', icon: 'check', kbd: 'Ctrl+A', run: () => app.select(app.page.els.filter((e) => !e.locked && !e.hidden).map((e) => e.id)) },
       { sep: true },
       { label: 'Tambah halaman', icon: 'plus', run: () => app.addPage() },
+      { label: 'Ubah ukuran desain', icon: 'crop', run: () => this.resizeDialog() },
     ];
     this.menu(x, y, items, key);
   }
@@ -1133,6 +1179,49 @@ export class UI {
     const i = +b.dataset.pg;
     if (i === this.app.pageIndex) { const r = b.getBoundingClientRect(); this.pageMenu(i, r.left, r.top - 8, true); return; }
     this.app.gotoPage(i);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // the page size (v1.13.1)
+  resizeDialog() {
+    this.closePop();
+    const d = this.app.design;
+    const st = { id: d.sizeId || null, w: d.width, h: d.height };
+    const bg = document.createElement('div');
+    bg.className = 'ds-modal-bg';
+    bg.innerHTML = `<div class="ds-modal" role="dialog" aria-label="Ubah ukuran">
+      <h2>Ubah ukuran</h2>
+      <p class="ds-hint" style="margin-top:-6px">Sekarang ${d.width} × ${d.height} px. Semua halaman ikut; posisi dan ukuran elemen disesuaikan.</p>
+      <div class="ds-rsz">${SIZES.map((z) => `<button data-z="${z.id}"><i style="aspect-ratio:${z.w}/${z.h}"></i><b>${esc(z.name)}</b><small>${z.w} × ${z.h}</small></button>`).join('')}</div>
+      <div class="ds-field"><span>Ukuran khusus (px)</span><div class="ds-wh"><input type="number" data-wh="w" min="64" max="8000" inputmode="numeric" aria-label="Lebar"><span>×</span><input type="number" data-wh="h" min="64" max="8000" inputmode="numeric" aria-label="Tinggi"><button class="ds-btn" data-swap title="Tukar lebar dan tinggi">⇄</button></div></div>
+      <div class="ds-actions"><button class="ds-btn" data-x>Batal</button><button class="ds-btn" data-copy>Salin & ubah ukuran</button><button class="ds-btn acc" data-go>Ubah ukuran</button></div>
+    </div>`;
+    document.body.appendChild(bg);
+    const W = $('[data-wh="w"]', bg);
+    const H = $('[data-wh="h"]', bg);
+    const sync = () => {
+      W.value = st.w;
+      H.value = st.h;
+      $$('[data-z]', bg).forEach((b) => b.classList.toggle('on', b.dataset.z === st.id));
+    };
+    sync();
+    const read = () => {
+      const w = Math.round(Number(W.value));
+      const h = Math.round(Number(H.value));
+      if (!(w >= 64 && w <= 8000 && h >= 64 && h <= 8000)) { this.toast('Ukuran 64–8000 px', 'err'); return null; }
+      const z = SIZES.find((x) => x.w === w && x.h === h);
+      return { w, h, id: z ? z.id : null };
+    };
+    bg.addEventListener('input', (e) => { if (e.target.dataset.wh) { st.id = null; $$('[data-z]', bg).forEach((b) => b.classList.remove('on')); } });
+    bg.addEventListener('keydown', (e) => e.stopPropagation());
+    bg.addEventListener('click', (e) => {
+      if (e.target === bg || e.target.closest('[data-x]')) { bg.remove(); return; }
+      const z = e.target.closest('[data-z]');
+      if (z) { const s = SIZES.find((x) => x.id === z.dataset.z); Object.assign(st, { id: s.id, w: s.w, h: s.h }); sync(); return; }
+      if (e.target.closest('[data-swap]')) { Object.assign(st, { id: null, w: Number(H.value) || st.h, h: Number(W.value) || st.w }); sync(); return; }
+      if (e.target.closest('[data-go]')) { const r = read(); if (r) { bg.remove(); this.app.resize(r.w, r.h, r.id); } return; }
+      if (e.target.closest('[data-copy]')) { const r = read(); if (r) { bg.remove(); this.app.copyResized(r.w, r.h, r.id); } }
+    });
   }
 
   // ---------------------------------------------------------------------------------------------

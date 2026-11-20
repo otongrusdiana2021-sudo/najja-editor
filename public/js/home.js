@@ -127,7 +127,7 @@ export class Home {
         <div class="hm-tag"><span>Lebih cepat. Lebih rapi.</span><b>Video produk yang menjual</b></div>
         <div class="hm-starts">
           <button class="hm-new" data-new><i>${icon('video', 26)}</i><span><b>Edit Video</b><small>Video produk, reels, iklan</small></span></button>
-          <button class="hm-new hm-design" data-design><i>${icon('palette', 26)}</i><span><b>Mulai Desain</b><small>Foto produk, banner, story</small></span></button>
+          <button class="hm-new hm-design" data-design><i class="hm-dlogo"><img src="/icons/najja-desain-192.png" alt="" draggable="false"></i><span><b>Mulai Desain</b><small>Foto produk, banner, story</small></span></button>
         </div>
       </header>
       <section class="hm-sizes" aria-label="Mulai desain cepat">

@@ -6,12 +6,23 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.13.1 (Najja Desain):**
+- **Perbaikan:**
+  - Elemen tidak lagi bergetar saat digeser. Garis bantu sepanjang 4000 px sempat memunculkan scrollbar, sehingga ukuran kanvas terus dihitung ulang. Sekarang garis bantu hanya di halaman, dan kanvas tidak diubah selama elemen digeser.
+  - Mengubah warna varian tidak lagi ikut mengubah latar, dan warna teks bisa diganti lagi. Sebelumnya pemilih warna yang pernah dibuka ikut berjalan.
+  - Menghapus halaman terakhir yang sedang dibuka tidak lagi membuat error.
+- **Foto masuk bingkai:** geser foto ke atas bingkai foto, bingkainya menyala, lalu lepas. Foto langsung mengisi bingkai dan dipotong pas.
+- **34 bentuk dan 24 bingkai foto**, di antaranya segi enam, lengkung (arch), blob, bunga, awan, tetes, perisai, kupon, pita, chevron, bintang 4/6, dan balon kata bulat.
+- **Ubah ukuran desain saat mengedit:** ketuk ukuran di atas atau di toolbar halaman, lalu pilih ukuran siap pakai atau ukuran sendiri. Posisi elemen tetap, ukurannya ikut menyesuaikan, dan bisa diurungkan. Ada juga *Salin & ubah ukuran* untuk membuat salinan dengan ukuran lain.
+- **27 template** (sebelumnya 10). Tambahannya: Testimoni, Sebelum & Sesudah, Ukuran Produk, Cara Pakai, Voucher, Pre-order, Restock, Giveaway, Katalog, Tanggal Kembar 11.11, Promo Gajian, Ramadhan Sale, Beli 1 Gratis 1, Story Ulasan, Story Koleksi Baru, Banner Flash Sale, dan Banner Koleksi.
+- **Logo Najja Desain** baru di editor desain dan di kartu Mulai Desain.
+
 **Baru di v1.13.0: Najja Desain**, editor desain untuk konten marketplace di dalam Najja, dengan tata letak ala aplikasi desain tablet. Beranda sekarang punya dua pilihan besar: **Edit Video** dan **Mulai Desain**, plus ukuran cepat (Foto Produk 1:1, Feed 4:5, Story 9:16, Banner 3:1, Banner 16:9, Kartu terima kasih, atau ukuran sendiri). Yang bisa dilakukan:
 - **Impor foto** dari perangkat (pilih banyak, tarik-lepas, tempel). Foto disimpan di server Najja.
 - **Teks**: ketik langsung di halaman, 25 font, warna/gradasi, tebal/miring, rata, huruf besar, spasi, **10 efek** (Bayangan, Angkat, Berongga, Sambung, Garis tepi, Gema, Glitch, Neon, Latar), dan **teks lengkung**.
-- **Elemen**: bentuk, **bingkai foto** (isi dengan foto produk), label marketplace (Gratis Ongkir, Best Seller, COD…), bulatan warna varian, **±1.600 ikon open source Lucide** (cari dalam bahasa Indonesia), dan emoji.
+- **Elemen**: 34 bentuk, 24 **bingkai foto** (isi dengan foto produk), label marketplace (Gratis Ongkir, Best Seller, COD…), bulatan warna varian, **±1.600 ikon open source Lucide** (cari dalam bahasa Indonesia), dan emoji.
 - **Foto**: Ganti, **Hapus latar** (AI server), 24 filter, Sesuaikan, Potong, Bingkai (lingkaran, sudut bulat, hati…), Bayangan produk, Balik.
-- **10 template marketplace** (Diskon, Koleksi baru, Best seller, Fitur produk, Varian warna, Bundling, Flash sale, Story, Banner, Kartu terima kasih) dan 8 kombinasi teks.
+- **27 template marketplace** (Diskon, Koleksi baru, Best seller, Testimoni, Voucher, Flash sale, 11.11, Story, Banner, Kartu terima kasih, dan lainnya) dan 8 kombinasi teks.
 - Geser, ubah ukuran, putar dengan jari, **garis bantu** saat menempel, cubit untuk zoom, multi-halaman, lapisan, ratakan/sebarkan, kunci, urungkan/ulangi.
 - **Ekspor** PNG, JPG, atau PNG transparan, 1× atau 2×; semua halaman jadi satu ZIP; tombol **Bagikan** di iPad untuk menyimpan ke Foto.
 

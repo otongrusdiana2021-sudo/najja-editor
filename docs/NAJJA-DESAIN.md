@@ -31,8 +31,8 @@ Desain tersimpan sebagai proyek di server, sama seperti video. Desain muncul di 
 
 | Panel | Isi |
 |---|---|
-| **Template** | 10 template marketplace: Diskon Besar, Koleksi Baru, Best Seller, Fitur Produk, Varian Warna, Bundling Hemat, Flash Sale, Story Promo, Banner Promo, Kartu Terima Kasih. Template untuk ukuran desain tampil paling atas; yang lain otomatis menyesuaikan. Di halaman kosong template langsung dipakai; di halaman berisi, template jadi halaman baru. |
-| **Elemen** | Bentuk (13), **bingkai foto** (8), label marketplace (Gratis Ongkir, Best Seller, Diskon, Flash Sale, COD, Ori 100%, Stok Terbatas…), bulatan warna varian, ikon **Lucide** (±1.600, bisa dicari dengan kata Indonesia seperti *tas, kirim, bintang, hadiah, jam*), dan emoji. |
+| **Template** | 27 template marketplace (v1.13.1). **Foto Produk / Feed:** Diskon Besar, Koleksi Baru, Best Seller, Fitur Produk, Varian Warna, Bundling Hemat, Flash Sale, Testimoni, Sebelum & Sesudah, Ukuran Produk, Cara Pakai, Voucher, Pre-order, Restock, Giveaway, Katalog, Tanggal Kembar, Promo Gajian, Ramadhan Sale, Beli 1 Gratis 1. **Story:** Story Promo, Story Ulasan, Story Koleksi Baru. **Banner:** Banner Promo, Banner Flash Sale, Banner Koleksi. **Kartu:** Kartu Terima Kasih. Template untuk ukuran desain tampil paling atas; yang lain otomatis menyesuaikan. Di halaman kosong template langsung dipakai; di halaman berisi, template jadi halaman baru. |
+| **Elemen** | 34 bentuk (persegi, lingkaran, segitiga, segi 5/6/8, jajar genjang, trapesium, bintang 4/5/6, lencana, bunga, hati, plus, lengkung, setengah lingkaran, tetes, blob, awan, perisai, label harga, kupon, pita, chevron, balon kata, panah, garis…), 24 **bingkai foto** dengan bentuk yang sama (tombol *Lihat semua*), label marketplace (Gratis Ongkir, Best Seller, Diskon, Flash Sale, COD, Ori 100%, Stok Terbatas…), bulatan warna varian, ikon **Lucide** (±1.600, bisa dicari dengan kata Indonesia seperti *tas, kirim, bintang, hadiah, jam*), dan emoji. |
 | **Teks** | Tambah kotak teks, judul / subjudul / isi, dan 8 kombinasi teks marketplace (harga coret, diskon, koleksi baru, flash sale, gratis ongkir, ulasan bintang, judul produk, ajakan beli). |
 | **Unggahan** | Unggah foto (bisa banyak sekaligus) dan daftar foto desain ini. Kalau bingkai foto sedang dipilih, ketuk foto untuk mengisinya. |
 | **Latar** | Warna, gradasi, atau foto sebagai latar, dan tombol untuk memakai latar yang sama di semua halaman. |
@@ -51,6 +51,7 @@ Desain tersimpan sebagai proyek di server, sama seperti video. Desain muncul di 
   - Potong, **Bingkai** (lingkaran, sudut bulat, kapsul, hati, bintang…), Bayangan (paling bagus untuk produk yang latarnya sudah dihapus), dan Balik.
 - **Bentuk**: warna atau gradasi, garis tepi (garis / putus-putus), sudut bulat, bayangan.
 - **Bingkai foto**: tombol **Pilih foto**. Foto otomatis dipotong pas seukuran bingkai (tidak gepeng) dan mengikuti bentuknya. Menu ⋯ → *Kosongkan bingkai* mengembalikannya ke bingkai kosong.
+  - **Geser foto ke bingkai** (v1.13.1): bingkai disorot selama foto berada di atasnya. Dilepas, foto mengisi bingkai, termasuk bingkai yang sudah berisi foto (fotonya diganti). Urungkan mengembalikan keduanya. Foto yang sudah di dalam bingkai ikut bergerak bersama bingkainya.
 - **Ikon**: warna garis, warna isi, ketebalan.
 - **Label**: ubah teks dan emoji, warna latar dan warna teks.
 - **Bulatan warna**: warna, nama, dan warna nama.
@@ -79,6 +80,16 @@ Desain tersimpan sebagai proyek di server, sama seperti video. Desain muncul di 
   | Esc | Batal pilih |
   | Ctrl/⌘ + = / − / 0 | Zoom |
 
+## Ukuran desain (v1.13.1)
+
+- Ketuk ukuran di bar atas (mis. `1080 × 1080 px`), tombol ukuran di toolbar halaman (saat tidak ada yang dipilih; juga di ponsel), atau menu klik kanan → *Ubah ukuran desain*.
+- Pilih ukuran siap pakai atau isi lebar × tinggi sendiri (⇄ menukar keduanya).
+- **Ubah ukuran** mengubah semua halaman desain ini, dan bisa diurungkan:
+  - posisi elemen tetap di bagian halaman yang sama;
+  - ukuran elemen mengikuti sisi pendek halaman;
+  - foto tetap proporsional.
+- **Salin & ubah ukuran** membuat salinan desain dengan ukuran baru lalu membukanya. Desain aslinya tidak berubah.
+
 ## Halaman dan ekspor
 
 - Strip bawah menampilkan semua halaman. **+** menambah halaman. Mengetuk halaman aktif membuka menu: duplikat, tambah kosong, geser kiri/kanan, hapus.
@@ -95,6 +106,10 @@ Desain tersimpan sebagai proyek di server, sama seperti video. Desain muncul di 
   - kotak teks yang membungkus kata, teks lengkung, dan efek teks;
   - bentuk dan bingkai foto, foto dengan bingkai, bayangan produk;
   - ikon vektor dari data Lucide.
+- **Getar saat menggeser (diperbaiki di v1.13.1).**
+  - Penyebabnya: garis bantu digambar sepanjang 4000 px ke atas dan bawah, sehingga area kanvas bisa digulir. Di Windows scrollbar lalu muncul, kanvas menghitung ulang zoom-nya, halaman bergeser beberapa piksel, garis bantu hilang, dan siklusnya berulang.
+  - Perbaikannya: garis bantu sekarang hanya sepanjang halaman, area di luar halaman tidak menambah area gulir, scrollbar disembunyikan, dan zoom tidak dihitung ulang selama elemen digeser.
+  - Tes e2e memeriksa bahwa halaman diam dan area gulir +0 px. Dengan CSS lama, tes yang sama mencatat +3954 px.
 - **Halaman sendiri yang ringan.** `/design` (`public/design.html`) hanya memuat renderer dan modul `js/design/`, bukan editor video.
   - Siap dipakai ±0,3 detik setelah dibuka.
   - Saat menggeser, elemen di bawah dan di atas disimpan sebagai dua gambar, jadi hanya yang bergerak yang digambar ulang (±0,1 ms per frame).

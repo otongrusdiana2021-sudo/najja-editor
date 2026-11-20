@@ -77,10 +77,23 @@ export function textEl(page, style = {}, props = {}) {
 /** A shape: kind (rect, circle, triangle, star, burst, heart, tag, bubble, arrow, line, pill, diamond). */
 export function shapeEl(page, kind = 'rect', props = {}, shape = {}) {
   const u = unit(page);
-  const dims = { line: [600, 10], arrow: [500, 120], pill: [520, 160], tag: [520, 200], bubble: [520, 360], burst: [420, 420] }[kind] || [400, 400];
+  const dims = SHAPE_DIMS[kind] || [400, 400];
   return base('shape', { shape: { kind, w: Math.round(dims[0] * u), h: Math.round(dims[1] * u), fill: '#47C9D7', radius: kind === 'rect' ? 0 : 0, ...shape }, name: SHAPE_NAMES[kind] || 'Bentuk', ...props });
 }
-export const SHAPE_NAMES = { rect: 'Persegi', rounded: 'Persegi bulat', circle: 'Lingkaran', triangle: 'Segitiga', star: 'Bintang', burst: 'Lencana', heart: 'Hati', tag: 'Label harga', bubble: 'Balon kata', arrow: 'Panah', line: 'Garis', pill: 'Kapsul', diamond: 'Belah ketupat' };
+export const SHAPE_NAMES = {
+  rect: 'Persegi', rounded: 'Persegi bulat', circle: 'Lingkaran', triangle: 'Segitiga', star: 'Bintang', burst: 'Lencana', heart: 'Hati', tag: 'Label harga',
+  bubble: 'Balon kata', arrow: 'Panah', line: 'Garis', pill: 'Kapsul', diamond: 'Belah ketupat',
+  // v1.13.1
+  pentagon: 'Segi lima', hexagon: 'Segi enam', octagon: 'Segi delapan', star4: 'Bintang 4', star6: 'Bintang 6', rtriangle: 'Segitiga siku',
+  parallelogram: 'Jajar genjang', trapezoid: 'Trapesium', cross: 'Plus', ribbon: 'Pita', chevron: 'Chevron', darrow: 'Panah dua arah', arch: 'Lengkung',
+  semicircle: 'Setengah lingkaran', drop: 'Tetes', shield: 'Perisai', blob: 'Blob', scallop: 'Bunga', cloud: 'Awan', bubble2: 'Balon bulat', ticket: 'Kupon',
+};
+/** A shape's size on a 1080 px page when added. */
+export const SHAPE_DIMS = {
+  line: [600, 10], arrow: [500, 120], darrow: [560, 140], pill: [520, 160], tag: [520, 200], bubble: [520, 360], bubble2: [520, 380], burst: [420, 420],
+  parallelogram: [480, 300], trapezoid: [480, 300], ribbon: [600, 180], chevron: [400, 260], arch: [360, 480], semicircle: [480, 240], drop: [320, 420],
+  shield: [360, 420], cloud: [560, 360], ticket: [600, 300],
+};
 /** A photo slot of a template: a shape a photo replaces (keeping its place and frame). */
 export function slotEl(page, kind = 'rect', w = 600, h = 600, props = {}, label = 'Foto produk') {
   const u = unit(page);
@@ -127,9 +140,21 @@ export function fillSlot(page, slot, media) {
   const radius = slot.shape?.radius ? (2 * slot.shape.radius) / Math.min(slot.shape.w, slot.shape.h) : 0;
   return base('image', {
     id: slot.id, mediaId: media.id, x: slot.x, y: slot.y, rotation: slot.rotation || 0, scale: Math.round(scale * 10000) / 10000, crop, name: media.name || 'Foto',
-    mask: kind === 'rect' && !radius ? null : { kind: kind === 'rect' ? 'rect' : kind, radius }, fromSlot: { kind, w: slot.shape.w, h: slot.shape.h, radius: slot.shape.radius || 0, label: slot.slot?.label || 'Foto produk', scale: slot.scale ?? 1 },
+    mask: kind === 'rect' && !radius ? null : { kind: kind === 'rect' ? 'rect' : kind, radius }, fromSlot: { kind, w: slot.shape.w, h: slot.shape.h, radius: slot.shape.radius || 0, label: slot.slot?.label || 'Foto produk', scale: slot.scale ?? 1, imgScale: Math.round(scale * 10000) / 10000 },
     opacity: slot.opacity ?? 1,
   });
+}
+
+/**
+ * The frame of a photo slot or of a frame with a photo in it (for putting another photo in): a slot element with
+ * the frame's place and its present size (a framed photo made bigger: the frame too).
+ */
+export function slotOf(el) {
+  if (el.slot) return el;
+  const f = el.fromSlot;
+  if (!f) return null;
+  const grown = f.imgScale ? (el.scale ?? 1) / f.imgScale : 1;
+  return { id: el.id, type: 'shape', x: el.x, y: el.y, rotation: el.rotation || 0, opacity: el.opacity ?? 1, scale: Math.round((f.scale ?? 1) * grown * 10000) / 10000, shape: { kind: f.kind, w: f.w, h: f.h, radius: f.radius || 0 }, slot: { label: f.label } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -270,5 +295,33 @@ export class History {
   get canUndo() { return this.past.length > 0; }
   get canRedo() { return this.future.length > 0; }
 }
-/** What of a design goes into an undo step (pages and media; not the name or the server's revision). */
-export const snapshotOf = (d) => JSON.stringify({ pages: d.pages, media: d.media, bg: d.bg });
+/** What of a design goes into an undo step (pages, media, size; not the name or the server's revision). */
+export const snapshotOf = (d) => JSON.stringify({ pages: d.pages, media: d.media, width: d.width, height: d.height, sizeId: d.sizeId ?? null });
+
+/**
+ * (v1.13.1) A new page size for the whole design, like a design app's resize: places stay where they are on the page
+ * (they are parts of it), sizes follow the page's shorter side, so a layout keeps its look on a page of another shape.
+ */
+export function resizeDesign(d, w, h, sizeId = null) {
+  w = Math.round(Math.min(8000, Math.max(64, w)));
+  h = Math.round(Math.min(8000, Math.max(64, h)));
+  const k = Math.min(w, h) / Math.min(d.width, d.height);
+  // a photo's base size is the photo fitted inside the page: that changes with the page, so its scale makes up for it
+  const fit = (m, cr, W, H) => Math.min(W / Math.max(1, m.width * (1 - cr.l - cr.r)), H / Math.max(1, m.height * (1 - cr.t - cr.b)));
+  for (const p of d.pages) {
+    for (const e of p.els) {
+      let f = k;
+      const m = e.type === 'image' ? d.media.find((x) => x.id === e.mediaId) : null;
+      if (m?.width && m?.height) {
+        const cr = e.crop || { l: 0, t: 0, r: 0, b: 0 };
+        f = (k * fit(m, cr, d.width, d.height)) / fit(m, cr, w, h);
+      }
+      e.scale = Math.round((e.scale ?? 1) * f * 10000) / 10000;
+    }
+  }
+  d.width = w;
+  d.height = h;
+  d.aspect = aspectOf(w, h);
+  d.sizeId = sizeId;
+  return d;
+}

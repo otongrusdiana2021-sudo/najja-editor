@@ -12,10 +12,11 @@ import { execFileSync } from 'node:child_process';
 import {
   SIZES, newDesign, normalizeDesign, newPage, textEl, shapeEl, slotEl, imageEl, fillSlot, iconEl, badgeEl, swatchEl, unit,
   aabb, union, hit, snap, snapAngle, moveEl, duplicateEls, duplicatePage, alignMoves, distributeMoves, History, snapshotOf, TEXT_KINDS,
+  slotOf, resizeDesign, SHAPE_NAMES, SHAPE_DIMS,
 } from '../public/js/design/model.js';
 import { TEMPLATES, COMBOS, templatesFor, ICON_NODES } from '../public/js/design/templates.js';
 import { zip, crc32 } from '../public/js/design/zip.js';
-import { wrapLine, curveArc, textEffect, baseSize } from '../public/js/render.js';
+import { wrapLine, curveArc, textEffect, baseSize, shapePath } from '../public/js/render.js';
 import { searchIcons } from '../public/js/design/assets.js';
 import { applyFx, fxOf } from '../public/js/design/ui.js';
 import { untar, createVendor, VENDOR } from '../lib/vendor.js';
@@ -84,7 +85,7 @@ test('a photo fills a slot: same place, its size, cropped to the slot (not squas
   assert.ok(Math.abs(size.w * img.scale - 600) < 1 && Math.abs(size.h * img.scale - 400) < 1, `${size.w * img.scale}×${size.h * img.scale}`);
   assert.equal(img.mask.kind, 'rect');
   assert.equal(img.mask.radius, 0.25, 'radius as a part of the half shorter side (50 of 200)');
-  assert.deepEqual(img.fromSlot, { kind: 'rect', w: 600, h: 400, radius: 50, label: 'Foto produk', scale: 1 });
+  assert.deepEqual(img.fromSlot, { kind: 'rect', w: 600, h: 400, radius: 50, label: 'Foto produk', scale: 1, imgScale: img.scale });
   const circle = fillSlot(d, slotEl(d, 'circle', 500, 500), m);
   assert.equal(circle.mask.kind, 'circle');
   const plain = fillSlot(d, slotEl(d, 'rect', 500, 500), m);
@@ -154,7 +155,7 @@ test('History: undo / redo of whole snapshots, the same state not twice, a new c
   for (const s of ['1', '2', '3', '4']) h.push(s);
   assert.equal(h.past.length, 3, 'at most max steps');
   const d = newDesign();
-  assert.deepEqual(Object.keys(JSON.parse(snapshotOf(d))), ['pages', 'media']);
+  assert.deepEqual(Object.keys(JSON.parse(snapshotOf(d))), ['pages', 'media', 'width', 'height', 'sizeId'], 'the page size is undone too (v1.13.1)');
 });
 
 test('every template fits every size: elements valid, inside the page, slots for the photos', () => {
@@ -171,7 +172,8 @@ test('every template fits every size: elements valid, inside the page, slots for
       const ids = new Set(out.els.map((e) => e.id));
       assert.equal(ids.size, out.els.length, `${t.id}: unique ids`);
       if (!t.for.includes(size.id)) continue;
-      if (t.id !== 'kartu') assert.ok(out.els.some((e) => e.slot), `${t.id}/${size.id}: a photo slot`);
+      // (the thank-you card and the voucher carry words, not a product photo)
+      if (!['kartu', 'voucher'].includes(t.id)) assert.ok(out.els.some((e) => e.slot), `${t.id}/${size.id}: a photo slot`);
       for (const e of out.els) {
         assert.ok(['text', 'shape', 'sticker', 'image'].includes(e.type));
         // the centre of every element on the page
@@ -316,4 +318,117 @@ test('the project list tells designs from videos (the home screen opens each in 
     assert.equal(vl.kind, 'video');
     assert.equal(vl.pages, undefined);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------------------------------------------------
+// v1.13.1
+test('every shape (and photo frame) is drawn inside its box', () => {
+  // a Path2D that keeps the points it goes through
+  class RecPath {
+    constructor() { this.pts = []; this.cur = [0, 0]; }
+    add(x, y) { this.pts.push([x, y]); this.cur = [x, y]; }
+    moveTo(x, y) { this.add(x, y); }
+    lineTo(x, y) { this.add(x, y); }
+    // (curves: points along them, not their control points)
+    quadraticCurveTo(cx, cy, x, y) {
+      const [x0, y0] = this.cur;
+      for (let i = 1; i <= 12; i++) { const t = i / 12; const u = 1 - t; this.pts.push([u * u * x0 + 2 * u * t * cx + t * t * x, u * u * y0 + 2 * u * t * cy + t * t * y]); }
+      this.cur = [x, y];
+    }
+    bezierCurveTo(c1x, c1y, c2x, c2y, x, y) {
+      const [x0, y0] = this.cur;
+      for (let i = 1; i <= 16; i++) {
+        const t = i / 16;
+        const u = 1 - t;
+        this.pts.push([u * u * u * x0 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x, u * u * u * y0 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y]);
+      }
+      this.cur = [x, y];
+    }
+    arcTo(x1, y1, x2, y2) { this.pts.push([x1, y1]); }
+    arc(x, y, r, a0, a1, ccw = false) {
+      // (along the arc, the way it is drawn)
+      let e = a1;
+      if (!ccw) while (e < a0) e += Math.PI * 2;
+      else while (e > a0) e -= Math.PI * 2;
+      for (let i = 0; i <= 24; i++) { const a = a0 + ((e - a0) * i) / 24; this.pts.push([x + Math.cos(a) * r, y + Math.sin(a) * r]); }
+    }
+    ellipse(x, y, rx, ry, rot, a0, a1) {
+      // the points the arc goes through (every few degrees)
+      const n = 24;
+      for (let i = 0; i <= n; i++) { const a = a0 + ((a1 - a0) * i) / n; this.pts.push([x + Math.cos(a) * rx, y + Math.sin(a) * ry]); }
+    }
+    rect(x, y, w, h) { this.pts.push([x, y], [x + w, y + h]); }
+    roundRect(x, y, w, h) { this.pts.push([x, y], [x + w, y + h]); }
+    closePath() {}
+  }
+  const saved = globalThis.Path2D;
+  globalThis.Path2D = RecPath;
+  try {
+    const kinds = Object.keys(SHAPE_NAMES).filter((k) => k !== 'rounded');
+    assert.ok(kinds.length >= 33, `${kinds.length} shapes`);
+    for (const kind of kinds) {
+      for (const [w, h] of [[400, 400], [600, 240], [300, 520]]) {
+        const p = shapePath(kind, w, h, 30);
+        assert.ok(p.pts.length >= 2, `${kind}: drawn`);
+        for (const [x, y] of p.pts) assert.ok(Math.abs(x) <= w / 2 + 0.5 && Math.abs(y) <= h / 2 + 0.5, `${kind} ${w}×${h}: (${x.toFixed(1)}, ${y.toFixed(1)}) outside`);
+        // and it reaches its box (a frame fills its place): at least 70% of the width and height (a heart: ±75%)
+        const xs = p.pts.map((q) => q[0]);
+        const ys = p.pts.map((q) => q[1]);
+        if (!['line', 'arrow', 'darrow', 'cross'].includes(kind)) {
+          assert.ok(Math.max(...xs) - Math.min(...xs) >= w * 0.7 && Math.max(...ys) - Math.min(...ys) >= h * 0.7, `${kind} ${w}×${h}: fills its box`);
+        }
+      }
+    }
+  } finally { globalThis.Path2D = saved; }
+  for (const [k, [w, h]] of Object.entries(SHAPE_DIMS)) assert.ok(SHAPE_NAMES[k] && w > 0 && h > 0, k);
+});
+
+test('a frame with a photo: its slot again, at its present size (a photo dropped on it fills the same place)', () => {
+  const d = newDesign();
+  const slot = slotEl(d, 'hexagon', 500, 400, { x: 0.2, y: -0.1, rotation: 12 });
+  const m = { id: 'm_pic1', width: 800, height: 800 };
+  d.media.push(m);
+  const img = fillSlot(d, slot, m);
+  const again = slotOf(img);
+  assert.deepEqual([again.id, again.x, again.y, again.rotation, again.shape.kind, again.shape.w, again.shape.h, again.scale], [slot.id, 0.2, -0.1, 12, 'hexagon', 500, 400, 1]);
+  assert.equal(img.mask.kind, 'hexagon');
+  // made 1.5× bigger after it was filled: the frame is too, and another photo keeps that size
+  img.scale *= 1.5;
+  assert.ok(Math.abs(slotOf(img).scale - 1.5) < 1e-3);
+  const other = fillSlot(d, slotOf(img), { id: 'm_pic2', width: 1200, height: 600 });
+  d.media.push({ id: 'm_pic2', width: 1200, height: 600 });
+  const sz = baseSize(other, envOf(d), null);
+  assert.ok(Math.abs(sz.w * other.scale - 750) < 1 && Math.abs(sz.h * other.scale - 600) < 1, `${sz.w * other.scale}×${sz.h * other.scale}`);
+  assert.equal(slotOf(slot), slot, 'an empty slot is its own slot');
+  assert.equal(slotOf({ type: 'image' }), null, 'a loose photo has none');
+});
+
+test('resizing a design: places stay, sizes follow the shorter side, photos keep their look, undo knows the size', () => {
+  const d = newDesign({ w: 1080, h: 1080, sizeId: 'produk' });
+  const m = { id: 'm_wide1', width: 2000, height: 1000 };
+  d.media.push(m);
+  const t = textEl(d, { content: 'Halo', size: 100 }, { x: -0.2, y: 0.3 });
+  const img = imageEl(d, m, { x: 0.1, y: -0.2 }, 0.5);
+  d.pages[0].els.push(t, img);
+  const before = JSON.parse(snapshotOf(d));
+  const shown = (e, dd) => { const s = baseSize(e, envOf(dd), null); return [s.w * e.scale, s.h * e.scale]; };
+  const imgBefore = shown(img, d);
+  resizeDesign(d, 1920, 640, 'banner');
+  assert.deepEqual([d.width, d.height, d.aspect, d.sizeId], [1920, 640, '3:1', 'banner']);
+  const k = 640 / 1080;
+  assert.ok(Math.abs(t.scale - k) < 1e-3, `text ${t.scale}`);
+  assert.deepEqual([t.x, t.y, img.x, img.y], [-0.2, 0.3, 0.1, -0.2], 'places on the page unchanged');
+  const imgAfter = shown(img, d);
+  assert.ok(Math.abs(imgAfter[0] - imgBefore[0] * k) < 1 && Math.abs(imgAfter[1] - imgBefore[1] * k) < 1, `photo ${imgBefore} → ${imgAfter}`);
+  assert.equal(JSON.parse(snapshotOf(d)).width, 1920);
+  assert.equal(before.width, 1080);
+  assert.deepEqual([resizeDesign(d, 10, 99999).width, d.height], [64, 8000], 'clamped');
+});
+
+test('27 templates: for every size, unique, their icons drawn', () => {
+  assert.ok(TEMPLATES.length >= 27, `${TEMPLATES.length}`);
+  const ids = new Set(TEMPLATES.map((t) => t.id));
+  assert.equal(ids.size, TEMPLATES.length, 'unique ids');
+  for (const size of ['produk', 'feed', 'story', 'banner', 'lebar', 'kartu']) assert.ok(TEMPLATES.some((t) => t.for.includes(size)), `a template for ${size}`);
+  for (const t of TEMPLATES) for (const e of t.make(newDesign()).els) if (e.sticker?.icon) assert.ok(e.sticker.icon.nodes?.length, `${t.id}: icon ${e.sticker.icon.name} has its drawing`);
 });

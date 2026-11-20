@@ -622,9 +622,12 @@ function drawSwatch(ctx, sw) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.75)';
-    ctx.shadowBlur = 8;
-    ctx.shadowOffsetY = 3;
+    // (a light name over a video gets a dark shadow; a dark name — on a design's light page — a soft light one)
+    const lc = String(sw.labelColor || '#ffffff').replace('#', '');
+    const dark = lc.length === 6 && [0, 2, 4].map((i) => parseInt(lc.slice(i, i + 2), 16)).reduce((a, v, i) => a + v * [0.299, 0.587, 0.114][i], 0) < 110;
+    ctx.shadowColor = dark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.75)';
+    ctx.shadowBlur = dark ? 6 : 8;
+    ctx.shadowOffsetY = dark ? 0 : 3;
     ctx.fillStyle = sw.labelColor || '#ffffff';
     ctx.fillText(sw.label, 0, cy + L.d / 2 + L.size * 0.78);
     ctx.restore();
@@ -669,6 +672,41 @@ export function shapePath(kind, w, h, radius = 0) {
   const x = -w / 2;
   const y = -h / 2;
   const pts = (list) => { list.forEach(([px, py], i) => (i ? p.lineTo(px, py) : p.moveTo(px, py))); p.closePath(); };
+  // (v1.13.1) points made on a unit circle, stretched to fill the box exactly (a frame fills its place)
+  const fit = (list) => {
+    const xs = list.map((q) => q[0]);
+    const ys = list.map((q) => q[1]);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    return list.map(([qx, qy]) => [x + ((qx - x0) / (x1 - x0 || 1)) * w, y + ((qy - y0) / (y1 - y0 || 1)) * h]);
+  };
+  const ring = (n, rot = -Math.PI / 2, inner = 0) => {
+    const m = inner ? n * 2 : n;
+    return Array.from({ length: m }, (_, i) => { const a = rot + (i * 2 * Math.PI) / m; const r = inner && i % 2 ? inner : 1; return [Math.cos(a) * r, Math.sin(a) * r]; });
+  };
+  // a smooth closed curve through points (Catmull-Rom as Bézier curves)
+  const smooth = (list) => {
+    const n = list.length;
+    p.moveTo(list[0][0], list[0][1]);
+    for (let i = 0; i < n; i++) {
+      const [a, b, c, d] = [list[(i - 1 + n) % n], list[i], list[(i + 1) % n], list[(i + 2) % n]];
+      p.bezierCurveTo(b[0] + (c[0] - a[0]) / 6, b[1] + (c[1] - a[1]) / 6, c[0] - (d[0] - b[0]) / 6, c[1] - (d[1] - b[1]) / 6, c[0], c[1]);
+    }
+    p.closePath();
+  };
+  // bumps around an ellipse (a scalloped circle, a cloud)
+  const bumps = (n, rIn, rOut) => {
+    const at = (a, r) => [Math.cos(a) * r * (w / 2), Math.sin(a) * r * (h / 2)];
+    const s0 = at(-Math.PI / 2, rIn);
+    p.moveTo(s0[0], s0[1]);
+    for (let i = 0; i < n; i++) {
+      const a0 = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+      const a1 = a0 + (2 * Math.PI) / n;
+      const c = at((a0 + a1) / 2, rOut);
+      const e = at(a1, rIn);
+      p.quadraticCurveTo(c[0], c[1], e[0], e[1]);
+    }
+    p.closePath();
+  };
   switch (kind) {
     case 'circle': p.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2); break;
     case 'triangle': pts([[0, y], [w / 2, h / 2], [x, h / 2]]); break;
@@ -727,11 +765,96 @@ export function shapePath(kind, w, h, radius = 0) {
       break;
     }
     case 'line': p.rect(x, y, w, h); break;
+    // ---- v1.13.1: more shapes (and photo frames of the same shapes)
+    case 'pentagon': pts(fit(ring(5))); break;
+    case 'hexagon': pts(fit(ring(6, 0))); break;
+    case 'octagon': pts(fit(ring(8, Math.PI / 8))); break;
+    case 'star4': pts(fit(ring(4, -Math.PI / 2, 0.4))); break;
+    case 'star6': pts(fit(ring(6, -Math.PI / 2, 0.58))); break;
+    case 'rtriangle': pts([[x, y], [w / 2, h / 2], [x, h / 2]]); break;
+    case 'parallelogram': { const k = w * 0.22; pts([[x + k, y], [w / 2, y], [w / 2 - k, h / 2], [x, h / 2]]); break; }
+    case 'trapezoid': { const k = w * 0.2; pts([[x + k, y], [w / 2 - k, y], [w / 2, h / 2], [x, h / 2]]); break; }
+    case 'cross': {
+      const t = Math.min(w, h) * 0.34;
+      pts([[-t / 2, y], [t / 2, y], [t / 2, -t / 2], [w / 2, -t / 2], [w / 2, t / 2], [t / 2, t / 2], [t / 2, h / 2], [-t / 2, h / 2], [-t / 2, t / 2], [x, t / 2], [x, -t / 2], [-t / 2, -t / 2]]);
+      break;
+    }
+    case 'ribbon': { const k = Math.min(h * 0.45, w * 0.15); pts([[x, y], [w / 2, y], [w / 2 - k, 0], [w / 2, h / 2], [x, h / 2], [x + k, 0]]); break; }
+    case 'chevron': { const k = Math.min(w * 0.4, h * 0.5); pts([[x, y], [w / 2 - k, y], [w / 2, 0], [w / 2 - k, h / 2], [x, h / 2], [x + k, 0]]); break; }
+    case 'darrow': {
+      const t = h * 0.36;
+      const hd = Math.min(w * 0.3, h * 1.1);
+      pts([[x, 0], [x + hd, y], [x + hd, -t / 2], [w / 2 - hd, -t / 2], [w / 2 - hd, y], [w / 2, 0], [w / 2 - hd, h / 2], [w / 2 - hd, t / 2], [x + hd, t / 2], [x + hd, h / 2]]);
+      break;
+    }
+    case 'arch': {
+      // a doorway: straight sides, a round top
+      const r = Math.min(w / 2, h);
+      p.moveTo(x, h / 2);
+      p.lineTo(x, y + r);
+      p.ellipse(0, y + r, w / 2, r, 0, Math.PI, Math.PI * 2);
+      p.lineTo(w / 2, h / 2);
+      p.closePath();
+      break;
+    }
+    case 'semicircle': p.moveTo(x, h / 2); p.ellipse(0, h / 2, w / 2, h, 0, Math.PI, Math.PI * 2); p.closePath(); break;
+    case 'drop': {
+      p.moveTo(0, y);
+      p.bezierCurveTo(w * 0.36, y + h * 0.3, w / 2, y + h * 0.48, w / 2, y + h * 0.66);
+      p.bezierCurveTo(w / 2, h / 2 - h * 0.02, w * 0.28, h / 2, 0, h / 2);
+      p.bezierCurveTo(-w * 0.28, h / 2, x, h / 2 - h * 0.02, x, y + h * 0.66);
+      p.bezierCurveTo(x, y + h * 0.48, -w * 0.36, y + h * 0.3, 0, y);
+      p.closePath();
+      break;
+    }
+    case 'shield': {
+      p.moveTo(x, y);
+      p.lineTo(w / 2, y);
+      p.lineTo(w / 2, y + h * 0.42);
+      p.bezierCurveTo(w / 2, y + h * 0.78, w * 0.2, h / 2 - h * 0.08, 0, h / 2);
+      p.bezierCurveTo(-w * 0.2, h / 2 - h * 0.08, x, y + h * 0.78, x, y + h * 0.42);
+      p.closePath();
+      break;
+    }
+    case 'blob': smooth(fit(ring(8, -Math.PI / 2).map(([qx, qy], i) => { const r = [1, 0.8, 0.95, 0.78, 0.97, 0.84, 1, 0.82][i]; return [qx * r, qy * r]; }))); break;
+    case 'scallop': bumps(14, 0.9, 1.08); break;
+    case 'cloud': bumps(9, 0.74, 1.24); break;
+    case 'bubble2': {
+      // a round speech bubble with a tail at the bottom left
+      const cy = -h * 0.06;
+      const ry = h * 0.44;
+      p.ellipse(0, cy, w / 2, ry, 0, 2.2, 2.2 + Math.PI * 2 - 0.5);
+      p.lineTo(x + w * 0.12, h / 2);
+      p.closePath();
+      break;
+    }
+    case 'ticket': {
+      // a coupon: round notches in the middle of both sides
+      const r = Math.min(h * 0.14, w * 0.1);
+      p.moveTo(x, y);
+      p.lineTo(w / 2, y);
+      p.lineTo(w / 2, -r);
+      p.arc(w / 2, 0, r, -Math.PI / 2, Math.PI / 2, true);
+      p.lineTo(w / 2, h / 2);
+      p.lineTo(x, h / 2);
+      p.lineTo(x, r);
+      p.arc(x, 0, r, Math.PI / 2, -Math.PI / 2, true);
+      p.closePath();
+      break;
+    }
     default: {
       // rect / rounded rect / pill
       const r = kind === 'pill' ? Math.min(w, h) / 2 : Math.max(0, Math.min(radius || 0, w / 2, h / 2));
       if (r > 0 && p.roundRect) p.roundRect(x, y, w, h, r);
-      else p.rect(x, y, w, h);
+      else if (r > 0) {
+        // (a browser without roundRect: the same corners with arcTo)
+        p.moveTo(x + r, y);
+        p.arcTo(w / 2, y, w / 2, h / 2, r);
+        p.arcTo(w / 2, h / 2, x, h / 2, r);
+        p.arcTo(x, h / 2, x, y, r);
+        p.arcTo(x, y, w / 2, y, r);
+        p.closePath();
+      } else p.rect(x, y, w, h);
     }
   }
   return p;
