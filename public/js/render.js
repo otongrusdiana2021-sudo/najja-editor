@@ -295,6 +295,9 @@ export function baseSize(clip, env, ctx) {
     }
     case 'solid':
       return { w: P.width, h: P.height };
+    case 'shape':
+      // (v1.13 Najja Desain) a shape: its own width and height
+      return { w: Math.max(1, clip.shape?.w || 200), h: Math.max(1, clip.shape?.h || 200) };
     case 'text': {
       const L = layoutText(ctx, clip.text);
       return { w: L.boxW, h: L.boxH };
@@ -308,6 +311,7 @@ export function baseSize(clip, env, ctx) {
         const L = swatchLayout(ctx, clip.sticker.swatch);
         return { w: L.w, h: L.h };
       }
+      if (clip.sticker?.icon) return { w: ICON_BOX, h: ICON_BOX };
       return { w: 220, h: 220 };
     }
     default:
@@ -321,14 +325,53 @@ export function layoutText(ctx, tx) {
   const font = `${tx.italic ? 'italic ' : ''}${weight} ${tx.size}px "${tx.font}", Poppins, sans-serif`;
   ctx.font = font;
   if ('letterSpacing' in ctx) ctx.letterSpacing = `${tx.letterSpacing || 0}px`;
-  const lines = String(tx.content ?? '').split('\n');
+  let lines = String(tx.upper ? String(tx.content ?? '').toUpperCase() : tx.content ?? '').split('\n');
+  // (v1.13 Najja Desain) a text box with a width: its words wrap inside it, the box keeps that width
+  const box = tx.width > 0 && !tx.curve ? tx.width : 0;
+  if (box) lines = lines.flatMap((l) => wrapLine(ctx, l, box));
   const widths = lines.map((l) => ctx.measureText(l || ' ').width);
   const lineH = tx.size * (tx.lineHeight || 1.2);
-  const w = Math.max(1, ...widths);
-  const h = Math.max(lineH, lines.length * lineH);
+  let w = box || Math.max(1, ...widths);
+  let h = Math.max(lineH, lines.length * lineH);
   const pad = tx.bg?.enabled ? tx.size * 0.38 * (tx.bg.padding ?? 1) : 0;
   const strokePad = tx.stroke?.enabled ? tx.stroke.width : 0;
-  return { font, lines, widths, lineH, w, h, pad, boxW: w + pad * 2 + strokePad * 2, boxH: h + pad * 2 + strokePad };
+  // (v1.13) a curved line (Lengkung): its letters on an arc; the box is the arc's
+  let arc = null;
+  if (tx.curve && lines.length === 1 && widths[0] > 1) {
+    arc = curveArc(widths[0], tx.curve, lineH);
+    w = arc.w;
+    h = arc.h;
+  }
+  return { font, lines, widths, lineH, w, h, pad, arc, boxW: w + pad * 2 + strokePad * 2, boxH: h + pad * 2 + strokePad };
+}
+/** One line broken into lines no wider than maxW (whole words; a longer word stays whole). */
+export function wrapLine(ctx, line, maxW) {
+  const words = String(line).split(/ +/);
+  const out = [];
+  let cur = '';
+  for (const word of words) {
+    const test = cur ? `${cur} ${word}` : word;
+    if (!cur || ctx.measureText(test).width <= maxW) cur = test;
+    else { out.push(cur); cur = word; }
+  }
+  out.push(cur);
+  return out;
+}
+/**
+ * The arc of a curved line: text width W bent by curve (-100..100; > 0 an arch ∩, < 0 a bowl ∪; ±100 nearly a
+ * circle). { r, theta, w, h, cy } — cy: the circle's centre from the box's centre.
+ */
+export function curveArc(W, curve, lineH) {
+  const c = Math.max(-100, Math.min(100, curve));
+  const theta = (Math.abs(c) / 100) * Math.PI * 1.9;
+  const r = W / theta;
+  const top = -r - lineH / 2;
+  const bottom = -r * Math.cos(theta / 2) + lineH / 2;
+  const h = bottom - top;
+  const w = (theta >= Math.PI ? 2 * r : 2 * r * Math.sin(theta / 2)) + lineH;
+  // (for the arch the centre is below the letters; for the bowl, mirrored)
+  const mid = (top + bottom) / 2;
+  return { r, theta, w, h, cy: c > 0 ? -mid : mid, sign: Math.sign(c) };
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -361,6 +404,72 @@ function paintText(ctx, tx, str, x, y, fill, s) {
   }
   ctx.fillStyle = fill;
   ctx.fillText(str, x, y);
+  ctx.restore();
+}
+
+const NONE = { enabled: false };
+const mixWhite = (hex, k) => { const [r, g, b] = hexToRgb(hex || '#ffffff'); return `rgb(${Math.round(r + (255 - r) * k)},${Math.round(g + (255 - g) * k)},${Math.round(b + (255 - b) * k)})`; };
+/**
+ * (v1.13 Najja Desain) A text effect (tx.effect = { type, color, color2, offset (0–100), intensity (0–100) }) as
+ * copies drawn under the text and the text's own look. null: no effect (the text as it is).
+ */
+export function textEffect(tx, s = 1) {
+  const e = tx.effect;
+  if (!e?.type || e.type === 'none') return null;
+  const size = tx.size || 96;
+  const off = ((e.offset ?? 50) / 100) * size * 0.12;
+  const k = (e.intensity ?? 50) / 100;
+  const col = e.color || '#000000';
+  switch (e.type) {
+    case 'lift':
+      return { tx: { ...tx, shadow: { enabled: true, color: '#000000', opacity: 0.15 + k * 0.45, blur: size * (0.15 + k * 0.35), x: 0, y: size * 0.06 } } };
+    case 'hollow':
+      return { tx: { ...tx, shadow: NONE, gradient: NONE, stroke: { enabled: true, color: tx.color || '#ffffff', width: Math.max(1, size * (0.012 + k * 0.03)) } }, fill: 'rgba(0,0,0,0)' };
+    case 'splice':
+      return {
+        tx: { ...tx, shadow: NONE, gradient: NONE, stroke: { enabled: true, color: tx.color || '#ffffff', width: Math.max(1, size * (0.012 + k * 0.03)) } },
+        fill: 'rgba(0,0,0,0)',
+        under: [{ tx: { ...tx, shadow: NONE, stroke: NONE }, fill: col, dx: off, dy: off, alpha: 1 }],
+      };
+    case 'echo':
+      return { tx, under: [3, 2, 1].map((n) => ({ tx: { ...tx, shadow: NONE, stroke: NONE }, fill: e.color || tx.color || '#ffffff', dx: off * n, dy: off * n, alpha: 0.18 + (3 - n) * 0.16 })) };
+    case 'glitch':
+      return {
+        tx: { ...tx, shadow: NONE },
+        under: [
+          { tx: { ...tx, shadow: NONE, stroke: NONE }, fill: e.color || '#00E5FF', dx: -off, dy: 0, alpha: 1 },
+          { tx: { ...tx, shadow: NONE, stroke: NONE }, fill: e.color2 || '#FF2DAA', dx: off, dy: 0, alpha: 1 },
+        ],
+      };
+    case 'neon': {
+      const glow = tx.color || '#47C9D7';
+      return { tx: { ...tx, gradient: NONE, stroke: NONE, shadow: { enabled: true, color: glow, opacity: 0.9, blur: size * (0.1 + k * 0.4), x: 0, y: 0 } }, fill: mixWhite(glow, 0.55) };
+    }
+    case 'shadow':
+      return { tx: { ...tx, shadow: { enabled: true, color: col, opacity: 0.25 + k * 0.6, blur: size * k * 0.25, x: off, y: off } } };
+    default:
+      return null;
+  }
+}
+/** A curved line, letter by letter on its arc (L.arc from layoutText); dx, dy: an offset copy. */
+function drawArcText(ctx, tx, line, L, fill, s, dx, dy) {
+  const a = L.arc;
+  const chars = [...line];
+  const ws = chars.map((ch) => ctx.measureText(ch).width);
+  const total = ws.reduce((x, y) => x + y, 0);
+  let acc = (L.widths[0] - total) / 2;
+  ctx.save();
+  ctx.translate(dx, dy + a.cy);
+  ctx.textAlign = 'center';
+  chars.forEach((ch, i) => {
+    const mid = acc + ws[i] / 2;
+    acc += ws[i];
+    const phi = mid / a.r - a.theta / 2;
+    ctx.save();
+    if (a.sign > 0) { ctx.translate(a.r * Math.sin(phi), -a.r * Math.cos(phi)); ctx.rotate(phi); } else { ctx.translate(a.r * Math.sin(phi), a.r * Math.cos(phi)); ctx.rotate(-phi); }
+    paintText(ctx, tx, ch, 0, 0, fill, s);
+    ctx.restore();
+  });
   ctx.restore();
 }
 
@@ -412,13 +521,24 @@ function drawText(ctx, clip, reveal, pxScale, spread = 0, local = 0) {
       return;
     }
   }
+  // (v1.13 Najja Desain) effects: copies under the text (echo, splice, glitch) and a changed look (hollow, neon, lift)
+  const fx = textEffect(tx, s);
+  const look = fx ? fx.tx : tx;
+  const mainFill = fx?.fill ?? fill;
+  if (L.arc) {
+    const line = budget === Infinity ? L.lines[0] : L.lines[0].slice(0, budget);
+    for (const u of fx?.under || []) { ctx.save(); ctx.globalAlpha *= u.alpha; drawArcText(ctx, u.tx, line, L, u.fill, s, u.dx, u.dy); ctx.restore(); }
+    drawArcText(ctx, look, line, L, mainFill, s, 0, 0);
+    return;
+  }
   L.lines.forEach((line, i) => {
     if (budget <= 0) return;
     const shown = budget === Infinity ? line : line.slice(0, budget);
     if (budget !== Infinity) budget -= line.length;
     const y = -L.h / 2 + i * L.lineH + L.lineH / 2;
     ctx.save();
-    paintText(ctx, tx, shown, x, y, fill, s);
+    for (const u of fx?.under || []) { ctx.save(); ctx.globalAlpha *= u.alpha; paintText(ctx, u.tx, shown, x + u.dx, y + u.dy, u.fill, s); ctx.restore(); }
+    paintText(ctx, look, shown, x, y, mainFill, s);
     if (tx.strike && shown) {
       // (v1.10) struck-through text, e.g. the old price on a price label
       const w = ctx.measureText(shown).width;
@@ -510,8 +630,187 @@ function drawSwatch(ctx, sw) {
     ctx.restore();
   }
 }
+// ---- (v1.13 Najja Desain) shapes, icons, photo frames --------------------------------------------
+const ICON_BOX = 200;
+/** An icon (Lucide nodes, a 24×24 drawing of strokes) in a 200 px box. */
+function drawIcon(ctx, ic) {
+  const k = ICON_BOX / 24;
+  ctx.save();
+  ctx.translate(-ICON_BOX / 2, -ICON_BOX / 2);
+  ctx.scale(k, k);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = ic.stroke || 2;
+  ctx.strokeStyle = ic.color || '#111111';
+  ctx.fillStyle = ic.fill || 'rgba(0,0,0,0)';
+  for (const [tag, a] of ic.nodes || []) {
+    let p = null;
+    if (tag === 'path') p = new Path2D(a.d);
+    else {
+      p = new Path2D();
+      if (tag === 'circle') p.arc(+a.cx, +a.cy, +a.r, 0, Math.PI * 2);
+      else if (tag === 'ellipse') p.ellipse(+a.cx, +a.cy, +a.rx, +a.ry, 0, 0, Math.PI * 2);
+      else if (tag === 'rect') { if (p.roundRect) p.roundRect(+a.x || 0, +a.y || 0, +a.width, +a.height, +(a.rx || 0)); else p.rect(+a.x || 0, +a.y || 0, +a.width, +a.height); }
+      else if (tag === 'line') { p.moveTo(+a.x1, +a.y1); p.lineTo(+a.x2, +a.y2); }
+      else if (tag === 'polyline' || tag === 'polygon') {
+        const pts = String(a.points).trim().split(/[\s,]+/).map(Number);
+        for (let i = 0; i + 1 < pts.length; i += 2) (i ? p.lineTo(pts[i], pts[i + 1]) : p.moveTo(pts[i], pts[i + 1]));
+        if (tag === 'polygon') p.closePath();
+      } else continue;
+    }
+    if (ic.fill) ctx.fill(p);
+    ctx.stroke(p);
+  }
+  ctx.restore();
+}
+/** The outline of a shape kind in a w × h box centred on 0,0 (also a photo's frame). */
+export function shapePath(kind, w, h, radius = 0) {
+  const p = new Path2D();
+  const x = -w / 2;
+  const y = -h / 2;
+  const pts = (list) => { list.forEach(([px, py], i) => (i ? p.lineTo(px, py) : p.moveTo(px, py))); p.closePath(); };
+  switch (kind) {
+    case 'circle': p.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2); break;
+    case 'triangle': pts([[0, y], [w / 2, h / 2], [x, h / 2]]); break;
+    case 'diamond': pts([[0, y], [w / 2, 0], [0, h / 2], [x, 0]]); break;
+    case 'star': case 'burst': {
+      const n = kind === 'star' ? 5 : 16;
+      const inner = kind === 'star' ? 0.45 : 0.8;
+      const list = [];
+      for (let i = 0; i < n * 2; i++) {
+        const a = (i * Math.PI) / n - Math.PI / 2;
+        const rr = i % 2 ? inner : 1;
+        list.push([Math.cos(a) * (w / 2) * rr, Math.sin(a) * (h / 2) * rr]);
+      }
+      pts(list);
+      break;
+    }
+    case 'heart': {
+      p.moveTo(0, h * 0.42);
+      p.bezierCurveTo(-w * 0.62, -h * 0.02, -w * 0.38, -h * 0.62, 0, -h * 0.22);
+      p.bezierCurveTo(w * 0.38, -h * 0.62, w * 0.62, -h * 0.02, 0, h * 0.42);
+      p.closePath();
+      break;
+    }
+    case 'tag': {
+      // a price tag: pointed on the left, rounded on the right
+      const n = Math.min(h / 2, w * 0.25);
+      const r = Math.min(radius || h * 0.18, h / 2);
+      p.moveTo(x, 0);
+      p.lineTo(x + n, y);
+      p.arcTo(w / 2, y, w / 2, h / 2, r);
+      p.arcTo(w / 2, h / 2, x, h / 2, r);
+      p.lineTo(x + n, h / 2);
+      p.closePath();
+      break;
+    }
+    case 'bubble': {
+      // a speech bubble: a rounded box with a tail at the bottom left
+      const bh = h * 0.8;
+      const r = Math.min(radius || bh * 0.25, bh / 2, w / 2);
+      const by = y + bh;
+      p.moveTo(x + r, y);
+      p.arcTo(w / 2, y, w / 2, by, r);
+      p.arcTo(w / 2, by, x, by, r);
+      p.lineTo(x + w * 0.32, by);
+      p.lineTo(x + w * 0.16, h / 2);
+      p.lineTo(x + w * 0.2, by);
+      p.arcTo(x, by, x, y, r);
+      p.arcTo(x, y, w / 2, y, r);
+      p.closePath();
+      break;
+    }
+    case 'arrow': {
+      const t = h * 0.36;
+      const head = Math.min(w * 0.4, h * 1.1);
+      pts([[x, -t / 2], [w / 2 - head, -t / 2], [w / 2 - head, y], [w / 2, 0], [w / 2 - head, h / 2], [w / 2 - head, t / 2], [x, t / 2]]);
+      break;
+    }
+    case 'line': p.rect(x, y, w, h); break;
+    default: {
+      // rect / rounded rect / pill
+      const r = kind === 'pill' ? Math.min(w, h) / 2 : Math.max(0, Math.min(radius || 0, w / 2, h / 2));
+      if (r > 0 && p.roundRect) p.roundRect(x, y, w, h, r);
+      else p.rect(x, y, w, h);
+    }
+  }
+  return p;
+}
+function shapeFill(ctx, sh) {
+  if (sh.fill2) {
+    const a = ((sh.angle ?? 135) * Math.PI) / 180;
+    const dx = (Math.cos(a) * sh.w) / 2;
+    const dy = (Math.sin(a) * sh.h) / 2;
+    const g = ctx.createLinearGradient(-dx, -dy, dx, dy);
+    g.addColorStop(0, sh.fill || '#47C9D7');
+    g.addColorStop(1, sh.fill2);
+    return g;
+  }
+  return sh.fill ?? '#47C9D7';
+}
+/** A shape (clip.shape: kind, w, h, fill, fill2, angle, radius, stroke, shadow); a photo slot of a template too. */
+function drawShape(ctx, clip, s) {
+  const sh = clip.shape || {};
+  const w = Math.max(1, sh.w || 200);
+  const h = Math.max(1, sh.h || 200);
+  const path = shapePath(sh.kind || 'rect', w, h, sh.radius || 0);
+  ctx.save();
+  if (sh.shadow?.enabled) {
+    ctx.shadowColor = rgba(sh.shadow.color || '#000000', sh.shadow.opacity ?? 0.35);
+    ctx.shadowBlur = (sh.shadow.blur ?? 20) * s;
+    ctx.shadowOffsetX = (sh.shadow.x ?? 0) * s;
+    ctx.shadowOffsetY = (sh.shadow.y ?? 8) * s;
+  }
+  if (clip.slot) {
+    // an empty photo slot: light, with a picture sign, until a photo is put in
+    ctx.fillStyle = sh.fill && sh.fill !== 'none' ? sh.fill : '#E9EDF1';
+    ctx.fill(path);
+    ctx.shadowColor = 'transparent';
+    ctx.save();
+    ctx.clip(path);
+    const m = Math.min(w, h);
+    ctx.strokeStyle = 'rgba(70,90,110,0.55)';
+    ctx.lineWidth = Math.max(2, m * 0.012);
+    ctx.lineJoin = 'round';
+    const iw = m * 0.3;
+    const ih = iw * 0.72;
+    ctx.strokeRect(-iw / 2, -ih / 2 - m * 0.05, iw, ih);
+    ctx.beginPath();
+    ctx.moveTo(-iw / 2, ih * 0.25 - m * 0.05);
+    ctx.lineTo(-iw * 0.12, -ih * 0.1 - m * 0.05);
+    ctx.lineTo(iw * 0.12, ih * 0.15 - m * 0.05);
+    ctx.lineTo(iw * 0.28, 0 - m * 0.05);
+    ctx.lineTo(iw / 2, ih * 0.2 - m * 0.05);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(iw * 0.22, -ih * 0.22 - m * 0.05, m * 0.03, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.font = `600 ${Math.max(10, m * 0.055)}px Poppins, sans-serif`;
+    ctx.fillStyle = 'rgba(70,90,110,0.85)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(clip.slot.label || 'Foto produk', 0, ih / 2 + m * 0.03);
+    ctx.restore();
+  } else if (sh.fill !== 'none') {
+    ctx.fillStyle = shapeFill(ctx, { ...sh, w, h });
+    ctx.fill(path);
+    ctx.shadowColor = 'transparent';
+  }
+  if (sh.stroke?.enabled && sh.stroke.width > 0) {
+    ctx.save();
+    ctx.clip(path);
+    ctx.lineWidth = sh.stroke.width * 2; // (inside the shape: the outer half is clipped)
+    ctx.strokeStyle = sh.stroke.color || '#111111';
+    if (sh.stroke.dash) ctx.setLineDash([sh.stroke.width * 3, sh.stroke.width * 2]);
+    ctx.stroke(path);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 function drawSticker(ctx, clip) {
   const st = clip.sticker || {};
+  if (st.icon) { drawIcon(ctx, st.icon); return; }
   if (st.swatch) { drawSwatch(ctx, st.swatch); return; }
   if (st.badge) {
     const b = st.badge;
@@ -634,6 +933,26 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
   const pxPerUnit = env.s * Math.abs(sc);
   const blurUnits = an.blur + (extra.blur || 0);
 
+  // (v1.13 Najja Desain) a photo in a frame (circle, rounded, star…) and a shadow under a cut-out product
+  if (src && (clip.mask?.kind && clip.mask.kind !== 'none')) {
+    const fp = shapePath(clip.mask.kind, size.w, size.h, (clip.mask.radius || 0) * Math.min(size.w, size.h) / 2);
+    if (clip.dropShadow?.enabled) {
+      ctx.save();
+      ctx.shadowColor = rgba(clip.dropShadow.color || '#000000', clip.dropShadow.opacity ?? 0.35);
+      ctx.shadowBlur = (clip.dropShadow.blur ?? 30) * pxPerUnit;
+      ctx.shadowOffsetX = (clip.dropShadow.x ?? 0) * pxPerUnit;
+      ctx.shadowOffsetY = (clip.dropShadow.y ?? 14) * pxPerUnit;
+      ctx.fillStyle = '#000';
+      ctx.fill(fp);
+      ctx.restore();
+    }
+    ctx.clip(fp);
+  } else if (src && clip.dropShadow?.enabled) {
+    ctx.shadowColor = rgba(clip.dropShadow.color || '#000000', clip.dropShadow.opacity ?? 0.35);
+    ctx.shadowBlur = (clip.dropShadow.blur ?? 30) * pxPerUnit;
+    ctx.shadowOffsetX = (clip.dropShadow.x ?? 0) * pxPerUnit;
+    ctx.shadowOffsetY = (clip.dropShadow.y ?? 14) * pxPerUnit;
+  }
   if (src) {
     const cr = clip.crop || { l: 0, t: 0, r: 0, b: 0 };
     const sx = src.w * cr.l;
@@ -714,6 +1033,8 @@ export function drawVisualClip(ctx, clip, t, env, extra = {}) {
       drawText(ctx, clip, an.reveal, pxPerUnit, an.spread, local);
     } else if (clip.type === 'sticker') {
       drawSticker(ctx, clip);
+    } else if (clip.type === 'shape') {
+      drawShape(ctx, clip, pxPerUnit);
     }
     ctx.filter = 'none';
   }

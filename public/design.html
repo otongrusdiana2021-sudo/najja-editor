@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="id" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Najja Desain</title>
+  <meta name="description" content="Najja Desain — editor desain untuk foto produk marketplace, banner, story, dan kartu.">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Najja">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,700&family=Inter:wght@400;500;600;700;800;900&family=Roboto:ital,wght@0,400;0,500;0,700;0,900;1,400;1,700&family=Raleway:wght@300;400;500&family=Montserrat:ital,wght@0,400;0,700;0,900;1,700&family=Bebas+Neue&family=Anton&family=Oswald:wght@400;700&family=Archivo+Black&family=Righteous&family=Space+Grotesk:wght@400;700&family=Playfair+Display:ital,wght@0,400;0,700;1,700&family=Instrument+Serif:ital@0;1&family=DM+Serif+Display:ital@0;1&family=Pacifico&family=Lobster&family=Caveat:wght@400;700&family=Dancing+Script:wght@700&family=Permanent+Marker&family=Satisfy&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Bangers&family=Patrick+Hand&display=swap">
+  <link rel="stylesheet" href="css/design.css">
+</head>
+<body class="ds">
+  <header class="ds-top">
+    <button class="ds-ib" data-cmd="home" aria-label="Kembali ke Beranda"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <span class="ds-logo" aria-hidden="true">N</span>
+    <input class="ds-name" aria-label="Nama desain" maxlength="80" spellcheck="false">
+    <span class="ds-save" aria-live="polite"></span>
+    <span class="ds-grow"></span>
+    <button class="ds-ib" data-cmd="undo" aria-label="Urungkan" title="Urungkan (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg></button>
+    <button class="ds-ib" data-cmd="redo" aria-label="Ulangi" title="Ulangi (Ctrl+Shift+Z)"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/></svg></button>
+    <span class="ds-size"></span>
+    <button class="ds-primary" data-cmd="export"><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg><span>Ekspor</span></button>
+  </header>
+  <div class="ds-main">
+    <nav class="ds-rail" aria-label="Panel"></nav>
+    <aside class="ds-panel" aria-label="Isi panel" hidden></aside>
+    <section class="ds-work">
+      <div class="ds-ctx" role="toolbar" aria-label="Alat elemen"></div>
+      <div class="ds-stage" tabindex="-1">
+        <div class="ds-scroller"><div class="ds-page"><canvas class="ds-canvas"></canvas><div class="ds-ov"></div></div></div>
+      </div>
+      <footer class="ds-foot">
+        <div class="ds-pages" aria-label="Halaman"></div>
+        <div class="ds-zoom"><button class="ds-ib sm" data-cmd="zoomOut" aria-label="Perkecil">−</button><button class="ds-zl" data-cmd="zoomFit" title="Sesuaikan layar">100%</button><button class="ds-ib sm" data-cmd="zoomIn" aria-label="Perbesar">+</button></div>
+      </footer>
+    </section>
+  </div>
+  <div class="ds-pop" hidden></div>
+  <div class="ds-toasts" aria-live="polite"></div>
+  <input type="file" class="ds-file" accept="image/*" multiple hidden>
+  <div class="ds-boot"><span>Memuat desain…</span></div>
+  <script type="module" src="js/design/app.js"></script>
+</body>
+</html>

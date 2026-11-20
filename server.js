@@ -1108,6 +1108,10 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       try { base = await vendor.ensure(v.name); } catch (err) {
         return sendJson(res, 503, { error: `Server belum bisa mengunduh ${v.name}: ${err.message}` });
       }
+      const gz = path.join(base, `${v.file}.gz`);
+      if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || '')) && fs.existsSync(gz)) {
+        return sendFile(req, res, gz, { 'Content-Type': MIME[path.extname(v.file).toLowerCase()] || 'application/octet-stream', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding', 'Cache-Control': 'public, max-age=31536000, immutable' });
+      }
       return sendFile(req, res, path.join(base, v.file), { 'Cache-Control': 'public, max-age=31536000, immutable' });
     }
     if (p.startsWith('/media-cache/')) {
@@ -1126,7 +1130,8 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       return res.end();
     }
     // Static files
-    let rel = p === '/' ? '/index.html' : p;
+    // (v1.13) Najja Desain: its own light page (the video editor's code is not loaded there)
+    let rel = p === '/' ? '/index.html' : p === '/design' || p === '/design/' ? '/design.html' : p;
     const filePath = path.normalize(path.join(PUBLIC_DIR, rel));
     if (!filePath.startsWith(PUBLIC_DIR)) {
       res.writeHead(403);

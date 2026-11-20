@@ -6,6 +6,7 @@ import { prefs } from './db.js';
 import { icon, MARK_PATHS } from './icons.js';
 import { escapeHtml, uid, clone } from './util.js';
 import { toast, contextMenu, confirmDialog, modal } from './ui.js';
+import { SIZES } from './design/model.js';
 
 const SORTS = {
   edited: ['Terakhir diubah', (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)],
@@ -82,6 +83,7 @@ export class Home {
     this.loaded = false;
     this.query = '';
     this.sort = SORTS[prefs.get('homeSort')] ? prefs.get('homeSort') : 'edited';
+    this.kind = 'all';
     this.selecting = false;
     this.selected = new Set();
     this.render();
@@ -123,8 +125,15 @@ export class Home {
         </div>
         <div class="hm-art">${ART}</div>
         <div class="hm-tag"><span>Lebih cepat. Lebih rapi.</span><b>Video produk yang menjual</b></div>
-        <button class="hm-new" data-new><i>${icon('plus', 26)}</i><b>Proyek baru</b></button>
+        <div class="hm-starts">
+          <button class="hm-new" data-new><i>${icon('video', 26)}</i><span><b>Edit Video</b><small>Video produk, reels, iklan</small></span></button>
+          <button class="hm-new hm-design" data-design><i>${icon('palette', 26)}</i><span><b>Mulai Desain</b><small>Foto produk, banner, story</small></span></button>
+        </div>
       </header>
+      <section class="hm-sizes" aria-label="Mulai desain cepat">
+        <div class="hm-ph"><h2>Desain cepat</h2></div>
+        <div class="hm-sizerow">${SIZES.map((z) => `<button class="hm-size" data-dsize="${z.id}"><i style="aspect-ratio:${z.w}/${z.h}"></i><b>${escapeHtml(z.name)}</b><small>${escapeHtml(z.sub)}</small></button>`).join('')}<button class="hm-size" data-design><i class="custom">${icon('plus', 20)}</i><b>Ukuran khusus</b><small>lebar × tinggi</small></button></div>
+      </section>
       <section class="hm-tools" aria-label="Alat">
         <button class="hm-tool" data-tool="cutout">${icon('bgRemove', 30)}<b>Hapus latar belakang</b></button>
         <button class="hm-tool" data-tool="upscale">${icon('upscale', 30)}<b>Upscale gambar</b></button>
@@ -133,6 +142,7 @@ export class Home {
         <div class="hm-ph">
           <h2>Proyek</h2>
           <div class="hm-actions">
+            <div class="hm-kinds" role="tablist" aria-label="Jenis proyek">${KINDS.map(([k, label]) => `<button class="hm-kind ${k === this.kind ? 'on' : ''}" data-kind="${k}">${label}</button>`).join('')}</div>
             <button class="hm-pill" data-sort>${icon('menu', 15)}<span class="hm-sort-l">${SORTS[this.sort][0]}</span></button>
             <button class="hm-pill" data-select>${icon('check', 15)}<span>Pilih</span></button>
           </div>
@@ -151,7 +161,7 @@ export class Home {
   /** Projects matching the search, in the chosen order. */
   shown() {
     const q = this.query;
-    return this.list.filter((p) => !q || String(p.name || '').toLowerCase().includes(q)).sort(SORTS[this.sort][1]);
+    return this.list.filter((p) => (!q || String(p.name || '').toLowerCase().includes(q)) && (this.kind === 'all' || (p.kind === 'design' ? 'design' : 'video') === this.kind)).sort(SORTS[this.sort][1]);
   }
 
   renderGrid() {
@@ -164,18 +174,22 @@ export class Home {
     const items = this.shown();
     const cur = this.deps.currentId();
     if (!items.length) {
-      grid.innerHTML = `<div class="hm-empty">${this.query ? `Tidak ada proyek bernama “${escapeHtml(this.query)}”.` : 'Belum ada proyek. Ketuk <b>Proyek baru</b> untuk mulai.'}</div>`;
+      grid.innerHTML = `<div class="hm-empty">${this.query ? `Tidak ada proyek bernama “${escapeHtml(this.query)}”.` : this.kind === 'design' ? 'Belum ada desain. Ketuk <b>Mulai Desain</b> untuk mulai.' : 'Belum ada proyek. Ketuk <b>Edit Video</b> atau <b>Mulai Desain</b> untuk mulai.'}</div>`;
       return;
     }
     grid.innerHTML = items.map((p) => {
       const size = cardSize(p.size);
       const sel = this.selected.has(p.id);
-      return `<div class="hm-card ${p.id === cur ? 'current' : ''} ${sel ? 'sel' : ''}" data-id="${escapeHtml(p.id)}">
+      const design = p.kind === 'design';
+      const pages = Array.isArray(p.pages) ? p.pages.length : Number(p.pages) || 1; // (a full record in browser mode)
+      const meta = design ? `${p.width && p.height ? `${p.width}×${p.height}<i>|</i>` : ''}${pages} hal.` : `${size ? `${size}<i>|</i>` : ''}${cardDur(p.duration)}`;
+      return `<div class="hm-card ${p.id === cur ? 'current' : ''} ${sel ? 'sel' : ''} ${design ? 'design' : ''}" data-id="${escapeHtml(p.id)}">
         <button class="hm-thumb" data-open="${escapeHtml(p.id)}" aria-label="Buka ${escapeHtml(p.name || 'proyek')}">
-          ${p.thumb ? `<img src="${p.thumb}" alt="" loading="lazy" draggable="false">` : `<span class="hm-ph-ic">${icon('video', 28)}</span>`}
+          ${p.thumb ? `<img src="${p.thumb}" alt="" loading="lazy" draggable="false">` : `<span class="hm-ph-ic">${icon(design ? 'palette' : 'video', 28)}</span>`}
+          ${design ? '<span class="hm-badge">Desain</span>' : ''}
           <span class="hm-check" aria-hidden="true">${icon('check', 16)}</span>
         </button>
-        <div class="hm-meta"><span>${size ? `${size}<i>|</i>` : ''}${cardDur(p.duration)}</span><button class="hm-more" data-more="${escapeHtml(p.id)}" aria-label="Pilihan proyek">${icon('dots', 18)}</button></div>
+        <div class="hm-meta"><span>${meta}</span><button class="hm-more" data-more="${escapeHtml(p.id)}" aria-label="Pilihan proyek">${icon('dots', 18)}</button></div>
         <div class="hm-name" title="${escapeHtml(p.name || '')}">${escapeHtml(p.name || 'Tanpa judul')}</div>
       </div>`;
     }).join('');
@@ -185,6 +199,13 @@ export class Home {
     const t = (sel) => e.target.closest(sel);
     let b;
     if (t('[data-new]')) return this.deps.create();
+    if ((b = t('[data-dsize]'))) return startDesign({ size: b.dataset.dsize });
+    if (t('[data-design]')) return designDialog();
+    if ((b = t('[data-kind]'))) {
+      this.kind = b.dataset.kind;
+      this.el.querySelectorAll('[data-kind]').forEach((x) => x.classList.toggle('on', x === b));
+      return this.renderGrid();
+    }
     if ((b = t('[data-tool]'))) return this.deps.tools.open(b.dataset.tool);
     if (t('[data-search]')) return this.toggleSearch();
     if ((b = t('[data-sort]'))) return this.sortMenu(b);
@@ -201,9 +222,16 @@ export class Home {
         return;
       }
       b.closest('.hm-card').classList.add('opening');
-      await this.deps.open(id);
+      await this.openItem(id);
     }
     return undefined;
+  }
+
+ /** Open a project: a video in the editor, a design in Najja Desain (its own page). */
+  openItem(id) {
+    const p = this.list.find((x) => x.id === id);
+    if (p?.kind === 'design') { location.href = `/design?id=${encodeURIComponent(id)}`; return undefined; }
+    return this.deps.open(id);
   }
 
   toggleSearch(on = !this.el.querySelector('.hm-search').classList.contains('on')) {
@@ -240,7 +268,7 @@ export class Home {
     if (!p) return;
     const r = btn.getBoundingClientRect();
     contextMenu(Math.max(8, r.right - 220), r.bottom + 4, [
-      { label: 'Buka', icon: 'edit', run: () => this.deps.open(id) },
+      { label: 'Buka', icon: 'edit', run: () => this.openItem(id) },
       { label: 'Ganti nama', icon: 'textAdd', run: () => this.rename(p) },
       { label: 'Duplikat', icon: 'copy', run: () => this.duplicate(p) },
       'sep',
@@ -302,6 +330,37 @@ export class Home {
     this.setSelecting(false);
     await this.refresh();
   }
+}
+
+const KINDS = [['all', 'Semua'], ['video', 'Video'], ['design', 'Desain']];
+
+/** Najja Desain starts on its own page (light: the video editor's code is not loaded there). */
+export function startDesign({ size = null, w = 0, h = 0 } = {}) {
+  const q = new URLSearchParams({ new: size || 'custom' });
+  if (w && h) { q.set('w', String(w)); q.set('h', String(h)); }
+  location.href = `/design?${q}`;
+}
+/** "Mulai Desain": a size to start from (marketplace first) or a size of one's own. */
+export function designDialog() {
+  const m = modal({
+    title: 'Mulai desain',
+    wide: true,
+    body: `<div class="dz-sizes">${SIZES.map((z) => `<button class="dz-size" data-z="${z.id}"><i style="aspect-ratio:${z.w}/${z.h}"></i><b>${escapeHtml(z.name)}</b><small>${escapeHtml(z.sub)} · ${z.w} × ${z.h} px</small></button>`).join('')}</div>
+      <div class="ctl"><label>Ukuran khusus (px)</label><div class="dz-custom"><input type="number" class="dz-w" min="64" max="8000" value="1080" inputmode="numeric" aria-label="Lebar"><span>×</span><input type="number" class="dz-h" min="64" max="8000" value="1080" inputmode="numeric" aria-label="Tinggi"><button class="btn btn-primary" data-custom>Buat</button></div></div>`,
+    footer: '<button class="btn" data-x>Batal</button>',
+  });
+  m.el.querySelector('[data-x]').onclick = () => m.close();
+  m.el.addEventListener('click', (e) => {
+    const z = e.target.closest('[data-z]');
+    if (z) { m.close(); startDesign({ size: z.dataset.z }); }
+    if (e.target.closest('[data-custom]')) {
+      const w = Math.round(Number(m.el.querySelector('.dz-w').value));
+      const h = Math.round(Number(m.el.querySelector('.dz-h').value));
+      if (!(w >= 64 && w <= 8000 && h >= 64 && h <= 8000)) { toast('Ukuran 64–8000 px', { type: 'error' }); return; }
+      m.close();
+      startDesign({ w, h });
+    }
+  });
 }
 
 /** A small "name" dialog. Resolves the trimmed name, or null when cancelled. */

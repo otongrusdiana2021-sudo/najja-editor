@@ -606,6 +606,8 @@ async function openProject(id) {
   await store.save();
   const rec = await storage.getProject(id);
   if (!rec) return toast('Proyek tidak ditemukan', { type: 'error' });
+  // (v1.13) a design opens in Najja Desain, its own light page
+  if (rec.kind === 'design') { location.href = `/design?id=${encodeURIComponent(id)}`; return undefined; }
   const missing = await loadProject(rec);
   engine.seek(0);
   timeline.fit();
@@ -693,7 +695,7 @@ function chooseProject(title) {
       resolve(b.dataset.pick);
     });
     storage.listProjects().catch(() => []).then((all) => {
-      const list = all.sort((a, b) => b.updatedAt - a.updatedAt);
+      const list = all.filter((p) => p.kind !== 'design').sort((a, b) => b.updatedAt - a.updatedAt);
       m.el.querySelector('.proj-grid').innerHTML = `<button class="proj-card new" data-pick="new">${icon('plus', 26)}<b>Proyek baru</b></button>
         ${list.map((p) => `<button class="proj-card" data-pick="${escapeHtml(p.id)}">
           <div class="pc-thumb" style="aspect-ratio:${p.width}/${p.height}">${p.thumb ? `<img src="${p.thumb}" alt="">` : icon('video', 22)}</div>
@@ -910,6 +912,7 @@ bridge.start({
   let loaded = false;
   if (want) {
     const rec = await storage.getProject(want);
+    if (rec?.kind === 'design') { location.replace(`/design?id=${encodeURIComponent(want)}`); return; }
     if (rec) {
       await loadProject(rec);
       loaded = true;

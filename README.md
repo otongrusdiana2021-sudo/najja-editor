@@ -6,6 +6,17 @@ Editor video **berbasis web** bergaya CapCut, dengan **server MCP bawaan** sehin
 
 ## Fitur
 
+**Baru di v1.13.0: Najja Desain**, editor desain untuk konten marketplace di dalam Najja, dengan tata letak ala aplikasi desain tablet. Beranda sekarang punya dua pilihan besar: **Edit Video** dan **Mulai Desain**, plus ukuran cepat (Foto Produk 1:1, Feed 4:5, Story 9:16, Banner 3:1, Banner 16:9, Kartu terima kasih, atau ukuran sendiri). Yang bisa dilakukan:
+- **Impor foto** dari perangkat (pilih banyak, tarik-lepas, tempel). Foto disimpan di server Najja.
+- **Teks**: ketik langsung di halaman, 25 font, warna/gradasi, tebal/miring, rata, huruf besar, spasi, **10 efek** (Bayangan, Angkat, Berongga, Sambung, Garis tepi, Gema, Glitch, Neon, Latar), dan **teks lengkung**.
+- **Elemen**: bentuk, **bingkai foto** (isi dengan foto produk), label marketplace (Gratis Ongkir, Best Seller, COD…), bulatan warna varian, **±1.600 ikon open source Lucide** (cari dalam bahasa Indonesia), dan emoji.
+- **Foto**: Ganti, **Hapus latar** (AI server), 24 filter, Sesuaikan, Potong, Bingkai (lingkaran, sudut bulat, hati…), Bayangan produk, Balik.
+- **10 template marketplace** (Diskon, Koleksi baru, Best seller, Fitur produk, Varian warna, Bundling, Flash sale, Story, Banner, Kartu terima kasih) dan 8 kombinasi teks.
+- Geser, ubah ukuran, putar dengan jari, **garis bantu** saat menempel, cubit untuk zoom, multi-halaman, lapisan, ratakan/sebarkan, kunci, urungkan/ulangi.
+- **Ekspor** PNG, JPG, atau PNG transparan, 1× atau 2×; semua halaman jadi satu ZIP; tombol **Bagikan** di iPad untuk menyimpan ke Foto.
+
+Halamannya ringan: kode editor video tidak ikut dimuat, siap dalam ±0,3 detik, dan menggeser elemen hanya ±0,1 ms per frame. Lihat [docs/NAJJA-DESAIN.md](docs/NAJJA-DESAIN.md).
+
 **Baru di v1.12.7:** **Pratinjau tidak lag lagi di edit cut to cut.** Potongan-potongan pendek dari satu video sekarang diputar bergiliran oleh 3 elemen video. Potongan berikutnya sudah siap di gambar pertamanya sebelum waktunya tayang. Sebelumnya setiap potongan punya elemen sendiri, sehingga 30 potongan berarti 30 video dimuat sekaligus dan iPad macet di setiap potongan. Lihat [docs/ANALISA-LAG-IPAD.md](docs/ANALISA-LAG-IPAD.md#17-edit-lag-lagi-pas-cut-to-cut-v1127).
 
 **Baru di v1.12.6:** **Momen dari ucapan** di Style Konsep, seperti kerja editor. Saat talent menyebut warna, muncul **bulatan warna** satu per satu. Saat bilang "tinggal 2 hari", muncul **⏰ bergetar** dengan **SFX timer berdetak**. Saat bilang "bisa buat baju basah, minuman", muncul **chip berisi emoji**. Klaim seperti anti bocor, best seller, gratis ongkir, dan diskon N% jadi badge, dan "oops"/"wow" jadi kata besar dengan SFX kartun. Semuanya otomatis dari transkrip, atau dipilih Claude lewat `plan.moments`. Lihat [docs/STYLE-KONSEP.md](docs/STYLE-KONSEP.md).
@@ -259,11 +270,15 @@ public/
   js/media.js      Impor instan, pilihan sumber (pratinjau ringan / kualitas ekspor), salinan di perangkat, audio sintetis
   js/devicecache.js  Salinan video permanen di perangkat (OPFS, 5 GB, LRU, bisa dilanjutkan)
   js/fastexport.js   Ekspor MP4 cepat (WebCodecs: demux, decode, encode, mux)
+  design.html, css/design.css   Najja Desain (v1.13): halaman sendiri yang ringan
+  js/design/       model.js (dokumen desain), templates.js, stage.js (kanvas + seleksi), ui.js (panel, toolbar),
+                   assets.js (foto, ikon Lucide), draw.js, zip.js, app.js (simpan, undo, ekspor)
 lib/               Penyimpanan server, akun login, salinan pratinjau 720p / H.264 1080p / thumbnail / waveform (ffmpeg)
 lib/ai.js          Permintaan alat AI (job "ai", kepemilikan, pembersihan) → layanan AI
 ai/                Layanan AI (Python + onnxruntime): hapus latar, upscale; models.json = model terkunci + sha256
 Dockerfile, Dockerfile.ai, docker-compose.yml, deploy/   Deploy VPS (Docker + Caddy, atau systemd); container "ai" terpisah
 docs/AI-TOOLS.md          Beranda dan alat AI: cara kerja, memori, deploy, lisensi model
+docs/NAJJA-DESAIN.md      Najja Desain: fitur, cara kerja, lisensi ikon
 docs/DEPLOY.md            Panduan deploy
 docs/capcut-analysis.md   Hasil analisis CapCut Web (REA) yang memandu desain
 test/              npm test
@@ -286,6 +301,7 @@ test/              npm test
   - Butuh pemrosesan di server: putar mundur, stabilkan, pisah suara, kurangi kebisingan.
   - Butuh model AI: hapus latar otomatis, retouch, lipsync, teks otomatis dari suara.
   - Mask (Tutupi), efek audio, efek tubuh, dan pelacakan kamera.
+- **Najja Desain** meniru tata letak aplikasi desain tablet, tetapi template, warna, ikon antarmuka, dan kodenya dibuat sendiri. Ikon elemen berasal dari [Lucide](https://lucide.dev) (lisensi ISC), diunduh sekali oleh server dari versi terkunci dan dicek sha256-nya.
 - Najja Editor meniru **tata letak dan alur kerja** editor video populer, tetapi seluruh kode, ikon, dan desainnya dibuat sendiri. Tidak ada kode, aset, atau merek CapCut yang dipakai. Lihat `docs/capcut-analysis.md`.
 
 ## Tes

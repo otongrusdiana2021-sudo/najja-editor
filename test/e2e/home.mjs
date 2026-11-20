@@ -183,10 +183,11 @@ try {
     const lay = await p.evaluate(() => {
       const r = (s) => document.querySelector(s)?.getBoundingClientRect();
       const sc = document.querySelector('.hm-scroll');
-      return { overflowX: sc.scrollWidth > sc.clientWidth + 1, newCard: r('.hm-new'), tools: [...document.querySelectorAll('.hm-tool')].map((t) => t.getBoundingClientRect()), grid: r('.hm-grid'), tabbar: !!document.querySelector('.hm-tabbar, nav.hm-tabs') };
+      return { overflowX: sc.scrollWidth > sc.clientWidth + 1, newCard: r('.hm-starts'), starts: [...document.querySelectorAll('.hm-starts .hm-new')].map((c) => c.getBoundingClientRect()), tools: [...document.querySelectorAll('.hm-tool')].map((t) => t.getBoundingClientRect()), grid: r('.hm-grid'), tabbar: !!document.querySelector('.hm-tabbar, nav.hm-tabs') };
     });
     check(!lay.overflowX, `${name}: tanpa geser horizontal`);
-    check(lay.newCard.width > vp.width * 0.85, `${name}: kartu Proyek baru selebar layar`);
+    check(lay.newCard.width > vp.width * 0.85, `${name}: kartu Edit Video + Mulai Desain selebar layar`);
+    check(lay.starts.length === 2 && lay.starts.every((c) => c.width > vp.width * 0.4 && c.height >= 90), `${name}: dua kartu besar berdampingan`);
     check(lay.tools.every((t) => t.width > 0 && t.bottom <= lay.grid.top), `${name}: alat di atas daftar proyek`);
     check(!lay.tabbar, `${name}: tanpa tab bawah (Template/Lab AI/Kotak Masuk/Saya)`);
   }
