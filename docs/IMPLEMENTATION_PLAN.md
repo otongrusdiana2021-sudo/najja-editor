@@ -90,7 +90,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy`, ikut di-push lewat branch `feat/p0-5-design-export` (CI hijau, run 45129262367). **Belum dipasang:** snippet nginx `.well-known` di VPS (butuh izin) dan record DNS `www` (butuh akses pengelola DNS) |
 | P0-5 Ekspor Najja Desain aman | ✅ selesai, branch `feat/p0-5-design-export` (berisi P0-1 sampai P0-5) **sudah di-push**. CI hijau di Node 22 (run 45129262367). Belum di-merge ke `main`, belum di-deploy. Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
-| P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 di branch `feat/p0-6b-update-clip` (belum di-push). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
+| P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -397,4 +397,5 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Unit: **266 test, 252 lulus, 0 gagal**, 2×.
   - Browser (handler editor yang dipakai MCP): tiga panggilan yang ditolak meninggalkan proyek persis sama (urutan klip, `x`, 3 langkah undo, panjang snapshot). Panggilan valid tetap pindah dan mengubah `x` dengan 2 langkah undo, seperti dulu. Console bersih.
 - **Kontrak MCP:** nama, schema, dan pesan error sama. Perubahan perilaku: panggilan yang ditolak tidak lagi mengubah proyek (perbaikan bug).
+- **CI:** branch `fix/v20-update-clip-atomic` di-push, dan run 45135252249 hijau di Node 22.
 - **Belum tercakup:** kegagalan **layanan** hapus latar (mis. model belum siap) yang terjadi setelah perubahan lain. Itu bukan argumen yang ditolak, dan perubahan lainnya sah dengan langkah undo sendiri.
