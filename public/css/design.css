@@ -4,6 +4,23 @@
   --acc: #129aa9; --acc2: #0d7f8c; --accbg: #e3f5f7; --sel: #19b3c4; --guide: #ff3fa4; --danger: #e5484d;
   --r: 12px; --shadow: 0 6px 24px rgba(20, 30, 45, .12); --font: Poppins, system-ui, sans-serif;
 }
+
+/* (v1.13.2) DESIGN.md §4 design tokens for Najja Desain (light), aliases of the values it already uses. The stage has
+   no background of its own (it shows the page), success is the success toast's colour, and Desain shows no warnings
+   yet, so warning takes the editor's value. Nothing uses them yet; nothing looks different. See docs/DESIGN-TOKENS.md. */
+:root {
+  --najja-app-bg: var(--bg);
+  --najja-panel-bg: var(--panel);
+  --najja-panel-raised: var(--panel);
+  --najja-canvas-bg: var(--bg);
+  --najja-text-primary: var(--ink);
+  --najja-text-secondary: var(--ink2);
+  --najja-border: var(--line);
+  --najja-accent: var(--acc);
+  --najja-success: var(--acc2);
+  --najja-warning: #ffb020;
+  --najja-danger: var(--danger);
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body.ds { background: var(--bg); color: var(--ink); font: 14px/1.35 var(--font); overflow: hidden; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; overscroll-behavior: none; }

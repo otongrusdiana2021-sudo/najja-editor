@@ -45,6 +45,22 @@
   color-scheme: dark;
 }
 
+/* (v1.13.2) DESIGN.md §4 design tokens: semantic names for the values this editor already uses (aliases, so they
+   follow the light theme too). Nothing uses them yet; nothing looks different. See docs/DESIGN-TOKENS.md. */
+:root {
+  --najja-app-bg: var(--bg);
+  --najja-panel-bg: var(--panel);
+  --najja-panel-raised: var(--panel-2);
+  --najja-canvas-bg: var(--stage);
+  --najja-text-primary: var(--text);
+  --najja-text-secondary: var(--text-2);
+  --najja-border: var(--border);
+  --najja-accent: var(--accent);
+  --najja-success: var(--ok);
+  --najja-warning: var(--warn);
+  --najja-danger: var(--danger);
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body {
