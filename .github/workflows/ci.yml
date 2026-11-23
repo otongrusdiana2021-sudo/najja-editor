@@ -38,4 +38,12 @@ jobs:
         run: find public/js -name '*.js' -print0 | xargs -0 -n1 node --check
 
       - name: Unit tests (includes the MCP contract)
-        run: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+
+      # Failing tests become annotations: their names and errors show in the run summary (and the public API)
+      # without opening the logs.
+      - name: Failing tests as annotations
+        if: failure()
+        run: node test/ci-annotate.mjs test-output.txt
