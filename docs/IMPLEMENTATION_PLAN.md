@@ -426,3 +426,4 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Ditemukan dan diperbaiki saat uji: label Desain sempat tertahan di "Menyimpan…" karena ada save kedua yang antre.
   - Semua proyek dan desain uji dihapus, termasuk satu yang sempat dibuat ulang oleh race di kode lama.
 - **Kontrak:** tidak ada perubahan pada tool MCP. REST `PUT /api/projects/:id` kini bisa menjawab 410. Klien yang dipakai (editor dan Desain) menanganinya.
+- **CI:** branch `fix/v19-deleted-project` (berisi semua kerjaan sampai V19 dan perbaikan test jobs) di-push. Run 45136491124 hijau di Node 22.
