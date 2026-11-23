@@ -145,6 +145,8 @@ Nama tool di `mcp/tools.js` sama 1:1 dengan handler di `public/js/api.js` (27 = 
 
 **Snapshot kontrak (P0-3):** `node test/mcp-contract.mjs --update` menulis snapshot dari `tools/list` dan `prompts/list` handler protokol yang asli, dan **menolak** menulis bila ada perubahan yang merusak. Yang diperiksa: tool dan prompt tidak hilang atau diganti nama, parameter tidak hilang, tidak ada parameter atau argumen prompt wajib yang baru, tipe tidak berubah (integer → number boleh), nilai `enum` tidak berkurang, batas `minimum`/`maximum`/`minItems`/`maxItems` tidak menyempit, objek tidak mulai menolak field lain, tool read-only tidak berubah jadi pengubah, dan tool tidak menjadi destruktif. Deskripsi dan judul boleh diubah bebas. **Belum dicakup:** bentuk output tool, karena hasil tool berupa data bebas tanpa `outputSchema`. Itu ditangani test per tool di fase B.
 
+**Status M8 (2026-11-23):** snippet `deploy/aapanel/najja-wellknown.conf` disiapkan di P0-4 (meneruskan hanya `/.well-known/oauth-*` dan `/.well-known/openid-configuration` ke app). **Belum dipasang di VPS.**
+
 **Status M1 (2026-11-23):** diperbaiki di P0-1 (branch `feat/p0-1-mcp-command-queue`), belum di-push dan belum di-deploy ke produksi.
 
 **Kunci ekspor (P0-2, 2026-11-23):** selama ekspor merender, hanya `get_project`, `list_assets`, `list_media`, `list_styles`, `get_export_status`, dan `export_video` yang dijalankan. Tool lain menjawab error "Not run: a video export is rendering…" dan proyek tidak berubah. Kontrak (nama, schema, bentuk hasil) tetap. Branch `feat/p0-2-autosave-export-lock`, belum di-push dan belum di-deploy.

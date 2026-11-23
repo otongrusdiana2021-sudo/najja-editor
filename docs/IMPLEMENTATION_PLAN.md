@@ -87,6 +87,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-1 Antrian perintah MCP + mutex capture | ✅ selesai, di-commit di branch `feat/p0-1-mcp-command-queue` (**belum di-push dan belum di-deploy**). E2E belum dijalankan (lihat log) |
 | P0-2 Autosave + kunci ekspor | ✅ selesai, di-commit di branch `feat/p0-2-autosave-export-lock` (dibangun di atas P0-1; **belum di-push dan belum di-deploy**). Thumbnail per-autosave (bagian V14) ditunda ke P2 karena butuh benchmark |
 | P0-3 Test infra + CI | ✅ selesai. Branch `feat/p0-3-contract-ci` (berisi P0-1 + P0-2 + P0-3) **sudah di-push** ke GitHub (belum di-merge ke `main`, belum di-deploy). Run CI pertama **hijau** (run 45125714348). E2E Playwright di CI ditunda |
+| P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy` (di atas P0-3; belum di-push). **Belum dipasang:** snippet nginx `.well-known` di VPS (butuh izin) dan record DNS `www` (butuh akses pengelola DNS) |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -172,3 +173,41 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Bentuk output tool belum masuk snapshot (tidak ada `outputSchema`). Ditangani test per tool di fase B.
   - E2E Playwright (Chromium + WebKit) belum ada di CI. Playwright bukan dependency project. Menambahkannya perlu memasang paket `playwright` dan browser, sebaiknya diuji lokal dulu.
 - **Berikutnya:** P0-4 (header keamanan, cache SW dibersihkan saat logout, nginx `.well-known`, DNS www, DEPLOY doc). Sebagian butuh perubahan di VPS/DNS, jadi perlu izin eksplisit.
+
+#### P0-4 — Keamanan dan deploy (2026-11-23)
+
+- **Tujuan:** S1 (header keamanan), S2/M8 (OAuth `/.well-known` 404 di aaPanel), S3 (`www` tanpa DNS), S4 (deploy produksi tidak terdokumentasi), S5 (cache SW saat logout).
+- **Fakta yang dicek sebelum mengubah apa pun:**
+  - Produksi (curl read-only): `/.well-known/oauth-*` dan `/openid-configuration` = 404, cadangan `/oauth/*` = 200. Header keamanan di `/login` hanya HSTS (dari nginx).
+  - VPS (SSH read-only): `/opt/najja-editor` = checkout git `86305a7` tanpa perubahan lokal. nginx 1.24 aaPanel. `location /.well-known{ root … }` mengalahkan proxy `^~ /` karena prefiksnya lebih panjang. Folder `extension/editor.najja.id/` di-include di blok server.
+  - DNS: `www.editor.najja.id` tanpa record A.
+  - Inventaris sumber eksternal app: hanya Google Fonts (`fonts.googleapis.com` CSS, `fonts.gstatic.com` font). Tidak ada iframe. Worker dari `blob:` (detak engine) dan modul origin sendiri (voicefx). WASM onnxruntime dari `/vendor/` sendiri. Halaman login tanpa script inline. Dashboard ecom (`~/Downloads/REA/najja`) tidak menyematkan editor.
+- **Perubahan:**
+  - `server.js`:
+    - `X-Content-Type-Options: nosniff` di setiap respons.
+    - Di setiap HTML (editor, Najja Desain, fallback SPA, login, dan juga respons 304): `Content-Security-Policy: frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, plus `Content-Security-Policy-Report-Only` (default `'self'`, `script-src 'self' 'wasm-unsafe-eval'`, Google Fonts, `blob:`/`data:` untuk media dan worker, `object-src 'none'`, `base-uri 'self'`).
+    - `form-action` sengaja tidak dipakai, karena di Chrome direktif ini berlaku juga untuk redirect setelah submit form, sehingga persetujuan OAuth tidak bisa kembali ke klien AI.
+    - HSTS tidak ditambahkan di app karena sudah dipasang nginx.
+  - `public/sw.js`: navigasi ke `/logout` atau `/login` menghapus cache `najja-shell-*`. Model AI (`najja-models-*`) tetap. Halamannya sendiri tetap dimuat dari jaringan.
+  - `deploy/aapanel/najja-wellknown.conf` (baru): dua `location` yang meneruskan hanya path OAuth discovery ke app, dengan header sama dengan proxy utama situs. ACME tidak tersentuh.
+  - `docs/DEPLOY.md`: bagian aaPanel `.well-known`, bagian "Produksi editor.najja.id" (fakta, prosedur update dan rollback lewat git, cek setelah deploy, langkah `www`), dan catatan keamanan v1.13.2.
+  - `test/security.test.js` (+4 test header), `test/sw.test.js` (baru, 4 test), `package.json`.
+- **Hasil test:**
+  - Unit: **199 test, 185 lulus, 0 gagal, 14 dilewati**.
+  - Mutation check: `server.js` dan `sw.js` lama → 7 dari 8 test baru gagal. Yang lulus adalah test "halaman lain tidak menyentuh cache", yang memang menjaga perilaku yang tidak berubah.
+  - Browser asli (server lokal):
+    - Header sampai ke browser.
+    - **0 pelanggaran CSP** sepanjang alur editor (project baru, warna, teks dengan font Bangers, stiker, filter, `get_frame`, putar, ekspor cepat) dan Najja Desain (templat, panel teks, panel elemen, bentuk).
+    - Alat ukurnya divalidasi: script inline yang sengaja disuntikkan terlapor (`script-src-elem`) tapi tetap jalan, sesuai mode report-only.
+    - Buka `/logout` → entri Najja Desain di cache shell turun dari 10 ke 1. Satu yang tersisa (`/js/design/model.js`) memang diimpor lagi oleh beranda editor.
+    - Log server bersih. Data uji dihapus.
+  - **Tidak diuji:** fitur yang membuat server mengunduh library vendor (ikon Lucide, hapus latar, deteksi wajah), karena belum pernah terunduh di server lokal dan unduhan pihak ketiga tidak dipicu tanpa izin. Fitur itu memakai `/vendor/` (origin sendiri) dan WASM, yang sudah diizinkan kebijakan, tapi belum terbukti di browser.
+- **Belum dipasang (butuh izin/akses):**
+  - S2: salin `deploy/aapanel/najja-wellknown.conf` ke `/www/server/panel/vhost/nginx/extension/editor.najja.id/`, lalu `nginx -t && nginx -s reload`. Tidak mengubah file vhost yang ada. Rollback dengan menghapus file itu lalu reload.
+  - S3: record DNS `www.editor` di pengelola domain `najja.id`, lalu domain + SSL + redirect 301 di aaPanel.
+  - Deploy kode P0-1 sampai P0-4 ke produksi: keputusan terpisah.
+- **Temuan baru:** S7. Draft perubahan (IndexedDB) dan salinan media (OPFS) tetap ada setelah Keluar. Butuh keputusan produk; jangan hapus draft yang belum sampai server.
+- **Risiko tersisa:**
+  - CSP baru report-only. Mengubahnya jadi wajib sebaiknya setelah dipantau di produksi, termasuk fitur vendor.
+  - `X-Frame-Options: SAMEORIGIN` akan memblokir siapa pun yang selama ini menyematkan editor dari domain lain. Di repo dan di dashboard ecom tidak ditemukan pemakaian seperti itu.
+- **Berikutnya:** pasang S2 di VPS (dengan izin), lalu P0-5 (keamanan ekspor Najja Desain: D2, D1, D3).

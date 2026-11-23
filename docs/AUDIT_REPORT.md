@@ -137,6 +137,9 @@ Kolom: **Risiko** T/S/R (Tinggi/Sedang/Rendah) · **Kompl.** S/M/L · **Status**
 | S4 | R | FAKTA | Deploy produksi | Produksi memakai aaPanel nginx + Docker Compose di `/opt/najja-editor`, sedangkan `deploy/install.sh` di repo memakai Caddy. Jalur deploy nyata tidak terdokumentasi | Dokumentasikan deploy aaPanel di `docs/DEPLOY.md` | S | — |
 | S5 | R | FAKTA (kode); kebocoran DUGAAN | `public/sw.js` (`networkFirst`) | Service worker menyimpan shell halaman yang sudah login dan tidak dibersihkan saat logout → di perangkat bersama, shell bisa terlihat saat offline | Hapus cache saat logout; cek apakah HTML memuat data akun | S | — |
 | S6 | — | FAKTA (positif) | `server.js:760-794, 229-238`; `lib/tenancy.js` | Rate limit login, cek Origin, cookie aman, data per akun, OAuth PKCE sudah benar. **Pertahankan** | — | — | — |
+| S7 | S | FAKTA (kode); dampak = DUGAAN | `public/js/store.js` (draft IndexedDB), `public/js/devicecache.js` (OPFS) | Setelah **Keluar**, draft perubahan proyek (isi proyek lengkap) dan salinan media di perangkat tetap tersimpan. Di perangkat bersama, akun berikutnya tidak bisa membukanya lewat app (data server per akun), tapi datanya masih ada di penyimpanan browser | Keputusan produk: (a) simpan dulu lalu hapus draft + salinan media saat keluar (aman untuk perangkat bersama, media harus diunduh ulang), atau (b) pisahkan penyimpanan per akun. Jangan hapus draft yang belum sampai server | M | Keputusan pemilik produk |
+
+**Status perbaikan (2026-11-23):** S1, S4, dan S5 (cache shell) dikerjakan di kode P0-4. S2 (snippet nginx `deploy/aapanel/najja-wellknown.conf`) dan S3 (DNS `www`) disiapkan, tetapi **belum dipasang** karena perlu izin akses VPS dan DNS. S7 ditemukan saat P0-4 dan menunggu keputusan. Detail di `IMPLEMENTATION_PLAN.md` → Log milestone P0-4.
 
 ### 3.6 Test dan kualitas
 

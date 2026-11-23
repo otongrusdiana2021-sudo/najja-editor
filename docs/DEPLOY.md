@@ -44,6 +44,52 @@ Installer otomatis mendeteksi kalau port 80/443 sudah dipakai web server lain. K
   3. **Reverse proxy → Add reverse proxy.** Name: `najja`, Target URL: `http://127.0.0.1:3333`, Sent Domain: `$host`, lalu Submit.
 - **Lainnya** (apache, Nginx Proxy Manager, Traefik, dll.): buat reverse proxy dari domain kamu ke `http://127.0.0.1:3333`. Teruskan header Host, matikan buffering, dan atur timeout baca minimal 1 jam.
 
+### aaPanel: OAuth untuk AI lewat `/.well-known/` (v1.13.2)
+
+aaPanel melayani semua path `/.well-known/` dari folder situs (untuk cek sertifikat SSL). Akibatnya metadata OAuth yang disediakan editor di sana dijawab 404, dan klien AI yang hanya memakai discovery standar gagal terhubung. Cadangan `/oauth/authorization-server` dan `/oauth/protected-resource` tetap jalan.
+
+Perbaikannya: pasang `deploy/aapanel/najja-wellknown.conf` ke `/www/server/panel/vhost/nginx/extension/<domain>/`. aaPanel meng-include semua `*.conf` di folder itu ke dalam blok server situs. File ini hanya meneruskan path OAuth ke editor. Cek sertifikat (`/.well-known/acme-challenge/`) tidak berubah.
+
+```bash
+cp deploy/aapanel/najja-wellknown.conf /www/server/panel/vhost/nginx/extension/editor.domainkamu.com/
+nginx -t && nginx -s reload
+curl -s https://editor.domainkamu.com/.well-known/oauth-authorization-server   # JSON, bukan 404
+```
+
+Batalkan dengan menghapus file itu, lalu `nginx -t && nginx -s reload`.
+
+## Produksi editor.najja.id
+
+Fakta (dicek read-only pada 2026-11-23):
+
+| Bagian | Nilai |
+|---|---|
+| Server | VPS `najja-vps`, nginx 1.24 dari aaPanel. Vhost `/www/server/panel/vhost/nginx/editor.najja.id.conf`: reverse proxy `location ^~ /` → `http://127.0.0.1:3333`, HSTS dipasang nginx |
+| App | `/opt/najja-editor`: checkout git dari GitHub (commit `86305a7` = v1.13.1, tanpa perubahan lokal), Docker Compose. Container `najja-editor-najja-1` (`127.0.0.1:3333`) dan `najja-editor-ai-1`. Service `caddy` di compose **tidak** dipakai (nginx aaPanel yang menerima HTTPS) |
+| Data | Volume Docker `najja-editor_najja-data`. Tidak ikut berubah saat update kode |
+| Konfigurasi rahasia | `/opt/najja-editor/.env` (jangan di-commit, jangan dibagikan) |
+| DNS | `editor.najja.id` → `31.97.223.23`. `www.editor.najja.id` **belum punya record** |
+
+**Update ke versi baru** (kode dari git, data tetap di volume):
+
+1. Pastikan CI hijau untuk commit yang mau dipasang (tab Actions di GitHub).
+2. Di VPS:
+   ```bash
+   cd /opt/najja-editor
+   git rev-parse --short HEAD          # catat, untuk rollback
+   git fetch origin
+   git checkout <commit-atau-tag>      # atau: git pull --ff-only origin main
+   docker compose up -d --build
+   ```
+3. Cek:
+   ```bash
+   curl -s https://editor.najja.id/healthz                      # versi baru
+   curl -sI https://editor.najja.id/login | grep -iE 'x-frame|content-security|referrer|nosniff'
+   ```
+4. Rollback bila perlu: `git checkout <commit-yang-dicatat> && docker compose up -d --build`.
+
+**`www.editor.najja.id`:** butuh record DNS di pengelola domain `najja.id` (A `www.editor` → `31.97.223.23`, atau CNAME ke `editor.najja.id`). Setelah itu di aaPanel: tambahkan domain `www.editor.najja.id` ke situs, terbitkan ulang SSL untuk kedua nama, lalu buat redirect 301 dari `www.editor.najja.id` ke `https://editor.najja.id`.
+
 ## Cara A — Docker manual
 
 **1. Upload kode** dari laptop kamu:
@@ -356,6 +402,9 @@ Dengan `NAJJA_URL` terisi, `mcp-stdio.js` hanya meneruskan perintah ke VPS dan t
 - **Ganti token:** edit `.env`, lalu jalankan `docker compose up -d`. Semua sesi lama otomatis keluar.
 - Proyek, media, dan hasil ekspor tersimpan di server kamu sendiri (volume `najja-data`), tidak di layanan luar.
 - Tombol **Keluar** ada di menu akun (bulatan inisial di kanan atas), atau buka `/logout`.
+- (v1.13.2) Semua halaman HTML mengirim header keamanan: situs lain tidak boleh menampilkannya di iframe (`frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`), referrer ke situs lain hanya berisi origin, dan semua respons memakai `X-Content-Type-Options: nosniff`.
+- (v1.13.2) `Content-Security-Policy` masih **report-only**: pelanggaran hanya muncul di console browser, belum ada yang diblokir. Setelah dipantau di produksi, kebijakan ini bisa diubah jadi wajib. HSTS dipasang di nginx, bukan di app.
+- (v1.13.2) Saat keluar (atau saat halaman login terbuka karena sesi habis), service worker menghapus cache tampilan aplikasi. Model AI yang sudah diunduh tetap disimpan. Draft perubahan dan salinan media di perangkat **belum** dihapus saat keluar (lihat `docs/AUDIT_REPORT.md`, S7).
 
 ## Hapus latar otomatis (v1.11)
 

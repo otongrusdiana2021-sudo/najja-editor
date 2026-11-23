@@ -162,3 +162,49 @@ test('healthz is public and reports the version and login mode', async () => {
   assert.equal(j.login, 'email');
   assert.match(j.version, /^\d+\.\d+\.\d+$/);
 });
+
+// ---- (P0-4) security headers ----
+const HTML_HEADERS = (h, what) => {
+  assert.equal(h['x-content-type-options'], 'nosniff', `${what}: nosniff`);
+  assert.equal(h['content-security-policy'], "frame-ancestors 'self'", `${what}: other sites may not frame it`);
+  assert.equal(h['x-frame-options'], 'SAMEORIGIN', `${what}: X-Frame-Options for older browsers`);
+  assert.equal(h['referrer-policy'], 'strict-origin-when-cross-origin', `${what}: referrer`);
+  const csp = h['content-security-policy-report-only'] || '';
+  for (const d of ["default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'", "object-src 'none'", "worker-src 'self' blob:", 'https://fonts.googleapis.com', 'https://fonts.gstatic.com']) {
+    assert.ok(csp.includes(d), `${what}: report-only CSP has ${d}`);
+  }
+  assert.ok(!/form-action/.test(csp), `${what}: no form-action (it would stop the OAuth redirect back to the AI client)`);
+};
+
+test('security headers: the editor, Najja Desain and a project link are HTML pages with them', async () => {
+  const H = { host: `localhost:${local.port}` };
+  for (const p of ['/', '/design', '/?p=p_abc', '/some/spa/path']) {
+    const r = await req(local.port, { path: p, headers: H });
+    assert.equal(r.status, 200, p);
+    assert.match(r.headers['content-type'], /text\/html/, p);
+    HTML_HEADERS(r.headers, p);
+  }
+});
+
+test('security headers: a page answered 304 (cached before this version) gets them too', async () => {
+  const r = await req(local.port, { path: '/', headers: { host: `localhost:${local.port}`, 'if-modified-since': new Date(Date.now() + 86400e3).toUTCString() } });
+  assert.equal(r.status, 304);
+  HTML_HEADERS(r.headers, '304');
+});
+
+test('security headers: the login page has them', async () => {
+  const r = await req(secured.port, { path: '/login', headers: { host: 'editor.example.com', 'x-forwarded-proto': 'https', 'x-forwarded-for': '9.9.9.9' } });
+  assert.equal(r.status, 200);
+  HTML_HEADERS(r.headers, '/login');
+});
+
+test('security headers: scripts, JSON and errors get nosniff but no page policy', async () => {
+  const H = { host: `localhost:${local.port}` };
+  for (const p of ['/js/app.js', '/sw.js', '/api/status', '/api/projects/does-not-exist']) {
+    const r = await req(local.port, { path: p, headers: H });
+    assert.equal(r.headers['x-content-type-options'], 'nosniff', p);
+    assert.equal(r.headers['content-security-policy-report-only'], undefined, p);
+  }
+  const mcp = await req(local.port, { method: 'POST', path: '/mcp', headers: { ...json, ...H }, body: rpcBody });
+  assert.equal(mcp.headers['x-content-type-options'], 'nosniff', '/mcp');
+});
