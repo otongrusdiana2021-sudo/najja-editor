@@ -1,6 +1,7 @@
 // Najja Desain (v1.13): the design editor page. A design is a project of kind 'design' (pages of elements) kept on
 // the Najja server like a video project; this module loads it, keeps every change undoable, saves it shortly after
 // each change, and carries out the commands of the canvas (stage.js) and of the panels and toolbar (ui.js).
+import '../screen.js'; // (v1.13.2) Akun → Ukuran layar: the same scale as the editor on this device
 import { storage } from '../storage.js';
 import { remote } from '../remote.js';
 import { onFontsLoaded, preloadFonts, baseSize } from '../render.js';

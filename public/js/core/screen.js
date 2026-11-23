@@ -53,3 +53,32 @@ export function suggestScreen(d) {
 
 /** Whether the zoom lock is on: the owner's choice, or by default on touch screens (phones, tablets). */
 export const zoomLocked = (setting, d) => (setting.lock == null ? Boolean(d.touch || d.ios) : setting.lock);
+
+/**
+ * A media query of our CSS for a page drawn with CSS zoom z. Media queries see the window in screen px while the page
+ * is z times larger or smaller, so the px in the query are scaled: at 110% a 990 px window lays out like a 900 px page.
+ */
+export const scaleMedia = (text, z) => String(text).replace(/(\d+(?:\.\d+)?)px/g, (_, n) => `${Math.round(Number(n) * z * 100) / 100}px`);
+
+/**
+ * The viewport meta of a touch screen drawn at z (iPad, phones). There the browser scales the page itself, like a
+ * pinch that stays, so pointer coordinates and boxes stay in one space and the editor's pointer math needs no change.
+ * z = 1 keeps the page's own width=device-width, initial-scale=1. Another z sets only initial-scale: the browser then
+ * lays the page out at the window width / z (also after a rotation or in Split View). The zoom lock pins the scale.
+ */
+export function viewportContent(content, z, lock) {
+  const keep = String(content || '').split(',').map((p) => p.trim())
+    .filter((p) => p && !/^(width|initial-scale|minimum-scale|maximum-scale)\s*=/.test(p));
+  const size = z === 1 ? ['width=device-width', 'initial-scale=1', ...(lock ? ['maximum-scale=1'] : [])]
+    : [`initial-scale=${z}`, ...(lock ? [`minimum-scale=${z}`, `maximum-scale=${z}`] : [])];
+  return [...size, ...keep].join(', ');
+}
+
+// The CSS zoom of the page now: 1 unless Ukuran layar draws the page with CSS zoom (public/js/screen.js sets it).
+// With CSS zoom, pointer positions and getBoundingClientRect are on screen while styles, scroll offsets and sizes are in
+// the page's own px: code that mixes them converts with toCss(). Here (no DOM) so every module can use it.
+let cssZoom = 1;
+export const uiZoom = () => cssZoom;
+export const setUiZoom = (z) => { cssZoom = z > 0 ? z : 1; };
+/** A length or offset on screen (clientX − rect.left, innerWidth, a rect's size) in the page's own CSS px. */
+export const toCss = (v) => v / cssZoom;

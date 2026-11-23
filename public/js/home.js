@@ -7,6 +7,7 @@ import { icon, MARK_PATHS } from './icons.js';
 import { escapeHtml, uid, clone } from './util.js';
 import { toast, contextMenu, confirmDialog, modal } from './ui.js';
 import { SIZES } from './design/model.js';
+import { uiZoom } from './core/screen.js';
 
 const SORTS = {
   edited: ['Terakhir diubah', (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)],
@@ -267,7 +268,7 @@ export class Home {
     const p = this.list.find((x) => x.id === id);
     if (!p) return;
     const r = btn.getBoundingClientRect();
-    contextMenu(Math.max(8, r.right - 220), r.bottom + 4, [
+    contextMenu(Math.max(8, r.right - 220 * uiZoom()), r.bottom + 4, [
       { label: 'Buka', icon: 'edit', run: () => this.openItem(id) },
       { label: 'Ganti nama', icon: 'textAdd', run: () => this.rename(p) },
       { label: 'Duplikat', icon: 'copy', run: () => this.duplicate(p) },

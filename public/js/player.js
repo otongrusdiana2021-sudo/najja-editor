@@ -7,6 +7,7 @@ import { icon } from './icons.js';
 import { clamp } from './util.js';
 import { metrics } from './metrics.js';
 import { preparingLight } from './media.js';
+import { uiZoom } from './core/screen.js';
 
 const PREVIEW_LONG = 1280;
 
@@ -71,7 +72,7 @@ export class Player {
     this.inner.style.height = `${cssH}px`;
     // Preview resolution: screen pixels (at most 2x), never above 1280 on the long side (the preview does not
     // need more), and lower still while a slow device cannot keep up (this.quality, see adapt()).
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(2, window.devicePixelRatio || 1) * uiZoom();
     let pw = Math.min(P.width, Math.round(cssW * dpr * this.quality));
     pw = Math.min(pw, Math.round((PREVIEW_LONG * P.width) / Math.max(P.width, P.height)));
     pw = Math.max(2, pw);
@@ -204,7 +205,7 @@ export class Player {
       if (this.touches.size === 2 && this.gesture) { this.startPinch(); return; }
       if (this.gesture) return;
       const rect = this.inner.getBoundingClientRect();
-      const k = this.cssScale || 1;
+      const k = (this.cssScale || 1) * uiZoom(); // (v1.13.2) on screen under CSS zoom (Ukuran layar)
       const toP = (ev) => ({ x: (ev.clientX - rect.left) / k, y: (ev.clientY - rect.top) / k });
       const p0 = toP(e);
       const handle = e.target.closest('.h');

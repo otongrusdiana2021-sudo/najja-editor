@@ -1,5 +1,6 @@
 // Najja Editor — bootstrap and app shell, laid out like a tablet video editor:
 // top bar · large preview · control row · timeline (centre playhead) · bottom toolbar · bottom sheets.
+import './screen.js'; // (v1.13.2) Akun → Ukuran layar: this device's scale, applied before anything is drawn
 import { store, newProject } from './store.js';
 import { prefs, db } from './db.js';
 import { storage } from './storage.js';
@@ -18,6 +19,7 @@ import { tools } from './api.js';
 import { bridge } from './bridge.js';
 import { blockedReason } from './cmdqueue.js';
 import { revCheck } from './core/sync.js';
+import { toCss, uiZoom } from './core/screen.js';
 import { exportVideo, exportState, cancelExport, supportedFormats, exportSize } from './exporter.js';
 import { fastExportAvailable } from './fastexport.js';
 import { RESOLUTIONS, FPS_OPTIONS } from './presets.js';
@@ -112,7 +114,7 @@ topbar.addEventListener('click', (e) => {
     case 'close': goHome(); break;
     case 'menu': {
       const r = b.getBoundingClientRect();
-      contextMenu(r.right - 240, r.bottom + 6, [
+      contextMenu(r.right - 240 * uiZoom(), r.bottom + 6, [
         { label: 'Proyek baru', icon: 'plus', run: () => newProjectDialog() },
         { label: 'Beranda (proyek saya)', icon: 'folder', kbd: 'Ctrl+O', run: () => goHome() },
         { label: 'Tambah media…', icon: 'upload', kbd: 'Ctrl+I', run: () => openSheet('media', { mode: 'append' }) },
@@ -181,8 +183,8 @@ function resPopover(anchor) {
   document.body.appendChild(popEl);
   const r = anchor.getBoundingClientRect();
   const w = popEl.offsetWidth;
-  popEl.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.right - w))}px`;
-  popEl.style.top = `${r.bottom + 8}px`;
+  popEl.style.left = `${Math.max(8, Math.min(toCss(innerWidth) - w - 8, toCss(r.right) - w))}px`;
+  popEl.style.top = `${toCss(r.bottom) + 8}px`;
   popEl.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;

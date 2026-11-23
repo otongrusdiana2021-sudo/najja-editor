@@ -4,6 +4,8 @@ import { modal, toast, contextMenu, confirmDialog } from './ui.js';
 import { escapeHtml, fmtBytes } from './util.js';
 import { deviceCache } from './devicecache.js';
 import { clearDeviceCache } from './media.js';
+import { SCREENS, uiZoom } from './core/screen.js';
+import { loadScreen, saveScreen, suggestedScreen, scaleMode } from './screen.js';
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { credentials: 'same-origin', headers: { 'content-type': 'application/json' }, ...opts });
@@ -29,16 +31,63 @@ export const account = {
 
   menu() {
     const r = this.btn.getBoundingClientRect();
-    contextMenu(r.right - 230, r.bottom + 6, [
+    contextMenu(r.right - 230 * uiZoom(), r.bottom + 6, [
       { label: this.me.email, icon: 'ai', disabled: true },
       'sep',
       { label: 'Token AI (MCP)', icon: 'ai', run: () => this.aiToken() },
       { label: 'Ganti password', icon: 'lock', run: () => this.changePassword() },
       ...(this.me.role === 'admin' ? [{ label: 'Kelola pengguna', icon: 'layers', run: () => this.users() }] : []),
       { label: 'Penyimpanan perangkat', icon: 'download', run: () => this.storage() },
+      { label: 'Ukuran layar', icon: 'fit', run: () => this.screenSize() },
       'sep',
       { label: 'Keluar', icon: 'x', danger: true, run: () => { location.href = '/logout'; } },
     ]);
+  },
+
+  /**
+   * (v1.13.2) Ukuran layar, like the ecom app: how big Najja is drawn on THIS device (each device keeps its own).
+   * The design stays the same; only the scale and the zoom lock change. Applied and saved at once.
+   */
+  screenSize() {
+    if (scaleMode() === 'browser') {
+      // Safari on a Mac keeps the older rules for CSS zoom (the pointer would land beside the clips): its own zoom
+      // keeps everything in place and is remembered for this site.
+      const mac = /Mac/.test(navigator.platform);
+      const m = modal({
+        title: 'Ukuran layar',
+        body: `<p class="hint">Di browser ini, ubah ukuran Najja dengan zoom browser: <b>${mac ? '⌘ +' : 'Ctrl +'}</b> memperbesar, <b>${mac ? '⌘ −' : 'Ctrl −'}</b> memperkecil, <b>${mac ? '⌘ 0' : 'Ctrl 0'}</b> ukuran asli. Browser mengingatnya untuk situs ini di perangkat ini.</p>
+          <p class="hint">Pengaturan ukuran di sini tersedia di Chrome, Edge, Firefox, iPad, dan HP.</p>`,
+        footer: '<button class="btn btn-primary" data-done>Oke</button>',
+      });
+      m.el.querySelector('[data-done]').onclick = () => m.close();
+      return;
+    }
+    const sug = suggestedScreen();
+    const groups = [...new Set(SCREENS.map((x) => x.group))];
+    let cur = loadScreen();
+    const m = modal({
+      title: 'Ukuran layar',
+      body: `<p class="hint">Hanya untuk perangkat ini. Tampilan tetap sama; yang berubah hanya ukurannya.</p>
+        <div class="ctl"><label>Perangkat</label><select class="scr-dev">${groups.map((g) => `<optgroup label="${escapeHtml(g)}">${SCREENS.filter((x) => x.group === g).map((x) => `<option value="${x.id}">${escapeHtml(x.label)}${x.id === sug ? ' (disarankan)' : ''} · ${escapeHtml(x.sub)}</option>`).join('')}</optgroup>`).join('')}</select></div>
+        <div class="ctl"><label>Ukuran <b class="scr-pct"></b></label><input type="range" class="scr-scale" min="75" max="130" step="5" aria-label="Ukuran tampilan"></div>
+        <div class="ctl"><label>Kunci zoom</label><select class="scr-lock"><option value="auto">Otomatis (nyala di layar sentuh)</option><option value="on">Nyala</option><option value="off">Mati</option></select></div>`,
+      footer: '<button class="btn" data-reset>Kembalikan</button><button class="btn btn-primary" data-done>Selesai</button>',
+    });
+    const q = (sel) => m.el.querySelector(sel);
+    const sync = () => {
+      q('.scr-dev').value = cur.id;
+      q('.scr-scale').value = cur.scale;
+      q('.scr-pct').textContent = `${cur.scale}%`;
+      q('.scr-lock').value = cur.lock == null ? 'auto' : cur.lock ? 'on' : 'off';
+    };
+    const set = (patch) => { cur = saveScreen({ ...cur, ...patch }); sync(); };
+    q('.scr-dev').onchange = (e) => { const p = SCREENS.find((x) => x.id === e.target.value); set({ id: p.id, scale: p.scale }); };
+    q('.scr-scale').oninput = (e) => { q('.scr-pct').textContent = `${e.target.value}%`; };
+    q('.scr-scale').onchange = (e) => set({ scale: Number(e.target.value) }); // (applied on release: the page rescales under the finger)
+    q('.scr-lock').onchange = (e) => set({ lock: e.target.value === 'auto' ? null : e.target.value === 'on' });
+    q('[data-reset]').onclick = () => set({ id: 'auto', scale: 100, lock: null });
+    q('[data-done]').onclick = () => m.close();
+    sync();
   },
 
   /** Videos kept on this device so a refresh does not download them again (max 5 GB). */

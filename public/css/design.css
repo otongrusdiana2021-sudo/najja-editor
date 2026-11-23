@@ -223,3 +223,5 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   .ds-size { display: none; }
   .ds-primary span { display: none; }
 }
+/* (v1.13.2) Ukuran layar: with the zoom lock on (touch screens), no double-tap zoom */
+html[data-zoom-lock] { touch-action: manipulation; }

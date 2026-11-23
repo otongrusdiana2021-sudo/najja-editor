@@ -63,6 +63,8 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
+/* (v1.13.2) Ukuran layar: with the zoom lock on (touch screens), no double-tap zoom */
+html[data-zoom-lock] { touch-action: manipulation; }
 body {
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
@@ -94,7 +96,7 @@ input, textarea { user-select: text; }
 body.ready .boot { opacity: 0; visibility: hidden; }
 
 /* Layout: top bar · preview · timeline · toolbar (sheets slide over timeline + toolbar) */
-#app { position: relative; height: 100vh; height: 100dvh; display: grid; grid-template-rows: var(--top-h) minmax(0, 1fr) var(--tl-h) calc(var(--tool-h) + var(--safe-b)); overflow: hidden; }
+#app { position: relative; height: 100vh; height: 100dvh; height: calc(100dvh / var(--ui-zoom, 1)); display: grid; grid-template-rows: var(--top-h) minmax(0, 1fr) var(--tl-h) calc(var(--tool-h) + var(--safe-b)); overflow: hidden; }
 
 /* Top bar */
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 6px; gap: 10px; padding-top: env(safe-area-inset-top, 0px); }

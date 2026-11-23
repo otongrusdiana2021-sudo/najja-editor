@@ -10,11 +10,12 @@ import { textEl, shapeEl, slotEl, iconEl, emojiEl, badgeEl, swatchEl, TEXT_KINDS
 import { templatesFor, COMBOS, ICON_NODES } from './templates.js';
 import { searchIcons } from './assets.js';
 import { SAFE_PIXELS } from './exportcheck.js';
+import { toCss } from '../core/screen.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const DPR = () => Math.min(2, window.devicePixelRatio || 1);
-const narrow = () => window.matchMedia('(max-width: 820px)').matches;
+const narrow = () => toCss(window.innerWidth) <= 820; // (the page's width: under CSS zoom it differs from the window's)
 const esc = (s) => escapeHtml(String(s ?? ''));
 
 // ---- interface icons (simple strokes, drawn for Najja)
@@ -778,12 +779,13 @@ export class UI {
     return p;
   }
   place(p, anchor) {
-    const r = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y, width: 0, height: 0 };
+    const s = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: anchor.x, top: anchor.y, bottom: anchor.y, width: 0 };
+    const r = { left: toCss(s.left), top: toCss(s.top), bottom: toCss(s.bottom), width: toCss(s.width) }; // (in page px: Ukuran layar)
     const pw = p.offsetWidth;
     const ph = p.offsetHeight;
-    const x = clamp(r.left + r.width / 2 - pw / 2, 8, window.innerWidth - pw - 8);
+    const x = clamp(r.left + r.width / 2 - pw / 2, 8, toCss(window.innerWidth) - pw - 8);
     let y = r.bottom + 8;
-    if (y + ph > window.innerHeight - 8) y = Math.max(8, r.top - ph - 8);
+    if (y + ph > toCss(window.innerHeight) - 8) y = Math.max(8, r.top - ph - 8);
     p.style.left = `${x}px`;
     p.style.top = `${y}px`;
   }
@@ -1109,8 +1111,8 @@ export class UI {
       items[+b.dataset.mi].run();
     }), 'ds-menu');
     const p = this.popEl;
-    p.style.left = `${clamp(x, 8, window.innerWidth - p.offsetWidth - 8)}px`;
-    p.style.top = `${clamp(above ? y - p.offsetHeight : y, 8, window.innerHeight - p.offsetHeight - 8)}px`;
+    p.style.left = `${clamp(toCss(x), 8, toCss(window.innerWidth) - p.offsetWidth - 8)}px`;
+    p.style.top = `${clamp(above ? toCss(y) - p.offsetHeight : toCss(y), 8, toCss(window.innerHeight) - p.offsetHeight - 8)}px`;
   }
   contextMenu(x, y, key = 'menu') {
     const app = this.app;

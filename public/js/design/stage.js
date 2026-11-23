@@ -5,6 +5,7 @@
 import { drawPage, boxOf, envFor } from './draw.js';
 import { aabb, union, hit, snap, snapAngle } from './model.js';
 import { layoutText } from '../render.js';
+import { toCss, uiZoom } from '../core/screen.js'; // (v1.13.2) Ukuran layar: screen px → page px under CSS zoom
 
 const ROT_ICON = '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>';
 const r4 = (v) => Math.round(v * 10000) / 10000;
@@ -82,7 +83,7 @@ export class Stage {
     this.pageTop = Math.round(Math.max(padTop, (H - ph) / 2 + (sh > ph + padTop + padBottom ? (padTop - padBottom) / 2 : 0)));
     Object.assign(this.pageEl.style, { left: `${this.pageLeft}px`, top: `${this.pageTop}px`, width: `${pw}px`, height: `${ph}px` });
     // the canvas's pixels: the screen's (≤ 2×), never more than a tablet can hold
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(2, window.devicePixelRatio || 1) * uiZoom();
     let bs = this.zoom * dpr;
     bs = Math.min(bs, 4096 / Math.max(d.width, d.height), Math.sqrt(16e6 / (d.width * d.height)));
     this.bs = bs;
@@ -101,13 +102,13 @@ export class Stage {
     this.zoom = Math.max(0.05, Math.min(8, z));
     this.layout();
     // the point under the fingers stays there
-    this.el.scrollLeft = this.pageLeft + before.x * this.zoom - (ax - r.left);
-    this.el.scrollTop = this.pageTop + before.y * this.zoom - (ay - r.top);
+    this.el.scrollLeft = this.pageLeft + before.x * this.zoom - toCss(ax - r.left);
+    this.el.scrollTop = this.pageTop + before.y * this.zoom - toCss(ay - r.top);
   }
   zoomFit() { this.fit = true; this.layout(); this.el.scrollLeft = 0; this.el.scrollTop = 0; }
   clientToPage(x, y) {
     const r = this.pageEl.getBoundingClientRect();
-    return { x: (x - r.left) / this.zoom, y: (y - r.top) / this.zoom };
+    return { x: toCss(x - r.left) / this.zoom, y: toCss(y - r.top) / this.zoom };
   }
   pagePoint(e) { return this.clientToPage(e.clientX, e.clientY); }
 
@@ -274,8 +275,8 @@ export class Stage {
       const dx = e.clientX - op.client.x;
       const dy = e.clientY - op.client.y;
       if (Math.abs(dx) + Math.abs(dy) > 4) op.moved = true;
-      this.el.scrollLeft = op.scroll.x - dx;
-      this.el.scrollTop = op.scroll.y - dy;
+      this.el.scrollLeft = op.scroll.x - toCss(dx);
+      this.el.scrollTop = op.scroll.y - toCss(dy);
       return;
     }
     if (op.kind === 'marq') {
@@ -479,8 +480,8 @@ export class Stage {
     this.zoom = Math.max(0.05, Math.min(8, op.z0 * (d / op.d0)));
     this.layout();
     const r = this.el.getBoundingClientRect();
-    this.el.scrollLeft = this.pageLeft + op.anchor.x * this.zoom - (mid.x - r.left);
-    this.el.scrollTop = this.pageTop + op.anchor.y * this.zoom - (mid.y - r.top);
+    this.el.scrollLeft = this.pageLeft + op.anchor.x * this.zoom - toCss(mid.x - r.left);
+    this.el.scrollTop = this.pageTop + op.anchor.y * this.zoom - toCss(mid.y - r.top);
   }
 
   // ---- editing a text where it is

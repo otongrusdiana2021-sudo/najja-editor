@@ -1,6 +1,7 @@
 // Toasts, context menus and modal dialogs.
 import { icon } from './icons.js';
 import { escapeHtml } from './util.js';
+import { toCss } from './core/screen.js';
 
 let toastHost = null;
 let aiToast = null;
@@ -50,8 +51,9 @@ export function contextMenu(x, y, items) {
     : `<button data-i="${i}" ${it.disabled ? 'disabled' : ''} class="${it.danger ? 'danger' : ''}">${it.icon ? icon(it.icon, 15) : '<span class="ic-sp"></span>'}<span>${escapeHtml(it.label)}</span>${it.kbd ? `<kbd>${escapeHtml(it.kbd)}</kbd>` : ''}</button>`)).join('');
   document.body.appendChild(menuEl);
   const r = menuEl.getBoundingClientRect();
-  menuEl.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`;
-  menuEl.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
+  // x, y, innerWidth and the box are on screen; the style is in page px (they differ under CSS zoom: Ukuran layar)
+  menuEl.style.left = `${toCss(Math.min(x, innerWidth - r.width - 8))}px`;
+  menuEl.style.top = `${toCss(Math.min(y, innerHeight - r.height - 8))}px`;
   menuEl.addEventListener('click', (e) => {
     const b = e.target.closest('button[data-i]');
     if (!b) return;

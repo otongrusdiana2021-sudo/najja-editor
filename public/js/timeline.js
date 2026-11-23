@@ -13,6 +13,7 @@ import { EFFECTS, TRANSITIONS } from './presets.js';
 import * as actions from './actions.js';
 import { contextMenu } from './ui.js';
 import { metrics } from './metrics.js';
+import { toCss } from './core/screen.js'; // (v1.13.2) Ukuran layar: screen px → page px under CSS zoom
 
 const MAIN_H = 64;
 const LANE_H = 30;
@@ -124,7 +125,7 @@ export class Timeline {
 
   timeAt(clientX) {
     const r = this.scroll.getBoundingClientRect();
-    return Math.max(0, (clientX - r.left + this.scroll.scrollLeft - this.pad) / this.pps);
+    return Math.max(0, (toCss(clientX - r.left) + this.scroll.scrollLeft - this.pad) / this.pps);
   }
   xOf(t) { return this.pad + t * this.pps; }
 
@@ -499,7 +500,7 @@ export class Timeline {
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
       const r = this.scroll.getBoundingClientRect();
       const overflowY = this.scroll.scrollHeight > this.scroll.clientHeight + 2;
-      const nearTop = e.clientY - r.top < TOP_PAD + MAIN_H + GAP;
+      const nearTop = toCss(e.clientY - r.top) < TOP_PAD + MAIN_H + GAP;
       if (e.shiftKey ? overflowY : (!overflowY || nearTop)) {
         e.preventDefault();
         if (e.shiftKey) this.scroll.scrollTop += e.deltaY;
@@ -621,8 +622,8 @@ export class Timeline {
       if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
       moved = true;
       this.body.classList.add('panning');
-      this.scroll.scrollLeft = sl - (ev.clientX - sx);
-      this.scroll.scrollTop = st - (ev.clientY - sy);
+      this.scroll.scrollLeft = sl - toCss(ev.clientX - sx);
+      this.scroll.scrollTop = st - toCss(ev.clientY - sy);
     };
     const up = (ev) => {
       window.removeEventListener('pointermove', move);
@@ -742,7 +743,7 @@ export class Timeline {
   /** Where a clip of `type` would land for a pointer at clientY: an existing lane of its kind, or a new one. */
   dropTarget(clientY, type) {
     const r = this.scroll.getBoundingClientRect();
-    const y = clientY - r.top + this.scroll.scrollTop;
+    const y = toCss(clientY - r.top) + this.scroll.scrollTop;
     const kind = TRACK_KIND_FOR[type];
     const row = this.layoutRows.find((rw) => y >= rw.top - GAP / 2 && y < rw.top + rw.h + GAP / 2);
     if (row) {

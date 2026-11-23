@@ -92,6 +92,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
 | P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
 | P1-2 Job system | ✅ selesai. PR #3 (`01fbfff`) **di produksi sejak 2026-11-23**. Jalur sukses `apply_style`/`get_transcript` di latar belakang belum diuji dengan layanan AI sungguhan |
+| DESIGN §3.1 → Ukuran layar per perangkat | ✅ selesai di `main` (belum di-deploy). Desain tetap; tiap perangkat mengatur skalanya di menu akun. Belum dicoba di iPad asli dan Safari Mac |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -511,3 +512,21 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Proses: fast-forward, lalu build 2 dtk (container lama tetap melayani), lalu `docker compose up -d najja` (`COMPOSE_FILE` memakai kedua file).
   - Hasil: port `127.0.0.1:3333` langsung terpasang, `healthz` 200 dalam 2 dtk, **tanpa downtime yang teramati**.
   - App di container memuat 30 tool (termasuk `get_job`, `list_jobs`, `cancel_job`). Log 0 error, dan endpoint publik normal.
+
+- **Ukuran layar per perangkat (DESIGN §3.1, keputusan pemilik 2026-11-23):**
+  - Desain tidak diubah. Menu akun (avatar) mendapat **Ukuran layar**: pilihan perangkat (Otomatis, HP, iPad mini/iPad/iPad Pro, laptop 13–16 inci, monitor 24/27 inci) dengan saran "disarankan", ukuran 75–130% per 5, dan kunci zoom (Otomatis/Nyala/Mati). Disimpan di `localStorage`, jadi tiap perangkat punya sendiri, dan berlaku juga di Najja Desain.
+  - Aturan disalin dari app ecom (`src/lib/theme.js`): `public/js/core/screen.js` (tanpa DOM) dan `public/js/screen.js` (menerapkan).
+  - **Beda dengan ecom (ditemukan saat uji):** CSS `zoom` pada `<html>` saja membuat pointer meleset di editor. Di 90%, ujung klip 0–4 dtk terbaca 3,28 dtk, karena posisi pointer dan `getBoundingClientRect` dihitung di layar sedangkan `scrollLeft`, `pps`, dan style dalam px halaman. Breakpoint `@media` juga melihat lebar jendela, sehingga di 110% tombol Ekspor terpotong. Jadi caranya dipilih per browser:
+    - **Layar sentuh (iPad, HP):** skala viewport (`initial-scale`, dan dikunci dengan `minimum-scale`/`maximum-scale`). Satu ruang koordinat, jadi kode pointer tidak berubah.
+    - **Chrome/Edge/Firefox di komputer:** CSS zoom. Semua titik yang mencampur ukuran layar dan px halaman memakai `toCss()`: timeline (`timeAt`, lajur, geser), handle preview, kanvas Desain (titik, zoom, geser, pinch), menu dan popover. Breakpoint `@media` diskalakan ikut (`scaleMedia`).
+    - **Safari di Mac:** aturan CSS zoom-nya masih versi lama (kotak dilaporkan dalam px-nya sendiri, WebKit bug 77998), jadi tidak dipakai. Dialog mengarahkan ke zoom browser (⌘ + / ⌘ −).
+  - **Hasil uji di browser lokal (Chrome 156):**
+    - Di 90% dan 110%, posisi pointer ke waktu tepat (klip 0–4 dtk terbaca 0 dan 4).
+    - Seret klip 72 px layar di 90% menggeser 0,500 dtk (seharusnya 0,5). Di 110%, seret 0,25 dtk tepat.
+    - Seret teks di preview sejauh 10% lebar menggeser `x` 0,1, dan kotak seleksi ikut tepat (88,65 px). Di 110%, 20% tinggi menggeser `y` 0,1998.
+    - Najja Desain 110%: titik layar ke halaman tepat (tengah = 540, 540). Seret 100×50 px layar memindahkan bentuk 258×129 px halaman (seharusnya 258,4×129,2).
+    - Menu muncul di titik yang diminta (selisih 4 px sama seperti di 100%). `#app` tetap setinggi layar, dan di 110% bilah atas memakai tata letak ringkas dan muat.
+    - Emulasi tablet 744 px: mode viewport, lebar halaman 826 px di 90% (`visualViewport.scale` 0,9), dan pemetaan timeline tepat.
+  - **Test:** `test/screen-size.test.js` 5 test (saran perangkat, preset, kunci zoom, viewport meta, breakpoint). Suite: **285 test, 271 lulus, 0 gagal, 14 dilewati**.
+    - Seret klip dengan mouse sungguhan (panel uji): di 100% +0,5 dtk tepat, di 90% 1,25 → 1,75 dtk (seharusnya 1,750).
+  - **Belum diuji:** iPad asli (Safari) dan Safari Mac.

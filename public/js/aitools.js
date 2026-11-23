@@ -5,6 +5,7 @@
 import { icon } from './icons.js';
 import { escapeHtml, pickFiles, downloadBlob, sleep } from './util.js';
 import { toast } from './ui.js';
+import { toCss } from './core/screen.js';
 
 const TOOLS = {
   cutout: {
@@ -259,7 +260,7 @@ export class AiTools {
     const fit = () => {
       if (!box.isConnected) { window.removeEventListener('resize', fit); return; }
       const maxW = Math.min(820, this.el.querySelector('.ai-body').clientWidth - 32);
-      const k = Math.min(maxW / rec.result.width, (innerHeight * 0.6) / rec.result.height);
+      const k = Math.min(maxW / rec.result.width, (toCss(innerHeight) * 0.6) / rec.result.height);
       box.style.width = `${Math.round(rec.result.width * k)}px`;
       box.style.height = `${Math.round(rec.result.height * k)}px`;
     };
