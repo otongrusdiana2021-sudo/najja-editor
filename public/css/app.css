@@ -97,7 +97,7 @@ body.ready .boot { opacity: 0; visibility: hidden; }
 .proj-name:focus { background: var(--panel-2); border-color: var(--accent); outline: none; }
 .save-state { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
 .save-state .spin { width: 10px; height: 10px; border: 2px solid var(--text-3); border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
-.save-state.conflict { color: var(--danger, #ff6b6b); cursor: pointer; text-decoration: underline dotted; }
+.save-state.conflict, .save-state.gone { color: var(--danger, #ff6b6b); cursor: pointer; text-decoration: underline dotted; }
 .conflict-list { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; color: var(--text-2); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .icon-btn { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; color: var(--text-2); transition: background 0.15s, color 0.15s, transform 0.1s; }

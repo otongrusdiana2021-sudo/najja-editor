@@ -399,3 +399,30 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 - **Kontrak MCP:** nama, schema, dan pesan error sama. Perubahan perilaku: panggilan yang ditolak tidak lagi mengubah proyek (perbaikan bug).
 - **CI:** branch `fix/v20-update-clip-atomic` di-push, dan run 45135252249 hijau di Node 22.
 - **Belum tercakup:** kegagalan **layanan** hapus latar (mis. model belum siap) yang terjadi setelah perubahan lain. Itu bukan argumen yang ditolak, dan perubahan lainnya sah dengan langkah undo sendiri.
+
+#### Perbaikan V19 — proyek yang dihapus di perangkat lain saat sedang terbuka (2026-11-23)
+
+- **Masalah yang terbukti:**
+  1. Polling `/rev` mendapat 404 setiap detik tanpa henti, dan pengguna tidak pernah diberi tahu.
+  2. **Ditemukan saat pengujian:** autosave yang masih tertunda saat proyek dihapus di perangkat lain **membuat ulang proyek itu diam-diam** di server. Server menerima `PUT` dengan `baseRev > 0` untuk proyek yang sudah tidak ada. Dibuktikan di browser: proyek kembali dengan rev 1.
+  3. Najja Desain akan mencoba ulang tanpa henti setiap 5 dtk kalau server menolak.
+- **Perbaikan:**
+  - `lib/storage.js` `putProject`: proyek tidak ada + `baseRev > 0` + bukan `force` → **410** `{gone: true}`. Simpan pertama (`baseRev` 0), simpan paksa, dan klien lama (tanpa `baseRev`) tetap menulis.
+  - `public/js/core/sync.js` (baru) `revCheck()`: keputusan polling (`gone`/`wait`/`same`/`mine`/`follow`) sebagai fungsi murni.
+  - `public/js/store.js`: 410 → `saveState: 'gone'`, event `gone`, tanpa retry. Save biasa ditahan sampai pengguna memilih, dan `save({ force: true })` tetap jalan. Jawaban untuk proyek lain yang sudah ditutup diabaikan (`loads`).
+  - `public/js/app.js`:
+    - Polling berhenti untuk proyek yang hilang (404), dan event `gone` dari autosave memunculkan dialog yang sama sekali per proyek. Dialognya memakai `modal` + `conflict-list` yang sudah ada.
+    - **Simpan lagi** memulihkan proyek dengan simpan paksa dan isi yang ada di perangkat ini. **Tutup** kembali ke beranda tanpa menyimpan, menghapus draft perangkat, dan proyek tetap terhapus.
+    - Indikator simpan menulis "Dihapus di perangkat lain — pilih tindakan" (gaya dan klik sama dengan konflik).
+  - `public/js/design/app.js`: 410 memunculkan dialog "Desain ini sudah dihapus" (pola `ds-modal` yang sama dengan dialog konflik Desain). Selama terhapus, label tetap jujur dan edit tidak mengirim request. "Simpan lagi" memakai simpan paksa.
+  - `public/css/app.css`: `.save-state.gone` memakai gaya `.save-state.conflict`.
+- **Test:**
+  - Unit: `test/core-sync.test.js` (baru), `test/storage.test.js` (+1: 410, force, `baseRev` 0, klien lama), `test/store-save.test.js` (+1: 410 tanpa retry, save biasa ditahan, force jalan).
+  - Suite **270 test, 256 lulus, 0 gagal**. Di satu dari dua run, `jobs.test.js` yang sudah tercatat flaky (T5) gagal lagi; file itu tidak disentuh.
+- **Browser asli (server lokal di-restart):**
+  - **Hapus saat terbuka:** satu 404, dialog muncul, lalu 0 request `/rev` dalam 4 dtk. **Simpan lagi** → proyek kembali (200) dan polling normal lagi.
+  - **Race (edit lalu langsung dihapus):** autosave mendapat 410 dan dialog muncul. Proyek **tetap terhapus** (404), edit lokal masih ada, dan label jujur. **Tutup** → beranda, proyek tetap 404, draft perangkat terhapus.
+  - **Najja Desain:** dialog muncul, 0 retry dalam 6 dtk, label "Dihapus di perangkat lain", dan edit selama terhapus mengirim 0 request. **Simpan lagi** memulihkan dengan nama terbaru, dan label kembali "Tersimpan".
+  - Ditemukan dan diperbaiki saat uji: label Desain sempat tertahan di "Menyimpan…" karena ada save kedua yang antre.
+  - Semua proyek dan desain uji dihapus, termasuk satu yang sempat dibuat ulang oleh race di kode lama.
+- **Kontrak:** tidak ada perubahan pada tool MCP. REST `PUT /api/projects/:id` kini bisa menjawab 410. Klien yang dipakai (editor dan Desain) menanganinya.

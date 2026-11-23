@@ -148,6 +148,7 @@ class DesignApp {
   }
   async save({ force = false } = {}) {
     clearTimeout(this.saveT);
+    if (this.isGone && !force) { this.unsaved = true; this.ui.saveState('error', 'Dihapus di perangkat lain'); return undefined; } // (V19: waits for the user's choice)
     if (this.saving) { this.pendingSave = true; return this.savingP; }
     this.saving = true;
     this.unsaved = false;
@@ -160,11 +161,13 @@ class DesignApp {
         delete rec.rev;
         const res = await storage.putProject(rec, { baseRev: storage.server ? this.baseRev : null, force });
         if (res?.rev != null) this.baseRev = res.rev;
+        this.isGone = false;
         this.ui.saveState(this.unsaved ? 'dirty' : this.uploadsN ? 'uploading' : storage.server ? 'saved' : 'local');
         this.retryUploads();
       } catch (err) {
         this.unsaved = true;
         if (err.status === 409) this.conflict();
+        else if (err.status === 410 && err.data?.gone) this.gone(); // (V19: no retry for ever)
         else {
           this.ui.saveState('error', 'Gagal menyimpan · dicoba lagi');
           clearTimeout(this.retryT);
@@ -189,6 +192,22 @@ class DesignApp {
     document.body.appendChild(bg);
     bg.addEventListener('click', (e) => {
       if (e.target.closest('[data-reload]')) location.reload();
+      if (e.target.closest('[data-force]')) { bg.remove(); this.save({ force: true }); }
+    });
+  }
+  /** (v1.13.2, V19) Deleted on another device or tab after it was opened here: the user keeps it or leaves. */
+  gone() {
+    this.isGone = true;
+    this.ui.saveState('error', 'Dihapus di perangkat lain');
+    if (document.querySelector('.ds-modal-bg[data-gone]')) return;
+    const bg = document.createElement('div');
+    bg.className = 'ds-modal-bg';
+    bg.dataset.gone = '1';
+    bg.innerHTML = `<div class="ds-modal"><h2>Desain ini sudah dihapus</h2><p class="ds-hint" style="font-size:13px">Desain ini dihapus dari perangkat atau tab lain setelah dibuka di sini. Simpan lagi untuk memulihkannya dengan isi yang ada di sini, atau kembali ke beranda (desain tetap terhapus).</p>
+      <div class="ds-actions"><button class="ds-btn" data-home>Ke beranda</button><button class="ds-btn acc" data-force>Simpan lagi</button></div></div>`;
+    document.body.appendChild(bg);
+    bg.addEventListener('click', (e) => {
+      if (e.target.closest('[data-home]')) { this.unsaved = false; location.href = '/'; }
       if (e.target.closest('[data-force]')) { bg.remove(); this.save({ force: true }); }
     });
   }

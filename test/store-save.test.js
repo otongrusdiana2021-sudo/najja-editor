@@ -176,3 +176,32 @@ test('failed saves wait longer each time (5, 10, 20, 40, 60, 60 s) and start ove
   assert.equal(store.retryMs, 0);
   assert.equal(srv.saved.name, 'satu');
 });
+
+test('(V19) the server says the project was deleted (410): no retry, no more autosaves, the app is told; keeping it forces one save', async () => {
+  const srv = setup();
+  store.mutate('nama', (P) => { P.name = 'satu'; });
+  await store.save();
+  const gone = [];
+  const off = store.on('gone', (id) => gone.push(id));
+  srv.putProject = async (rec, { force = false } = {}) => {
+    srv.calls.push({ force });
+    if (!force) throw Object.assign(new Error('Proyek sudah dihapus.'), { status: 410, data: { gone: true } });
+    return { ok: true, rev: 1 };
+  };
+  storage.putProject = srv.putProject;
+  try {
+    srv.calls.length = 0;
+    store.mutate('nama', (P) => { P.name = 'dua'; });
+    await store.save();
+    assert.equal(store.saveState, 'gone');
+    assert.deepEqual(gone, [store.P.id]);
+    assert.equal(store.retryMs, 0, 'no retry');
+    store.mutate('nama', (P) => { P.name = 'tiga'; });
+    await store.save();
+    assert.equal(srv.calls.length, 1, 'no more saves until the user chooses');
+    await store.save({ force: true });
+    assert.deepEqual(srv.calls.map((c) => c.force), [false, true]);
+    assert.equal(store.saveState, 'saved');
+    assert.equal(store.gone, null);
+  } finally { off(); }
+});

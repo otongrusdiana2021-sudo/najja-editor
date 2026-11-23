@@ -398,6 +398,7 @@ class Store {
     this.baseRev = 0;
     this.dirty = false;
     this.conflict = null; // { rev, updatedAt } of the server version while a conflict waits for the user
+    this.gone = null; // (V19) id of the open project when the server said it was deleted (410)
     this._saving = null;
     // (v1.13.2) loads: bumped when a project is opened (setProject). edits: bumped on every change to save
     // (scheduleSave, also when media info changes without touch). A save's answer belongs to the project as it was
@@ -524,6 +525,7 @@ class Store {
   setProject(p, { keepHistory = false, baseRev = null, dirty = false } = {}) {
     this.project = p;
     this.loads++;
+    this.gone = null;
     this.baseRev = baseRev ?? (p.rev || 0);
     this.dirty = dirty;
     this.conflict = null;
@@ -587,6 +589,7 @@ class Store {
   async _save({ force }) {
     if (!this.dirty && !force) return;
     if (this.conflict && !force) return; // waiting for the user's choice
+    if (this.gone === this.project.id && !force) return; // (V19) deleted elsewhere: waiting for the user's choice
     this.saveState = 'saving';
     this.emit('save', this.saveState);
     const rec = clone(this.project);
@@ -604,6 +607,7 @@ class Store {
       if (this.loads !== load) return;
       if (res?.rev != null) this.baseRev = res.rev;
       this.conflict = null;
+      this.gone = null;
       this.retryMs = 0;
       clearTimeout(this.retryTimer);
       if (this.edits === edits) { // nothing changed while saving
@@ -614,6 +618,17 @@ class Store {
       this.saveState = this.dirty ? 'saving' : 'saved';
       if (this.dirty) this.scheduleSave();
     } catch (err) {
+      if (err.status === 410 && err.data?.gone) {
+        // (v1.13.2, V19) the project was deleted on another device after this one opened it: the save would have
+        // brought it back silently. No retry; the app asks (keep it: save({ force: true }), or close it).
+        if (this.loads !== load) return; // (another project is open now)
+        metrics.count('project_gone');
+        this.gone = id;
+        this.saveState = 'gone';
+        this.emit('save', this.saveState);
+        this.emit('gone', id);
+        return;
+      }
       if (err.status === 409 && err.data?.conflict) {
         // Another device saved this project since we loaded it: never overwrite silently (the app asks).
         metrics.count('revision_conflict_count');
