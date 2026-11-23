@@ -8,6 +8,7 @@ import { clamp } from './util.js';
 import { metrics } from './metrics.js';
 import { ensureCutout, onMaskReady } from './segment.js';
 import { createQueue } from './cmdqueue.js';
+import { FrameSource, videoFileFor, decoderSupported } from './framesource.js';
 
 const AC = window.AudioContext || window.webkitAudioContext;
 // A main video reporting "not enough data" for less than this is ridden out (the clock keeps going): a clip that
@@ -26,6 +27,14 @@ const LINGER = 0.25;
 const NUDGE_START = 0.04;
 const NUDGE_STOP = 0.012;
 const NUDGE_MIN_MS = 1000;
+// (v1.14, P2-6) The preview's own decoder (framesource.js): frames decoded ahead of the clock while a stretch plays,
+// and of a stretch coming up next (its first pictures, ready before the cut).
+const DEC_AHEAD = 10;
+const DEC_PRIME = 3;
+// The picture is this far behind the clock: the playhead waits for it (after STALL_GRACE_MS), like a stalled video.
+const DEC_STALL_LAG = 0.25;
+const ENGINE_PREF = 'najja.previewEngine'; // 'element': the <video> elements as before v1.14 (Diagnostik switch)
+const loadEnginePref = () => { try { return localStorage.getItem(ENGINE_PREF) === 'element' ? 'element' : 'auto'; } catch { return 'auto'; } };
 
 export class Engine {
   constructor(canvas) {
@@ -36,6 +45,11 @@ export class Engine {
     this.playing = false;
     this.loop = false;
     this.els = new Map(); // element key (first clip of a chain) -> { el, mediaId, url, clip, gain, src, hold }
+    // (v1.14) the same slots, decoded by the editor itself: element key -> FrameSource (pictures of video clips)
+    this.decs = new Map();
+    this.decFailed = new Set(); // media whose decoder failed here: their <video> element plays them
+    this.frameMode = loadEnginePref(); // 'auto': own decoder where it can play the clip; 'element': always <video>
+    this.decShown = 0; // pictures of the main track's decoder shown (video_presented_fps)
     this.buffering = false;
     // The main video's picture drives the timeline while it plays (see tick). false: the old wall clock that
     // seeks videos which fall behind — kept as a switch for A/B measurements.
@@ -122,9 +136,10 @@ export class Engine {
     this.ctxDown = false;
     this.audioClock = this.useAudioClock();
     metrics.gauge('audio_mode', this.audioClock ? 'scheduled' : 'element');
+    metrics.gauge('preview_engine', this.frameMode === 'element' || !decoderSupported() ? 'element' : 'decoder');
     if (this.audioClock) this.audio.start(this.time);
     this.sync();
-    this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, shown: 0, needed: 0, vq: this.videoQuality(), lastTick: 0, gaps: 0 };
+    this.session = { at: performance.now(), t: this.time, draws: 0, skipped: 0, shown: 0, needed: 0, vq: this.videoQuality(), lastTick: 0, gaps: 0, dec0: this.decShown, decFrames: 0, decLate: 0 };
     this.emit('play');
   }
   pause() {
@@ -179,7 +194,10 @@ export class Engine {
     // new picture, so drawing one of two is not a miss.
     const expected = S.needed > 0 ? S.needed : Math.max(1, (this.time - S.t) * fps);
     metrics.sample('fps_rendered', S.draws / secs);
-    if (S.shown > 0) metrics.sample('video_presented_fps', S.shown / secs); // pictures the video decoder delivered
+    const shown = S.shown + (this.decShown - S.dec0); // pictures the video decoder delivered (element or own decoder)
+    if (shown > 0) metrics.sample('video_presented_fps', shown / secs);
+    // (v1.14) own decoder: pictures shown more than a frame behind the clock (it did not keep up)
+    if (S.decFrames > 0) metrics.sample('decoder_late_frames_pct', (100 * S.decLate) / S.decFrames);
     metrics.sample('playback_speed_pct', (100 * (this.time - S.t)) / secs); // timeline seconds per real second
     metrics.count('raf_gap_over_50ms', S.gaps);
     if (S.held) metrics.count('clock_held_for_video', S.held); // ticks the clock waited for a slow decoder
@@ -194,6 +212,11 @@ export class Engine {
       const c = E.clip;
       if (c?.type !== 'video' || this.time < c.start || this.time >= c.start + c.duration) continue;
       if (!this.frameReady(E)) return false;
+    }
+    for (const D of this.decs.values()) {
+      const c = D.clip;
+      if (!c || D.failed || this.time < c.start || this.time >= c.start + c.duration) continue;
+      if (!D.final(this.localTime(c, this.time))) return false;
     }
     return true;
   }
@@ -236,11 +259,14 @@ export class Engine {
       if (this.buffering) {
         // Hold the playhead until the main video has data again (instead of racing ahead and flashing black).
         const M = this.masterEl();
+        const D = M ? null : this.masterDec();
         this.clockBase = this.time;
         this.clockStart = now;
         const giveUp = now - this.bufferSince > 15000;
-        if (!M || this.exportTarget || Engine.canResume(M.el) || giveUp) {
+        const ready = D ? D.canResume(this.localTime(D.clip, this.time)) : !M || Engine.canResume(M.el);
+        if (this.exportTarget || ready || giveUp) {
           if (M && giveUp) M.noHold = true; // this file will not load: play on rather than stall again
+          if (D) { if (giveUp) D.noHold = true; D.starvedSince = null; }
           if (M && !M.el.seeking) {
             const c = M.clip;
             const tt = c.start + (M.el.currentTime - c.in) / (c.speed || 1);
@@ -266,6 +292,7 @@ export class Engine {
           this.leaveAudioClock(now, `scheduler error: ${err?.message || err}`);
         }
         this.watchStall(now, this.masterEl());
+        this.watchDecStall(now, this.masterDec());
       } else {
         const wall = this.clockBase + (now - this.clockStart) / 1000;
         this.time = wall;
@@ -286,6 +313,7 @@ export class Engine {
           }
         }
         this.watchStall(now, M);
+        if (!this.exportTarget) this.watchDecStall(now, this.masterDec());
       }
       const d = this.duration;
       if (this.time >= d) {
@@ -369,6 +397,28 @@ export class Engine {
     }
   }
 
+  /**
+   * (v1.14) The main track's own decoder: its picture is more than DEC_STALL_LAG behind the clock (the bytes are still
+   * coming from the server, or the decoder cannot keep up): hold the playhead after the grace time, like watchStall.
+   */
+  watchDecStall(now, D) {
+    if (!D || D.noHold || D.failed || this.buffering) return;
+    if (D.lag(this.localTime(D.clip, this.time)) > DEC_STALL_LAG) {
+      if (D.starvedSince == null) D.starvedSince = now;
+      if (now - D.starvedSince >= STALL_GRACE_MS) {
+        this.buffering = true;
+        this.bufferSince = now;
+        if (this.audioClock) this.audio.stop();
+        metrics.count(D.playAt && now - D.playAt < 1000 ? 'buffer_at_clip_start' : 'buffer_mid_clip');
+        metrics.count(D.waitingBytes ? 'buffer_decoder_network' : 'buffer_decoder_slow');
+        this.emit('buffer');
+      }
+    } else if (D.starvedSince != null) {
+      D.starvedSince = null;
+      metrics.count('stall_ridden_out');
+    }
+  }
+
   env(s, boxes = null) {
     return {
       project: store.P,
@@ -385,24 +435,44 @@ export class Engine {
       return img && img.complete && img.naturalWidth ? { el: img, w: img.naturalWidth, h: img.naturalHeight } : null;
     }
     if (clip.type === 'video') {
-      const E = this.els.get(this.keyFor(clip));
-      const v = E?.el;
-      // (the element may be serving another stretch of its file now: then it has nothing of this clip to show)
-      const mine = E && this.sameStretch(E.clip, clip);
-      if (mine && v.readyState >= 2 && v.videoWidth && !v.seeking) return { el: v, w: v.videoWidth, h: v.videoHeight };
-      if (mine && E.hold) return E.hold; // while seeking or stalled: the last picture instead of a black gap
+      const own = this.pictureOf(clip);
+      if (own) return own;
       // (v1.12.7) a cut whose picture is not there yet: the main clip before it stays a moment (its element lingers)
       if (clip.trackId === 'main') {
         const plan = store.plan();
         const prev = plan.main.clips[(plan.mainIndex.get(clip.id) ?? 0) - 1];
-        const PE = prev && prev.type === 'video' && this.els.get(this.keyFor(prev));
-        const pmine = PE && this.sameStretch(PE.clip, prev);
-        const pv = pmine && PE.el;
-        if (pv && pv.readyState >= 2 && pv.videoWidth && !pv.seeking) { metrics.count('cut_held_previous_picture'); return { el: pv, w: pv.videoWidth, h: pv.videoHeight }; }
-        if (pmine && PE.hold) return PE.hold;
+        const p = prev && prev.type === 'video' && this.pictureOf(prev, true);
+        if (p) { if (!p.hold) metrics.count('cut_held_previous_picture'); return p.hold ? p.pic : p; }
       }
       return null;
     }
+    return null;
+  }
+
+  /**
+   * The picture a video clip shows now: from its own decoder (v1.14) or its element. prev: asked for the clip before a
+   * cut (returns { hold, pic } for an element's kept picture, so the caller counts only real pictures).
+   */
+  pictureOf(clip, prev = false) {
+    const key = this.keyFor(clip);
+    const D = this.decs.get(key);
+    if (D && !D.failed && this.sameStretch(D.clip, clip)) {
+      const lt = this.localTime(clip, this.time);
+      const f = D.frame(lt);
+      if (!f) return null;
+      if (!prev && clip.trackId === 'main' && this.playing && this.time >= clip.start && this.time < clip.start + clip.duration) {
+        if (f !== D.counted) { D.counted = f; this.decShown++; }
+        const S = this.session;
+        if (S && !this.buffering) { S.decFrames++; if (D.lag(lt) > D.fd * 0.5) S.decLate++; }
+      }
+      return { el: f, w: f.displayWidth, h: f.displayHeight };
+    }
+    const E = this.els.get(key);
+    const v = E?.el;
+    // (the element may be serving another stretch of its file now: then it has nothing of this clip to show)
+    const mine = E && this.sameStretch(E.clip, clip);
+    if (mine && v.readyState >= 2 && v.videoWidth && !v.seeking) return { el: v, w: v.videoWidth, h: v.videoHeight };
+    if (mine && E.hold) return prev ? { hold: true, pic: E.hold } : E.hold; // while seeking or stalled: the last picture instead of a black gap
     return null;
   }
 
@@ -586,6 +656,8 @@ export class Engine {
     const sampleAv = running && now - (this.avAt || 0) > 250;
     if (sampleAv) this.avAt = now;
     const alive = new Set();
+    const aliveDec = new Set();
+    this.decWaiting = new Set(); // clips whose file the decoder is still opening (no picture yet; settle waits)
     for (const [key, clips] of groups) {
       // The clip driving this element now: the one on screen, else the next to start, else the one just ended.
       // (v1.12.7: an element serves several stretches of its file in turn — plan.js elementKeysOf. One that just
@@ -607,6 +679,21 @@ export class Engine {
       }
       // a sound-only clip the scheduler plays needs no element
       if (clip.type === 'audio' && this.audioClock && !this.exportTarget && this.audio.covers(clip)) continue;
+      // (v1.14) the picture from the editor's own decoder, where it can play this clip
+      if (clip.type === 'video') {
+        const file = this.decodes(clip);
+        const E0 = this.els.get(key);
+        // an element showing this clip right now keeps it while playing (a swap would show a gap); the decoder takes
+        // the slot at its next stretch, or once paused
+        const shownNow = E0 && this.playing && E0.el.videoWidth && t >= clip.start - 0.6 && t < clip.start + clip.duration && this.sameStretch(E0.clip, clip);
+        if (file && !shownNow) {
+          if (E0) this.disposeEl(key);
+          if (file === 'wait') { this.decWaiting.add(clip.id); continue; }
+          this.syncDecoder(key, clip, file, t);
+          aliveDec.add(key);
+          continue;
+        }
+      }
       const tr = store.track(clip.trackId);
       const end = clip.start + clip.duration;
       let E = this.els.get(key);
@@ -736,9 +823,106 @@ export class Engine {
       if (!viaEl && !el.muted) el.muted = true;
     }
     for (const id of [...this.els.keys()]) if (!alive.has(id)) this.disposeEl(id);
+    for (const [id, D] of [...this.decs]) if (!aliveDec.has(id)) { D.close(); this.decs.delete(id); }
   }
 
   /** The main-track video on screen now (the preview clock waits for it when it runs out of data). */
+  /**
+   * (v1.14) Should the preview decode this video clip's picture itself? Returns its VideoFile, 'wait' while the file is
+   * being opened (one read of its sample tables), or false for the <video> element: the element mode (Diagnostik), a
+   * real-time export, a browser without WebCodecs, a file it cannot decode here (not H.264, rotated…), a heavy camera
+   * original, or a clip whose sound the scheduler cannot play (sped up, or sound not decodable here) — the element
+   * plays that sound.
+   */
+  decodes(clip) {
+    if (this.frameMode === 'element' || this.exportTarget || this.useExportSources) return false;
+    if (this.decFailed.has(clip.mediaId) || playsHeavyOriginal(clip.mediaId)) return false;
+    if (this.audio.audible(clip) && !((this.playing ? this.audioClock : this.useAudioClock()) && this.audio.covers(clip))) return false;
+    const f = videoFileFor(mediaRT.get(clip.mediaId));
+    if (!f || f.state === 'failed') return false;
+    if (f.state === 'opening') {
+      if (!f.hooked) { f.hooked = true; f.ready.then(() => { this.sync(); this.requestRender(); }); }
+      return 'wait';
+    }
+    return f;
+  }
+  /** Keep a slot's decoder on what its clip needs now: the frame at the playhead, ahead of it while playing. */
+  syncDecoder(key, clip, file, t) {
+    let D = this.decs.get(key);
+    if (D && (D.file !== file || D.failed || D.closed)) { D.close(); this.decs.delete(key); D = null; }
+    if (!D) {
+      D = new FrameSource(file, { onFrame: (src) => this.onDecFrame(src) });
+      this.decs.set(key, D);
+      metrics.count('decoder_created');
+    }
+    if (D.clip && !this.sameStretch(D.clip, clip)) {
+      // the slot moves on to the next stretch it shows: its picture belongs to the last one
+      D.drop();
+      D.starvedSince = null;
+      D.noHold = false;
+      metrics.count('element_reused');
+    }
+    D.clip = clip;
+    const speed = clip.speed || 1;
+    const active = t >= clip.start && t < clip.start + clip.duration;
+    const lt = this.localTime(clip, t);
+    const end = clip.in + clip.duration * speed;
+    if (this.playing && active) {
+      // the cut: was its first picture ready when the playhead got there? (what the iPad got wrong with <video>)
+      if (D.activeClip !== clip.id && !this.buffering) {
+        D.activeClip = clip.id;
+        D.playAt = performance.now();
+        if (clip.trackId === 'main' && t - clip.start < 0.1) metrics.count(D.final(lt) ? 'cut_picture_ready' : 'cut_picture_late');
+      }
+      // (the same number of frames at any speed: a sped-up clip needs a faster decoder, not more frames kept — more than
+      // a hardware decoder's output pictures stalls it)
+      D.want(lt, { playing: true, ahead: DEC_AHEAD, end });
+    } else {
+      if (!active) D.activeClip = null;
+      // coming up next (or just ended) while playing: its first pictures; paused: exactly the frame at the playhead
+      D.want(lt, this.playing ? { playing: true, ahead: DEC_PRIME, end } : { end });
+    }
+  }
+  /** A decoder has the picture for its target (redraw), or failed (its media goes back to the <video> element). */
+  onDecFrame(D) {
+    if (D.failed) {
+      const id = D.clip?.mediaId;
+      const msg = String(D.failed?.message || D.failed).slice(0, 160);
+      metrics.event('decoder_problem', { msg, file: String(store.media(id)?.name || id || '').slice(0, 40) });
+      // A hardware decoder the browser took back (Chrome, a tab in the background: QuotaExceededError "reclaimed") is
+      // simply made again. A third real failure of one media is final: its <video> element plays it from then on.
+      const reclaimed = D.failed?.name === 'QuotaExceededError' || /reclaim/i.test(msg);
+      this.decFails ||= new Map();
+      const n = (this.decFails.get(id) || 0) + (reclaimed ? 0 : 1);
+      this.decFails.set(id, n);
+      if (id && n >= 3) { this.decFailed.add(id); metrics.count('decoder_fallback'); }
+      setTimeout(() => { this.sync(); this.requestRender(); }, 0);
+    }
+    this.requestRender();
+  }
+  /** Preview engine (Diagnostik): 'auto' (own decoder where it can) or 'element' (<video> elements, before v1.14). */
+  setFrameMode(mode) {
+    this.frameMode = mode === 'element' ? 'element' : 'auto';
+    try { if (this.frameMode === 'element') localStorage.setItem(ENGINE_PREF, 'element'); else localStorage.removeItem(ENGINE_PREF); } catch { /* storage blocked */ }
+    this.decFailed.clear();
+    this.decFails?.clear();
+    this.sync();
+    this.requestRender();
+  }
+  /** For Diagnostik. */
+  decoderInfo() {
+    const sum = {};
+    for (const D of this.decs.values()) for (const [k, v] of Object.entries(D.stats)) sum[k] = (sum[k] || 0) + v;
+    return { mode: this.frameMode, webcodecs: decoderSupported(), active: this.decs.size, fallbackMedia: this.decFailed.size, ...sum };
+  }
+  /** (v1.14) The main-track clip on screen, when its picture comes from the editor's own decoder. */
+  masterDec() {
+    for (const D of this.decs.values()) {
+      const c = D.clip;
+      if (c?.type === 'video' && c.trackId === 'main' && !D.failed && this.time >= c.start && this.time < c.start + c.duration) return D;
+    }
+    return null;
+  }
   masterEl() {
     for (const E of this.els.values()) {
       const c = E.clip;
@@ -795,13 +979,23 @@ export class Engine {
         const near = this.time >= c.start - 1 && this.time <= c.start + c.duration + 1;
         if (onScreen ? !this.frameReady(E) : near && (E.el.readyState < 2 || E.el.seeking)) pending.push(E);
       }
-      if (!pending.length) return [];
-      if (performance.now() > deadline) return pending.filter((E) => E.clip.type === 'video').map((E) => E.clip.id);
+      // (v1.14) own decoders: the exact frame at the playhead; files still being opened
+      const waiting = [];
+      for (const D of this.decs.values()) {
+        const c = D.clip;
+        if (c && !D.failed && this.time >= c.start - 0.001 && this.time < c.start + c.duration && !D.final(this.localTime(c, this.time))) waiting.push(c.id);
+      }
+      for (const id of this.decWaiting || []) {
+        const c = store.P?.clips.find((x) => x.id === id);
+        if (c && this.time >= c.start - 0.001 && this.time < c.start + c.duration) waiting.push(id);
+      }
+      if (!pending.length && !waiting.length) return [];
+      if (performance.now() > deadline) return [...pending.filter((E) => E.clip.type === 'video').map((E) => E.clip.id), ...waiting];
       await Promise.race([
         ...pending.map(({ el }) => new Promise((r) => {
           for (const ev of ['seeked', 'loadeddata', 'canplay', 'error']) el.addEventListener(ev, r, { once: true });
         })),
-        new Promise((r) => setTimeout(r, 100)),
+        new Promise((r) => setTimeout(r, waiting.length ? 20 : 100)),
       ]);
     }
   }

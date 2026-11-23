@@ -1,0 +1,132 @@
+{
+  "profile": "ipad",
+  "source": "device",
+  "runs": [
+    {
+      "label": "element #1",
+      "engine": "element",
+      "renders": 414,
+      "wrong_frames": 48,
+      "wrong_by_more_than_3": 0,
+      "cuts_seen": 30,
+      "cuts_wrong_first_picture": 5,
+      "freezes_over_100ms": 0,
+      "freeze_total_ms": 0,
+      "freeze_max_ms": 0,
+      "freeze_at_timeline_s": [],
+      "timeline_reached_s": 13.5,
+      "wall_s": 14.62,
+      "buffers": 0,
+      "buffer_wait_ms": null,
+      "cut_picture_ready": 0,
+      "cut_picture_late": 0,
+      "cut_held_previous_picture": 0,
+      "decoder_first_frame_ms": null,
+      "decoder_late_frames_pct": null,
+      "clip_start_latency_ms": {
+        "p50": 41,
+        "p95": 45.9,
+        "max": 46.8,
+        "n": 30
+      },
+      "fps_rendered": {
+        "p50": 30.6,
+        "p95": 30.6,
+        "max": 30.6,
+        "n": 1
+      },
+      "video_presented_fps": {
+        "p50": 33.5,
+        "p95": 33.5,
+        "max": 33.5,
+        "n": 1
+      },
+      "playback_speed_pct": {
+        "p50": 99.3,
+        "p95": 99.3,
+        "max": 99.3,
+        "n": 1
+      },
+      "audio_start_wait_ms": {
+        "p50": 6.7,
+        "p95": 6.7,
+        "max": 6.7,
+        "n": 1
+      },
+      "audio_mode": "scheduled",
+      "preview_engine": "element",
+      "decoders": 0,
+      "elements": 3,
+      "decoder_error": 0,
+      "decoder_fallback": 0,
+      "audio_underrun": 0,
+      "events": []
+    },
+    {
+      "label": "auto #1",
+      "engine": "auto",
+      "renders": 423,
+      "wrong_frames": 0,
+      "wrong_by_more_than_3": 0,
+      "cuts_seen": 30,
+      "cuts_wrong_first_picture": 0,
+      "freezes_over_100ms": 0,
+      "freeze_total_ms": 0,
+      "freeze_max_ms": 0,
+      "freeze_at_timeline_s": [],
+      "timeline_reached_s": 13.5,
+      "wall_s": 14.6,
+      "buffers": 0,
+      "buffer_wait_ms": null,
+      "cut_picture_ready": 30,
+      "cut_picture_late": 0,
+      "cut_held_previous_picture": 0,
+      "decoder_first_frame_ms": {
+        "p50": 15.1,
+        "p95": 87.4,
+        "max": 111.9,
+        "n": 28
+      },
+      "decoder_late_frames_pct": {
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "n": 1
+      },
+      "clip_start_latency_ms": null,
+      "fps_rendered": {
+        "p50": 31.3,
+        "p95": 31.3,
+        "max": 31.3,
+        "n": 1
+      },
+      "video_presented_fps": {
+        "p50": 27.6,
+        "p95": 27.6,
+        "max": 27.6,
+        "n": 1
+      },
+      "playback_speed_pct": {
+        "p50": 99.5,
+        "p95": 99.5,
+        "max": 99.5,
+        "n": 1
+      },
+      "audio_start_wait_ms": {
+        "p50": -1,
+        "p95": -1,
+        "max": -1,
+        "n": 1
+      },
+      "audio_mode": "scheduled",
+      "preview_engine": "decoder",
+      "decoders": 3,
+      "elements": 0,
+      "decoder_error": 0,
+      "decoder_fallback": 0,
+      "audio_underrun": 0,
+      "events": []
+    }
+  ],
+  "errors": []
+}

@@ -9,13 +9,16 @@
 // few seconds (WebCodecs AudioDecoder on the file's AAC track, only the stretches that are played) and started
 // sample-accurately at its place on the timeline (AudioBufferSourceNode). The preview clock follows what the
 // speakers play (AudioContext.getOutputTimestamp), and the muted video elements follow the clock (engine.js).
-// Per clip fallback to the element's sound, as before: sped-up clips (the element keeps the pitch), files not on
-// this device yet (still streamed), and sound this browser cannot decode. Real-time exports keep the element path.
+// Per clip fallback to the element's sound, as before: sped-up clips (the element keeps the pitch) and sound this
+// browser cannot decode. Real-time exports keep the element path.
+// (v1.14, P2-6) A copy still on the server is decoded too: its bytes are read with Range (mediabytes.js, shared with
+// the preview's own video decoder), so the sound no longer waits for the whole copy to be on this device.
 import { store } from './store.js';
 import { mediaRT } from './media.js';
 import { blobOfUrl } from './util.js';
 import { metrics } from './metrics.js';
 import { ByteSource, demuxAudio, decodeAudioRange } from './fastexport.js';
+import { mediaBytes } from './mediabytes.js';
 import { voiceKey, processedFor } from './voicefx.js';
 
 const BLOCK = 8; // seconds of source decoded at a time
@@ -29,6 +32,7 @@ const UPDATE_MS = 90;
 // A decoder that does not answer within these is given up on (the file is then decoded another way): an 8 s block
 // takes ~0.1–0.3 s even on a tablet.
 const BLOCK_TIMEOUT_MS = 2500;
+const READ_TIMEOUT_MS = 20000; // the bytes of a block from the server (before its decode starts)
 const FULL_TIMEOUT_MS = 20000;
 const withTimeout = (p, ms, what) => {
   let t = null;
@@ -40,19 +44,20 @@ const audibleType = (c) => c.type === 'video' || c.type === 'audio';
 
 /** The sound of one media file: opened once (container + codec check), decoded block by block. */
 class Source {
-  constructor(id, url) {
+  constructor(id, url, bytes = null) {
     this.id = id;
     this.url = url;
+    this.bytes = bytes; // a copy on the server: read with Range (no blob)
     this.state = 'opening'; // opening | blocks | full | silent | failed
     this.blocks = new Map(); // block index (0 for a whole-file decode) -> { state, buffer, start, used }
     this.fails = 0;
     this.ready = this.open().catch(() => { this.state = 'failed'; });
   }
   async open() {
-    const blob = blobOfUrl(this.url);
-    if (!blob) { this.state = 'failed'; return; }
+    const blob = this.bytes ? null : blobOfUrl(this.url);
+    if (!blob && !this.bytes) { this.state = 'failed'; return; }
     this.blob = blob;
-    this.src = new ByteSource(blob, 4 << 20);
+    this.src = blob ? new ByteSource(blob, 4 << 20) : this.bytes;
     if (typeof AudioDecoder === 'function') {
       let moov = null;
       try { moov = await this.src.moov(); } catch { moov = null; }
@@ -69,7 +74,16 @@ class Source {
       }
     }
     const dur = store.media(this.id)?.duration || 0;
-    this.state = dur > 0 && dur <= FULL_MAX_S ? 'full' : 'failed';
+    this.state = blob && dur > 0 && dur <= FULL_MAX_S ? 'full' : 'failed'; // (a whole-file decode needs the file here)
+  }
+  /** Bytes of the samples of [t0, t1] (source seconds), read before the decoder starts (they may come from the server). */
+  async load(t0, t1) {
+    if (!this.bytes || !this.track) return;
+    const S = this.track.samples;
+    let a = Infinity;
+    let z = 0;
+    for (const x of S) if (x.pts >= t0 - 0.3 && x.pts <= t1 + 0.3) { a = Math.min(a, x.offset); z = Math.max(z, x.offset + x.size); }
+    if (z > a) await withTimeout(this.bytes.read(a, z - a), READ_TIMEOUT_MS, 'reading the sound from the server');
   }
   blockOf(s) { return this.state === 'full' ? 0 : Math.max(0, Math.floor(s / BLOCK + 1e-9)); }
   blockEnd(k) { return this.state === 'full' ? Infinity : (k + 1) * BLOCK; }
@@ -106,13 +120,17 @@ export class PreviewAudio {
   source(id) {
     if (this.pid !== store.P?.id) this.reset();
     const rt = mediaRT.get(id);
-    const url = [rt?.url, rt?.local].find((u) => u && String(u).startsWith('blob:') && blobOfUrl(u)) || null;
+    const local = [rt?.url, rt?.local].find((u) => u && String(u).startsWith('blob:') && blobOfUrl(u)) || null;
+    // (v1.14) not on this device yet: the copy on the server, read with Range
+    const bytes = !local && rt?.url && !String(rt.url).startsWith('blob:') ? mediaBytes(rt) : null;
+    const url = local || (bytes ? rt.url : null);
     let s = this.sources.get(id);
+    if (s?.bytes && rt?.url) mediaBytes(rt); // (the shared reader switches to the device copy once it is here)
     // that file failed (or was removed from this device), and another local copy is here now: try that one
     if (s && s.state === 'failed' && url && url !== s.url) { this.sources.delete(id); s = null; }
     if (!s) {
       if (!url) return null;
-      s = new Source(id, url);
+      s = new Source(id, url, bytes);
       this.sources.set(id, s);
       s.ready.then(() => { if (s.state !== 'opening') metrics.count(`audio_source_${s.state}`); });
     }
@@ -464,6 +482,15 @@ export class PreviewAudio {
       await s.ready;
       mode = s.state;
       if (mode === 'blocks') {
+        // (a copy on the server: its bytes first, so a slow network is not taken for a stuck decoder)
+        if (s.bytes) {
+          try { await s.load(k * BLOCK, (k + 1) * BLOCK); } catch (err) {
+            if (s.blocks.get(k) === b) s.blocks.delete(k); // asked for again when needed
+            metrics.count('audio_read_retry');
+            this.problem('read', err, s);
+            return;
+          }
+        }
         const r = await withTimeout(decodeAudioRange(s.src, s.track, k * BLOCK, (k + 1) * BLOCK, { timeoutMs: BLOCK_TIMEOUT_MS }), BLOCK_TIMEOUT_MS + 1500, 'audio block');
         if (!r) throw new Error('no audio decoded');
         this.checkSound(s, r.buffer, Math.max(0, r.start), (k + 1) * BLOCK);
@@ -507,7 +534,7 @@ export class PreviewAudio {
   degrade(s) {
     const dur = store.media(s.id)?.duration || 0;
     s.blocks.clear();
-    s.state = s.state === 'blocks' && dur > 0 && dur <= FULL_MAX_S ? 'full' : 'failed';
+    s.state = s.state === 'blocks' && s.blob && dur > 0 && dur <= FULL_MAX_S ? 'full' : 'failed';
     metrics.count(`audio_source_to_${s.state}`);
     this.queue = this.queue.filter((q) => q.s !== s);
     if (s.state === 'failed') {

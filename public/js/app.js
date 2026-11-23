@@ -406,7 +406,7 @@ async function diagnosticsSnapshot() {
   try { const r = await fetch('/api/jobs', { cache: 'no-store', credentials: 'same-origin' }); if (r.ok) jobs = (await r.json()).jobs; } catch { /* offline */ }
   return metrics.snapshot({
     app: bridge.state.status?.version || null,
-    preview: { canvas: `${engine.canvas.width}x${engine.canvas.height}`, quality: player.quality, activeMediaElements: engine.els.size, videoClock: engine.videoClock,
+    preview: { canvas: `${engine.canvas.width}x${engine.canvas.height}`, quality: player.quality, activeMediaElements: engine.els.size, videoClock: engine.videoClock, decoder: engine.decoderInfo(),
       audio: { mode: engine.audioMode === 'element' ? 'element (A/B)' : engine.audioClock ? 'scheduled' : 'element', startDelayMs: Math.round(engine.startLat * 1000), ...engine.audio.info() },
       sources: (store.P?.media || []).filter((m) => m.type === 'video').slice(0, 12).map((m) => ({ name: String(m.name || '').slice(0, 40), size: `${m.width}x${m.height}`, duration: Math.round(m.duration || 0), plays: previewSource(m.id) })),
       project: store.P ? { clips: store.P.clips.length, media: store.P.media.length, tracks: store.P.tracks.length, duration: Math.round(store.duration()) } : null },
@@ -440,7 +440,11 @@ async function diagnosticsDialog() {
           row('FPS pratinjau', 'fps_rendered', ''), row('Gambar dari decoder video', 'video_presented_fps', ' fps'), row('Kecepatan putar', 'playback_speed_pct', '%'),
           row('Frame proyek terlewat', 'preview_frames_missed_pct', '%'), row('Frame video di-drop', 'video_dropped_frames_pct', '%'),
           row('Waktu gambar per frame', 'frame_draw_ms'), row('Menunggu buffer', 'buffer_wait_ms'), row('Seek → frame tepat', 'seek_to_frame_ms'),
-        ])}${snap.preview.sources.length ? `<p class="hint">Diputar: ${snap.preview.sources.map((x) => `${escapeHtml(x.name)} (${x.size}) → ${escapeHtml(x.plays)}`).join(' · ')}</p>` : ''}<p class="hint">Seek koreksi: ${c.drift_seek || 0} · jeda frame &gt; 50 ms: ${c.raf_gap_over_50ms || 0} · Buffer: awal klip ${c.buffer_at_clip_start || 0} · tengah klip ${c.buffer_mid_clip || 0} · dari perangkat ${c.buffer_src_local || 0} · dari server ${c.buffer_src_server || 0} · jeda singkat dilewati ${c.stall_ridden_out || 0}${Object.keys(c).filter((k) => k.startsWith('play_rejected_')).map((k) => ` · play ditolak (${escapeHtml(k.slice(14))}) ${c[k]}`).join('')}</p></section>
+          row('Frame pertama potongan (dekoder)', 'decoder_first_frame_ms'), row('Gambar telat (dekoder)', 'decoder_late_frames_pct', '%'),
+        ])}${(() => {
+          const D = snap.preview.decoder || {};
+          return `<p class="hint">Mesin pratinjau: <select class="diag-engine" data-engine><option value="auto"${D.mode !== 'element' ? ' selected' : ''}>Dekoder sendiri (WebCodecs)</option><option value="element"${D.mode === 'element' ? ' selected' : ''}>Elemen video (lama)</option></select>${D.webcodecs ? '' : ' · browser ini tanpa WebCodecs: elemen video'} · dekoder aktif ${D.active || 0} · potongan siap tepat waktu ${c.cut_picture_ready || 0} · telat ${c.cut_picture_late || 0} · buffer: data dari server ${c.buffer_decoder_network || 0}, dekoder lambat ${c.buffer_decoder_slow || 0} · file pakai elemen ${D.fallbackMedia || 0}${c.decoder_error ? ` · error dekoder ${c.decoder_error}` : ''}</p>`;
+        })()}${snap.preview.sources.length ? `<p class="hint">Diputar: ${snap.preview.sources.map((x) => `${escapeHtml(x.name)} (${x.size}) → ${escapeHtml(x.plays)}`).join(' · ')}</p>` : ''}<p class="hint">Seek koreksi: ${c.drift_seek || 0} · jeda frame &gt; 50 ms: ${c.raf_gap_over_50ms || 0} · Buffer: awal klip ${c.buffer_at_clip_start || 0} · tengah klip ${c.buffer_mid_clip || 0} · dari perangkat ${c.buffer_src_local || 0} · dari server ${c.buffer_src_server || 0} · jeda singkat dilewati ${c.stall_ridden_out || 0}${Object.keys(c).filter((k) => k.startsWith('play_rejected_')).map((k) => ` · play ditolak (${escapeHtml(k.slice(14))}) ${c[k]}`).join('')}</p></section>
         <section>${table('Audio', [
           row('Gambar tertinggal dari suara', 'picture_behind_sound_ms', ' ms', '(+ = gambar telat)'), row('Jeda mulai video di potongan', 'clip_start_latency_ms'),
           row('Selisih audio elemen ke jam', 'audio_drift_ms'), row('Tunggu suara pertama', 'audio_start_wait_ms'), row('Suara masuk terlambat', 'audio_late_join_ms'), row('Decode audio per blok', 'audio_decode_ms'),
@@ -490,6 +494,13 @@ async function diagnosticsDialog() {
       </div>`;
   };
   await render();
+  body.addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-engine]');
+    if (!sel) return;
+    engine.setFrameMode(sel.value);
+    toast(sel.value === 'element' ? 'Pratinjau memakai elemen video (cara lama)' : 'Pratinjau memakai dekoder sendiri', { type: 'ok' });
+    render();
+  });
   body.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-job-cancel],[data-job-retry]');
     if (!b) return;

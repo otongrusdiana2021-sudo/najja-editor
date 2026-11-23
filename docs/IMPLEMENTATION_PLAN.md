@@ -56,6 +56,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P2-3 | Memori Najja Desain | D6, D7, D1 | Puncak memori dokumen 20 foto 6000 px, sebelum vs sesudah |
 | P2-4 | Akselerasi hardware | V8, V16 | Pilih decoder dari statistik. Pulihkan WebGL setelah context lost. Eksperimen compositor WebGPU **di balik flag**, aktif hanya bila feature detection lolos, dengan fallback Canvas 2D |
 | P2-5 | Kualitas pratinjau adaptif | — | Ukur mekanisme yang sudah ada (`player.js:72-99`) sebelum mengubah apa pun |
+| P2-6 | Mesin pratinjau dekoder (WebCodecs) | iPad: potong-ke-potong macet | Rencana di log P2-6. Ukuran: jeda gambar di setiap potongan dan "buffer" saat play, skenario B9 (30 potongan), di Chrome dan di WebKit (Safari Mac), sebelum vs sesudah; lalu iPad asli lewat Diagnostik |
 
 ## P3 — Advanced features
 
@@ -93,6 +94,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
 | P1-2 Job system | ✅ selesai. PR #3 (`01fbfff`) **di produksi sejak 2026-11-23**. Jalur sukses `apply_style`/`get_transcript` di latar belakang belum diuji dengan layanan AI sungguhan |
 | DESIGN §3.1 → Ukuran layar per perangkat | ✅ selesai. **Di produksi sejak 2026-11-23** (`0744fd6`). Desain tetap; tiap perangkat mengatur skalanya di menu akun. Belum dicoba di iPad asli dan Safari Mac |
+| P2-6 Mesin pratinjau dekoder (WebCodecs) | ✅ selesai di kode dan diukur di Safari Mac + Chromium (2026-11-23). **Belum di produksi, belum diverifikasi di iPad asli** |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -652,4 +654,51 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
     - `/healthz`, `/login`, dan `.well-known` 200, dan Range lewat nginx tetap `206`.
     - Di dalam container ada gerbang unduhan baru (`app.js`), `priority: 'low'` (`media.js`), dan `inTurn` (`lib/jobs.js`).
   - **Ukuran keberhasilan (dicek di log saat pemilik memakai iPad):** satu transfer besar salinan selesai walaupun sedang play, lalu tidak ada lagi permintaan `/edit` dari iPad.
+
+#### P2-6 — Mesin pratinjau dekoder (WebCodecs), rencana (2026-11-23)
+
+- **Masalah:** di iPad, video mentah lancar, tapi timeline dengan banyak potongan macet. Rekaman layar pemilik (Chrome iPad, yang di dalamnya WebKit) menunjukkan 14 detik beku di 00:00 sambil "play". Empat perbaikan cache/jaringan hari ini memperbaiki bug sungguhan, tapi gejalanya tetap.
+- **Akar masalah (arsitektur):** pratinjau memakai elemen `<video>` (pool 3 per file, `plan.js`). Memuat, melompat (seek), dan mulai memutar di setiap potongan diputuskan oleh pemutar bawaan browser. Di WebKit pemutar itu pelit dan tidak bisa ditebak, jadi editor menunggu sesuatu yang tidak ia kendalikan.
+- **Tujuan:** gambar pratinjau di-decode editor sendiri dengan `VideoDecoder` (hardware), dari byte persis yang dibutuhkan, dan frame awal potongan berikutnya sudah siap sebelum playhead sampai.
+- **Rancangan:**
+  - `public/js/framesource.js` (baru): pembaca byte (salinan di perangkat = Blob; di server = HTTP Range per jendela, dengan read-ahead), tabel sampel per file (pembaca MP4 dari `fastexport.js`), dan `FrameSource` per slot elemen: decode di depan playhead (antrian frame terbatas), restart di keyframe saat lompat, frame tepat saat jeda.
+  - `engine.js`: slot yang sama dengan pool elemen (`plan.js` `elKeys`), tapi isinya `FrameSource`, bukan `<video>`. Suara tetap dari jam audio (`audio.js`). Gambar dipilih untuk waktu jam audio. Tahan playhead hanya kalau datanya memang belum ada.
+  - **Cadangan otomatis ke `<video>`** per file: bukan H.264 MP4, video diputar, browser tanpa `VideoDecoder`, dekoder error, suara klip tidak bisa dijadwalkan jam audio, original berat, atau ekspor real-time.
+  - Sakelar Diagnostik "Mesin pratinjau" (dekoder / elemen video) untuk A/B dan jalan keluar kalau ada masalah di perangkat.
+- **Kriteria terima:**
+  - Test unit `FrameSource` (dekoder palsu): frame potongan berikutnya siap sebelum potongan, lompat mundur/maju, frame tepat saat jeda, batas frame yang ditahan, cadangan saat error.
+  - Di Chrome (browser pane) dan WebKit (Safari Mac): proyek 30 potongan diputar tanpa "buffer" dan tanpa potongan yang menunggu gambar; seek dan freeze frame tetap tepat.
+  - `npm test` lulus. Jalur elemen lama tidak berubah perilakunya saat sakelar di "elemen video".
+  - Ditandai *belum diverifikasi di iPad* sampai pemilik mencoba di iPad.
+
+#### P2-6 — hasil (2026-11-23)
+
+- **Dibangun:**
+  - `public/js/mediabytes.js`: pembaca byte per salinan media. Dari perangkat dibaca sebagai Blob, dari server lewat Range per jendela 1 MB dengan read-ahead. Gambar dan suara memakai jendela yang sama, dan pembaca pindah ke salinan perangkat begitu salinan itu ada.
+  - `public/js/framesource.js`: `VideoFile` (tabel sampel + konfigurasi dekoder per salinan) dan `FrameSource` per slot.
+  - `engine.js`: slot pool yang sama (`plan.js`) diisi `FrameSource`. Stall ditahan hanya kalau gambar tertinggal lebih dari 0,25 dtk. `settle`, capture, dan freeze frame memakai frame dekoder.
+  - `audio.js`: suara juga dijadwalkan untuk salinan yang masih di server, jadi jalur dekoder berlaku sejak kunjungan pertama, tidak menunggu unduhan selesai.
+  - Diagnostik: sakelar "Mesin pratinjau", hitungan potongan siap/telat, buffer karena jaringan atau dekoder lambat, dan "frame pertama potongan".
+- **Cadangan `<video>` otomatis** berlaku untuk:
+  - browser tanpa WebCodecs;
+  - file bukan H.264, atau video yang diputar;
+  - original berat;
+  - klip bersuara yang dipercepat;
+  - ekspor real-time;
+  - dekoder yang gagal 3× di satu media.
+- **Diukur** (`bench/p26/`, hasil di `bench/results/2026-11-23-p26-decoder.md`). Skenario: 30 potongan lompat, pembacaan nomor frame dari kanvas.
+  - **Safari 18.6** (mesin iPad), termasuk efek GPU dan salinan ringan yang di-*stream* dari server dengan jeda 80 ms / 20 Mbps:
+    - Dekoder: 0 gambar salah, 0 beku, 30/30 potongan siap tepat waktu, 0 buffer, seek diam p50 34–52 ms.
+    - `<video>`: 108–342 gambar salah per putaran, sampai 20 potongan diawali gambar salah, beku sampai 380 ms (dengan efek), seek diam sekitar 515–530 ms.
+  - **Chromium** (desktop dan profil iPad): dekoder 0 gambar salah dan 30/30 potongan; `<video>` 28–59 gambar salah dan beku 193–251 ms.
+  - **Dengan suara**, salinan di-*stream*: suara terjadwal dari byte server, 0 suara kosong, suara pertama 319 ms.
+- **Tiga perilaku dekoder Safari** ditemukan dan diperbaiki saat mengukur (masing-masing punya test yang gagal tanpa perbaikannya):
+  - Dekoder menahan beberapa frame sampai ada input berikutnya. Input tambahan kini diingat per file (`extraNeeded`), dan frame pertama turun dari 165 ms ke sekitar 25 ms.
+  - Menyimpan lebih banyak frame daripada stok output dekoder membuatnya macet ("holds frames until a flush"). Jumlah frame yang disimpan kini dibatasi terpisah dari input tambahan.
+  - Frame terakhir tiap potongan tertahan di dalam dekoder, menyebabkan beku 100 ms sebelum setiap potongan. Input kini diteruskan melewati ujung potongan.
+- **Test:** `test/framesource.test.js`, 15 test dengan dekoder palsu: tahan frame, stok output terbatas, hanya keluar saat flush, error, dan streaming. Tes penuh: 307 test, 293 lulus, 0 gagal, 14 dilewati karena butuh ffmpeg.
+- **Belum:**
+  - Belum diverifikasi di iPad asli.
+  - Klip bersuara yang dipercepat masih memakai `<video>`.
+  - `bench/run.mjs` B9 dengan ffmpeg belum dijalankan.
 
