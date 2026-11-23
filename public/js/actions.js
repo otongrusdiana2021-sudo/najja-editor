@@ -4,23 +4,19 @@ import {
   upsertKeyframe, removeKeyframe, spreadLook, subtitleTrackOf, TRACK_NAMES,
 } from './store.js';
 import { mediaRT, importCanvasAsImage } from './media.js';
-import { TEXT_PRESETS, TEXT_TEMPLATES, DEFAULT_TEXT, FILTERS, TRANSITIONS, EFFECTS, BADGES, ADJUSTMENTS } from './presets.js';
+import { TEXT_TEMPLATES, FILTERS, TRANSITIONS, EFFECTS, BADGES, ADJUSTMENTS } from './presets.js';
 import { clone, deepMerge, uid } from './util.js';
 import { wordCount } from './kinetic.js';
 import { toast } from './ui.js';
 import * as cmd from './core/commands.js';
+import { presetStyle } from './core/clipedit.js';
 
 export const app = { engine: null, timeline: null, library: null, inspector: null, player: null, toolbar: null, openSheet: null };
 
 const now = () => app.engine?.time ?? 0;
 
-export function presetStyle(id) {
-  const p = TEXT_PRESETS.find((x) => x.id === id) || TEXT_PRESETS[0];
-  const base = clone(DEFAULT_TEXT);
-  deepMerge(base, clone(p.style));
-  base.preset = p.id;
-  return base;
-}
+// (v1.13.2, P0-6b) presetStyle moved to core/clipedit.js; still exported here for the panels that import it
+export { presetStyle };
 
 export function select(id) {
   store.select(id);

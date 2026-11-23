@@ -252,6 +252,71 @@
     ],
     "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
   },
+  "text: a new preset changes the look and keeps the kinetic motion and word times": {
+    "error": null,
+    "result": {
+      "preset": "yellow",
+      "motion": {
+        "type": "wordPop",
+        "spring": "bouncy",
+        "stagger": 0.1,
+        "speed": 1.5,
+        "out": "none"
+      },
+      "words": [
+        [
+          0,
+          0.5
+        ],
+        [
+          0.5,
+          1
+        ]
+      ],
+      "content": "Halo dunia"
+    },
+    "selection": "txt",
+    "history": 2,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "6a22c7d05f260f75b452b8a073c30e4a709be2260d43eaafc727a9fd194a02be"
+  },
   "text: kinetic options without a motion is refused": {
     "error": "text_motion is needed (no kinetic animation on this text yet)",
     "result": null,

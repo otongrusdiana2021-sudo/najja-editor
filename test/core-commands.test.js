@@ -123,6 +123,6 @@ test('core commands run on a bare project: no store, no editor, no page', async 
   const m = cmd.mediaClip({ id: 'm_v', type: 'video', name: 'v', duration: 10 }, { sourceIn: 4, props: { speed: 2 } });
   assert.deepEqual([m.in, m.duration, m.mediaId], [4, 3, 'm_v']);
   assert.equal(store.P, before, 'the store was not touched');
-  const src = fs.readFileSync(new URL('../public/js/core/commands.js', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  const src = fs.readFileSync(new URL('../public/js/core/commands.js', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   assert.doesNotMatch(src, /\bstore\.(?!js')|\bdocument\b|\bwindow\b|\bengine\b|\btoast\(/, 'core/commands.js uses only the project it is given');
 });

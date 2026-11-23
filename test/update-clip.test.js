@@ -102,6 +102,13 @@ scenario('text: kinetic motion with options, then off', {}, async (r) => {
   await up({ clip_id: r.txt, text_motion: 'none' });
   return { mid, opts, after: store.clip(r.txt).text.motion ?? null };
 });
+scenario('text: a new preset changes the look and keeps the kinetic motion and word times', {}, async (r) => {
+  await up({ clip_id: r.txt, text_motion: 'wordPop', text_motion_speed: 1.5 });
+  store.clip(r.txt).text.words = [[0, 0.5], [0.5, 1]];
+  await up({ clip_id: r.txt, preset: 'yellow' });
+  const tx = store.clip(r.txt).text;
+  return { preset: tx.preset, motion: tx.motion ?? null, words: tx.words ?? null, content: tx.content };
+});
 scenario('text: kinetic options without a motion is refused', {}, (r) => up({ clip_id: r.txt, text_motion_speed: 2 }));
 scenario('text: an unknown preset is refused', {}, (r) => up({ clip_id: r.txt, preset: 'nope' }));
 scenario('visual: position, scale and opacity clamped, rotation, flips, blend, crop', {}, (r) => up({
@@ -131,3 +138,8 @@ scenario('a bad colour is refused', {}, (r) => up({ clip_id: r.sol, color: 'mera
 scenario('an unknown clip is refused', {}, () => up({ clip_id: 'c_nope', x: 1 }));
 scenario('add_text with style, position and animation (shared helpers)', {}, () => tools.add_text({ text: 'Diskon', preset: 'outline', font: 'Scholar', size: 140, color: '#ffcc00', x: 0.1, y: -0.3, animation_in: 'fade', start: 1, duration: 2 }));
 scenario('add_sticker with position and loop (shared helpers)', {}, () => tools.add_sticker({ emoji: '🔥', x: -0.2, scale: 1.5, animation_loop: 'pulse', start: 0, duration: 2 }));
+
+test('core/clipedit.js uses only the project and clip it is given (no store, page or engine)', () => {
+  const src = fs.readFileSync(new URL('../public/js/core/clipedit.js', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(src, /\bstore\.(?!js')|\bdocument\b|\bwindow\b|\bengine\b|\btoast\(|\bactions\./);
+});

@@ -1,116 +1,28 @@
 // MCP tool implementations (run inside the editor tab). Names/arguments match mcp/tools.js.
 import {
-  store, summarizeClip, sortedClips, setSpeed, clipEnd, KF_PROPS, projectDuration,
+  store, summarizeClip, sortedClips, clipEnd, projectDuration,
 } from './store.js';
 import { importFromServerUrl, mediaRT } from './media.js';
 import {
   ASPECTS, FILTERS, EFFECTS, TRANSITIONS, ANIM_IN, ANIM_OUT, ANIM_LOOP, TEXT_PRESETS, TEXT_TEMPLATES, FONTS, BLEND_MODES, STICKERS, BADGES, RESOLUTIONS,
 } from './presets.js';
 import * as actions from './actions.js';
+import { need, oneOf, color, fontFamily, applyTextStyle, applyVisual, applyAnim, updateClip } from './core/clipedit.js';
 import { setAspect } from './player.js';
 import { exportState } from './exporter.js';
-import { clamp, normHex, deepMerge } from './util.js';
+import { clamp, deepMerge } from './util.js';
 import { STYLES, checkMaterial } from './styles.js';
 import { generateStyle, getTranscript } from './stylerun.js';
 import { startBgRemove, cancelBgRemove, bgStatus } from './bgremove.js';
-import { KINETIC, SPRINGS, makeMotion } from './kinetic.js';
 import { colorOf } from './moments.js';
 
 const ids = (a) => a.map((x) => x.id);
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
-/** A font by its family or by the name it is shown with ("Scholar" → Libre Baskerville). */
-const fontFamily = (v) => FONTS.find((f) => f.label && f.label.toLowerCase() === String(v).toLowerCase())?.name || v;
-
-function need(cond, msg) { if (!cond) throw new Error(msg); }
-function oneOf(value, list, what) {
-  if (value == null) return value;
-  need(list.includes(value), `Unknown ${what} "${value}". Valid: ${list.join(', ')}`);
-  return value;
-}
-function color(v, what = 'color') {
-  const c = normHex(v);
-  need(c, `${what} must be a hex color like #ff0055 (got ${v})`);
-  return c;
-}
 function getClip(id) {
   const c = store.clip(id);
   need(c, `Clip not found: ${id}. Call get_project for valid clip ids.`);
   return c;
-}
-
-/** Apply text-style arguments (snake_case) onto a text style object. */
-function applyTextStyle(tx, a) {
-  if (a.preset) {
-    oneOf(a.preset, ids(TEXT_PRESETS), 'preset');
-    const content = tx.content;
-    const keep = { ...(tx.motion ? { motion: tx.motion } : {}), ...(tx.words ? { words: tx.words } : {}) }; // (the look changes, not the animation or word times)
-    const base = actions.presetStyle(a.preset);
-    for (const k of Object.keys(tx)) delete tx[k];
-    Object.assign(tx, base, { content }, keep);
-  }
-  if (a.font) { a.font = fontFamily(a.font); oneOf(a.font, FONTS.map((f) => f.name), 'font'); tx.font = a.font; }
-  if (a.size != null) tx.size = clamp(Number(a.size), 8, 600);
-  if (a.color) tx.color = color(a.color);
-  if (a.bold != null) tx.weight = a.bold ? Math.max(700, tx.weight) : 400;
-  if (a.italic != null) tx.italic = !!a.italic;
-  if (a.align) tx.align = oneOf(a.align, ['left', 'center', 'right'], 'align');
-  if (a.letter_spacing != null) tx.letterSpacing = Number(a.letter_spacing);
-  if (a.line_height != null) tx.lineHeight = clamp(Number(a.line_height), 0.5, 4);
-  if (a.stroke_color) { tx.stroke.color = color(a.stroke_color, 'stroke_color'); tx.stroke.enabled = true; }
-  if (a.stroke_width != null) { tx.stroke.width = Math.max(0, Number(a.stroke_width)); tx.stroke.enabled = tx.stroke.width > 0; }
-  if (a.background_color) {
-    if (a.background_color === 'none') tx.bg.enabled = false;
-    else { tx.bg.color = color(a.background_color, 'background_color'); tx.bg.enabled = true; }
-  }
-  if (a.background_opacity != null) tx.bg.opacity = clamp(Number(a.background_opacity), 0, 1);
-  if (a.shadow != null) tx.shadow.enabled = !!a.shadow;
-  // (v1.12) kinetic text
-  const kOpts = ['text_motion_spring', 'text_motion_stagger', 'text_motion_speed', 'text_motion_color', 'text_motion_out'].some((k) => a[k] != null);
-  if (a.text_motion === 'none') delete tx.motion;
-  else if (a.text_motion != null || kOpts) {
-    const type = oneOf(a.text_motion ?? tx.motion?.type, ids(KINETIC), 'text_motion');
-    need(type, 'text_motion is needed (no kinetic animation on this text yet)');
-    const base = tx.motion?.type === type ? tx.motion : { speed: tx.motion?.speed, color: tx.motion?.color, out: tx.motion?.out };
-    if (a.text_motion_spring != null) oneOf(a.text_motion_spring, Object.keys(SPRINGS), 'text_motion_spring');
-    if (a.text_motion_color != null) color(a.text_motion_color, 'text_motion_color');
-    tx.motion = makeMotion(type, {
-      spring: a.text_motion_spring ?? base.spring, stagger: a.text_motion_stagger ?? base.stagger, speed: a.text_motion_speed ?? base.speed,
-      color: a.text_motion_color != null ? normHex(a.text_motion_color) : base.color, out: a.text_motion_out ?? base.out,
-    });
-  }
-  if (a.gradient_from === 'none' || a.gradient_to === 'none') tx.gradient.enabled = false;
-  else if (a.gradient_from || a.gradient_to) {
-    if (a.gradient_from) tx.gradient.from = color(a.gradient_from, 'gradient_from');
-    if (a.gradient_to) tx.gradient.to = color(a.gradient_to, 'gradient_to');
-    tx.gradient.enabled = true;
-  }
-}
-
-function applyVisual(c, a) {
-  const set = (k, v) => {
-    c[k] = v;
-    if (c.keyframes?.length && KF_PROPS.includes(k)) for (const kf of c.keyframes) kf[k] = v;
-  };
-  if (a.x != null) set('x', Number(a.x));
-  if (a.y != null) set('y', Number(a.y));
-  if (a.scale != null) set('scale', clamp(Number(a.scale), 0.01, 20));
-  if (a.rotation != null) set('rotation', Number(a.rotation));
-  if (a.opacity != null) set('opacity', clamp(Number(a.opacity), 0, 1));
-  if (a.flip_h != null) c.flipH = !!a.flip_h;
-  if (a.flip_v != null) c.flipV = !!a.flip_v;
-  if (a.blend_mode) c.blend = oneOf(a.blend_mode, ids(BLEND_MODES), 'blend_mode');
-  for (const [k, ck] of [['crop_left', 'l'], ['crop_right', 'r'], ['crop_top', 't'], ['crop_bottom', 'b']]) {
-    if (a[k] != null && c.crop) c.crop[ck] = clamp(Number(a[k]), 0, 0.9);
-  }
-}
-function applyAnim(c, a) {
-  if (!c.animIn) return;
-  if (a.animation_in) c.animIn.type = oneOf(a.animation_in, ids(ANIM_IN), 'animation_in');
-  if (a.animation_out) c.animOut.type = oneOf(a.animation_out, ids(ANIM_OUT), 'animation_out');
-  if (a.animation_loop) c.animLoop.type = oneOf(a.animation_loop, ids(ANIM_LOOP), 'animation_loop');
-  if (a.animation_in_duration != null) c.animIn.duration = clamp(Number(a.animation_in_duration), 0.05, 10);
-  if (a.animation_out_duration != null) c.animOut.duration = clamp(Number(a.animation_out_duration), 0.05, 10);
 }
 
 function projectInfo() {
@@ -296,41 +208,8 @@ export const tools = {
     const c = getClip(a.clip_id);
     let note = null;
     if (a.start != null && c.trackId === 'main' && store.P.magnet) actions.moveClip(c.id, { start: Number(a.start) });
-    store.mutate('AI: ubah klip', (P) => {
-      if (a.start != null && !(c.trackId === 'main' && P.magnet)) c.start = Math.max(0, Number(a.start));
-      if (a.source_in != null && 'in' in c) c.in = Math.max(0, Number(a.source_in));
-      if (a.speed != null && c.type !== 'text') setSpeed(P, c, a.speed);
-      if (a.duration != null) c.duration = Math.max(0.1, Number(a.duration));
-      if (a.volume != null && 'volume' in c) c.volume = clamp(Number(a.volume), 0, 2);
-      if (a.muted != null && 'muted' in c) c.muted = !!a.muted;
-      if (a.fade_in != null && 'fadeIn' in c) c.fadeIn = Math.max(0, Number(a.fade_in));
-      if (a.fade_out != null && 'fadeOut' in c) c.fadeOut = Math.max(0, Number(a.fade_out));
-      if ('x' in c) applyVisual(c, a);
-      if (c.type === 'text') {
-        if (a.text != null) { c.text.content = String(a.text); c.name = c.text.content.split('\n')[0].slice(0, 40); }
-        applyTextStyle(c.text, a);
-      }
-      if (a.filter && c.filter) c.filter.name = oneOf(a.filter, ids(FILTERS), 'filter');
-      if (a.filter_intensity != null && c.filter) c.filter.intensity = clamp(Number(a.filter_intensity), 0, 1);
-      if (a.adjust && c.adjust) for (const [k, v] of Object.entries(a.adjust)) if (k in c.adjust) c.adjust[k] = Number(v);
-      applyAnim(c, a);
-      if (a.transition && c.transition) c.transition.type = oneOf(a.transition, ids(TRANSITIONS), 'transition');
-      if (a.transition_duration != null && c.transition) c.transition.duration = clamp(Number(a.transition_duration), 0.1, 5);
-      if (c.type === 'effect') {
-        if (a.effect) { c.effect.type = oneOf(a.effect, ids(EFFECTS), 'effect'); c.name = EFFECTS.find((e) => e.id === a.effect).name; }
-        if (a.intensity != null) c.effect.intensity = clamp(Number(a.intensity), 0, 1);
-      }
-      if (c.type === 'solid') {
-        if (a.color) c.solid.color = color(a.color);
-        if (a.color2 === 'none') c.solid.color2 = null;
-        else if (a.color2) c.solid.color2 = color(a.color2, 'color2');
-      }
-      if (c.type === 'sticker' && c.sticker.badge) {
-        if (a.color) c.sticker.badge.bg = color(a.color);
-        if (a.text) c.sticker.badge.text = String(a.text);
-      }
-      if (a.name) c.name = String(a.name).slice(0, 60);
-    });
+    // (v1.13.2, P0-6b) the edit itself is core/clipedit.js updateClip (pure, the same code the tests replay)
+    store.mutate('AI: ubah klip', (P) => { updateClip(P, c.id, a); });
     if (a.remove_background != null) {
       need(c.type === 'video' || c.type === 'image', 'remove_background is for video and photo clips');
       // (v1.11) one way: the background goes, every object in front stays; the clip is analysed once (device GPU or

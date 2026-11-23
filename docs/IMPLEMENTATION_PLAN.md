@@ -90,7 +90,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy`, ikut di-push lewat branch `feat/p0-5-design-export` (CI hijau, run 45129262367). **Belum dipasang:** snippet nginx `.well-known` di VPS (butuh izin) dan record DNS `www` (butuh akses pengelola DNS) |
 | P0-5 Ekspor Najja Desain aman | ✅ selesai, branch `feat/p0-5-design-export` (berisi P0-1 sampai P0-5) **sudah di-push**. CI hijau di Node 22 (run 45129262367). Belum di-merge ke `main`, belum di-deploy. Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
-| P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema bersama) dan langkah 2 (split/hapus/duplikat/pindah/tambah klip di `core/commands.js`) selesai, branch `feat/p0-6b-core-commands` (sudah di-push; CI hijau di run 45133468567, setelah satu run merah yang ternyata flaky, lihat T5). Sisa: `update_clip` dan teks/subtitle ke `core/`, serta helper model dari `store.js` |
+| P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 di branch `feat/p0-6b-update-clip` (belum di-push). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -353,3 +353,27 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Run berikutnya (45133468567) dengan kode aplikasi yang sama **hijau**. Artinya kegagalan pertama intermiten, dan nama test-nya tidak tercatat (lihat T5).
   - Perbaikan port test (`267463d`, port diminta ke OS) di-push. Run 45133833509 **hijau**. Belum terbukti bahwa ini memang penyebab flaky-nya; kalau terulang, anotasi CI akan menyebut test-nya.
 - **Berikutnya:** P0-6b langkah 3 (`update_clip` ke `core/`) atau lanjut ke P1.
+
+#### P0-6b langkah 3 — `update_clip` dan helpernya di `public/js/core/clipedit.js` (2026-11-23)
+
+- **Cara (sama seperti langkah 2):**
+  1. Commit `122caa7` merekam 21 skenario dari `api.js` **sebelum** refactor: teks, gaya, kinetik, visual dan keyframe, video, efek, warna, badge, nama, posisi dengan/tanpa magnet, semua penolakan, plus `add_text`/`add_sticker` yang memakai helper yang sama. Yang disimpan: jawaban tool, seleksi, jumlah langkah undo, dan SHA-256 seluruh proyek.
+  2. Refactor, lalu diputar ulang: **identik**.
+- **Mutation test:**
+  - Batas skala 20→21, keyframe tanpa opacity, dan mute terbalik ketahuan.
+  - "Ganti preset menghapus animasi kinetik" awalnya **lolos**, karena belum ada skenario yang mengganti preset pada teks yang beranimasi. Skenarionya ditambah, golden direkam ulang dari `api.js`/`actions.js` lama (hash file sama dengan `122caa7`), dan mutasi ini kemudian ketahuan.
+- **Perubahan:**
+  - `public/js/core/clipedit.js` (baru): `need`, `oneOf`, `color`, `fontFamily`, `presetStyle`, `applyTextStyle`, `applyVisual`, `applyAnim`, `updateClip(P, id, a)`. Dipindah apa adanya dari `api.js` dan `actions.js`.
+  - `api.js` memakai helper itu untuk `update_clip` **dan** `add_media_clip`, `add_text`, `add_subtitles`, `add_sticker`. Pemindahan dengan magnet, hapus latar (async, layanan GPU/server), `clip_effects`, dan seleksi tetap di `api.js`.
+  - `actions.js` meneruskan ekspor `presetStyle`, karena `inspector.js` mengimpornya dari sana.
+  - Import yang tidak terpakai lagi dibersihkan.
+  - Cek statis di test: `core/clipedit.js` dan `core/commands.js` tidak memakai `store`, `actions`, `document`, `window`, atau engine. Strip komentar kini juga membuang komentar blok, karena sebelumnya sempat salah menangkap kata `actions.moveClip` di JSDoc.
+- **Perilaku lama yang sengaja dipertahankan (temuan V20):** nilai yang valid sudah masuk ke proyek walaupun argumen sesudahnya ditolak, dan tanpa langkah undo. Contoh: `{x: 0.3, filter: "nope"}` → `x` menjadi 0,3. Diperbaiki terpisah supaya perubahan perilakunya jelas tercatat.
+- **Hasil test:**
+  - Unit: **262 test, 248 lulus, 0 gagal, 14 dilewati**, stabil 3×. Satu run sempat gagal di `jobs.test.js` "restart: queued and interrupted jobs…" (file yang tidak disentuh). Test itu lulus 5× saat berdiri sendiri, jadi dicatat bersama T5 sebagai flaky.
+  - Kontrak MCP lulus.
+  - Browser asli lewat MCP:
+    - `update_clip` teks: `preset: yellow`, `font: "Scholar"` → Libre Baskerville, `size: "150"` → 150, `x`, dan `text_motion: wordPop` terpasang semua dengan 2 langkah undo.
+    - Warna latar dan warna kedua berubah. `color: "merah"` ditolak dengan pesan yang sama seperti dulu.
+    - `inspector.js` termuat. Console bersih. Proyek uji dihapus.
+- **Berikutnya:** perbaiki V20 (validasi semua argumen dulu, baru mengubah proyek), lalu sisa P0-6b atau lanjut ke P1.
