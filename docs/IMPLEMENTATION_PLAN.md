@@ -625,3 +625,19 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
     - Setelah itu tidak ada lagi permintaan `/edit` dari iPad.
     - Potongan tidak lagi menunggu. Kalau masih patah, Diagnostik iPad (`frame_draw_ms`) menunjukkan apakah sisanya dari efek (WebGL `gpufx.js`).
 
+- **Test job "restart" yang kadang gagal (T5) diperbaiki di akarnya, `lib/jobs.js` (2026-11-23, belum di-deploy):**
+  - **Gejala:** `test/jobs.test.js` "restart: queued and interrupted jobs…" gagal sekitar 1 dari 12 run file lengkap (2 dari 25, 1 dari 5). Waktunya habis di `until()` yang menunggu journal di disk berisi `running`. Karena `deploy-vps.sh` menjalankan `npm test` dulu, satu run sial bisa memblokir deploy.
+  - **Bukti:** skrip yang mengulang langkah awal test 400× menghasilkan 28 run buruk. Di setiap run buruk, job `a` `running` di memori dan handler-nya sudah mulai, tapi file journal-nya tetap `queued` selamanya.
+  - **Akar masalah (bug di kode, bukan di test):**
+    - `register()` dan `init()` menjadwalkan `pump()`.
+    - `enqueue()` memasukkan job ke memori, lalu menunggu tulisan `queued`.
+    - Kalau timer pump jalan di tengah tulisan itu, `start()` langsung menulis `running`. Dua `rename` untuk file yang sama lalu berjalan bersamaan, dan tulisan lama bisa mendarat terakhir.
+    - Pola yang sama bisa membuat `succeeded` tertimpa `running`. Di produksi, job ffmpeg yang sudah selesai akan dijalankan ulang setelah server restart.
+  - **Perbaikan:**
+    - Penulisan journal per job kini berantai (`inTurn`), dan isinya diambil saat dipanggil, sehingga urutan di disk sama dengan urutan perubahan status. Penghapusan file job lama ikut antre di rantai yang sama, supaya tidak ada file yang muncul lagi.
+    - `createJobs` mendapat opsi `io` (bawaan `node:fs/promises`) supaya test bisa memperlambat tulisan.
+  - **Bukti perbaikan:**
+    - Test baru yang deterministik (tulisan pertama tiap job diperlambat 80 ms) gagal 10/10 sebelum perbaikan dan lulus 10/10 sesudahnya.
+    - Loop 400× turun dari 28 buruk menjadi 0.
+    - `jobs.test.js` lulus 50/50, dan suite penuh 2× (292 test, 278 lulus, 0 gagal, 14 dilewati).
+

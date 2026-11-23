@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createJobs, defaultLimits } from '../lib/jobs.js';
@@ -104,6 +105,27 @@ test('cancel: a running job is aborted, a queued job never runs', async () => {
   assert.equal(q.get(b.id).state, 'cancelled');
   assert.equal(started, 1);
   assert.equal(q.get(a.id).attempts, 1, 'a cancelled job is not retried');
+});
+
+test('journal writes of one job land in the order they were made: an older, slower write never undoes a newer state', async () => {
+  // (T5, found 2026-11-23: 28 of 400 runs of the restart steps) a job could start while its first write ("queued") was
+  // still on its way; that older write landed last and the journal said "queued" for a running job — and a "succeeded"
+  // overtaken the same way would make a finished job run again after a restart. Here every job's first write is slow.
+  const dir = tmp();
+  const seen = new Set();
+  const io = { ...fsp, writeFile: async (f, data, ...rest) => { const id = JSON.parse(data).id; if (!seen.has(id)) { seen.add(id); await sleep(80); } return fsp.writeFile(f, data, ...rest); } };
+  const q = createJobs({ dir, limits: { fast: 1, slow: 1 }, io, ...fast });
+  let finish;
+  q.register('edit', { run: () => new Promise((r) => { finish = r; }) });
+  const a = await q.enqueue({ kind: 'edit', data: { mediaId: 'a' } });
+  const disk = () => JSON.parse(fs.readFileSync(path.join(dir, `${a.id}.json`), 'utf8')).state;
+  await until(() => q.get(a.id).state === 'running');
+  await sleep(150); // (every write issued so far has landed)
+  assert.equal(disk(), 'running', 'the journal of a running job says running');
+  finish();
+  await q.idle();
+  await sleep(150);
+  assert.equal(disk(), 'succeeded');
 });
 
 test('restart: queued and interrupted jobs continue from the journal; broken files are skipped', async () => {
