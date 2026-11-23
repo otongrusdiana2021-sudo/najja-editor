@@ -464,3 +464,12 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Port `127.0.0.1:3333->3333/tcp`. Log 0 error. Kedua container sehat.
   - `healthz` tetap menyebut 1.13.1, karena versi di `package.json` belum dinaikkan.
 - **Belum dicek:** alur pengguna yang butuh login (editor, Desain, MCP dengan token) dan iPad. Pemilik diminta mencoba.
+
+#### `COMPOSE_FILE` di VPS dan Caddy dimatikan di mode proxy (PR #2) — 2026-11-23
+
+- **`.env` VPS** (atas permintaan pemilik): ditambah `COMPOSE_FILE=docker-compose.yml:deploy/compose.proxy.yml`, sehingga `docker compose` biasa memakai kedua file. Cadangan `.env` ada di `/root/najja-env-backups/` (di luar repo, karena `.env.bak-*` tidak di-ignore git). Dicek: port `127.0.0.1:3333` ikut, dan dry-run tidak mengganti container.
+- **PR #2** (`7a98b22`): `caddy` diberi `profiles: ["caddy"]` di `deploy/compose.proxy.yml`. Ada `test/deploy-config.test.js` (dengan file lama, test proxy gagal). CI hijau di run 45139243360.
+- **VPS di-fast-forward ke `7a98b22`**, tanpa build dan tanpa mengganti container:
+  - Service di `docker compose` biasa `ai caddy najja` → `ai najja`.
+  - Dry-run `docker compose up -d` tanpa nama service: kedua container "Running", Caddy tidak dibuat.
+  - Port tetap `127.0.0.1:3333`, dan `/login` 200.
