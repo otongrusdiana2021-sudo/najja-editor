@@ -579,7 +579,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Hasil: port terpasang, error di log 0, container `running` dengan 0 restart. `/healthz`, `/login`, dan `.well-known` 200, dan Range lewat nginx tetap `206`. Perbaikan ada di `devicecache.js` di dalam container.
   - **Belum diukur:** apakah iPad kini memutar dari disk (log server seharusnya berhenti menerima permintaan `/edit` dari iPad setelah salinan selesai), dan Diagnostik iPad dibanding PC.
 
-- **iPad patah-patah di potongan (cut to cut), video mentah lancar (diperbaiki di kode 2026-11-23, belum di-deploy):**
+- **iPad patah-patah di potongan (cut to cut), video mentah lancar (diperbaiki dan di-deploy 2026-11-23, `58b9848`):**
   - **Laporan pemilik:** di iPad video mentah lancar, tapi setelah dipotong-potong dan diberi efek jadi patah-patah. Di PC lancar.
   - **Yang sudah dicek dan bukan penyebab:**
     - Salinan `edit` di server sudah ramah-edit: keyframe tiap 0,5 dtk dan tanpa B-frame (`lib/media-proxy.js` `editArgs`).
@@ -598,4 +598,9 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
     - Di Chrome, skenario `meta.json` hilang kini cukup 1 permintaan (`416`), lalu salinan disk dipakai dengan isi identik dan `complete: true`.
     - Suite: 291 test, 277 lulus, 0 gagal, 14 dilewati.
   - **Belum diukur:** efek (filter di iPad lewat WebGL, `gpufx.js`) mungkin ikut menambah beban per frame. Diagnostik iPad akan menunjukkannya (`frame_draw_ms`) setelah streaming tidak lagi jadi penyebab.
+
+- **Deploy produksi `58b9848` (salinan utuh tanpa `meta.json`), 2026-11-23:**
+  - `npm run deploy` berjalan: test lokal lulus, CI hijau, lalu VPS `7f97dd9` → `58b9848`. Image lama dicadangkan sebagai `backup-7f97dd9`.
+  - Hasil: port terpasang, error di log 0, container `running` dengan 0 restart (mulai 10:03 UTC). `/healthz`, `/login`, dan `.well-known` 200, dan Range lewat nginx tetap `206`. Perbaikan ada di `devicecache.js` dan `media.js` di dalam container.
+  - **Ukuran keberhasilan (dicek di log setelah pemilik membuka proyek di iPad):** paling banyak satu `416` per media, lalu tidak ada lagi unduhan penuh ke memori dan tidak ada aliran `206` selama play.
 
