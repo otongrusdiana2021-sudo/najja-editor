@@ -52,11 +52,12 @@ topbar.innerHTML = `
   </div>`;
 
 const engine = new Engine(document.createElement('canvas'));
-// Background downloads of media to this device pause while the preview plays or a frame is being
-// captured (the player and the seek need the bandwidth).
-// Copies are saved to this device while the editor is idle — and also while it plays, when everything it plays
-// is already on the device (then playback uses no network and the light copy arrives sooner).
-setCacheGate(() => !engine.capturing && (!engine.playing || engine.playingLocal()));
+// Background downloads of media to this device pause only while a frame is being captured (export, MCP frame).
+// (v1.13.2) They no longer pause while the preview plays from the server: on an iPad that opened a project made
+// elsewhere, the owner kept playing, so the copy never finished, and the player streamed instead — 241 MB of a
+// 102 MB file in two minutes (each element of the cut pool fetches on its own) and a stall at every cut. One
+// download at low network priority (media.js) is far less, and once it is done every cut plays from the device.
+setCacheGate(() => !engine.capturing);
 const player = new Player($('#viewer'), engine);
 engine.canvas = player.canvas;
 engine.ctx = player.canvas.getContext('2d', { alpha: false });

@@ -279,7 +279,7 @@ let deviceBytes = 0;
 let cacheChain = Promise.resolve();
 const caching = new Map(); // `${id}|${src}` -> promise<blob url | null>
 
-/** Downloads yield to playback: while the preview plays, the player gets the whole connection. */
+/** Downloads pause while a frame is captured (app.js setCacheGate); during playback they go on at low priority. */
 let cacheGate = () => true;
 export function setCacheGate(fn) { cacheGate = fn; }
 let forceCache = 0; // > 0 while an export waits for its media
@@ -336,7 +336,8 @@ async function downloadToDevice(id, src, onProgress, stillWanted) {
         return deviceCache.download(key, {
           id,
           name: entryOf(id)?.name || '',
-          fetchFrom: (off) => fetch(src, { credentials: 'same-origin', headers: off ? { Range: `bytes=${off}-` } : {} }),
+          // (low priority: the player's own requests come first while it streams)
+          fetchFrom: (off) => fetch(src, { credentials: 'same-origin', priority: 'low', headers: off ? { Range: `bytes=${off}-` } : {} }),
           shouldPause: () => !gateOpen(),
           waitResume: waitGate,
           stillWanted,
@@ -369,7 +370,7 @@ async function downloadToMemory(src, onProgress, stillWanted) {
       if (!stillWanted()) return null;
       let r;
       try {
-        r = await fetch(src, { credentials: 'same-origin', headers: got ? { Range: `bytes=${got}-` } : {} });
+        r = await fetch(src, { credentials: 'same-origin', priority: 'low', headers: got ? { Range: `bytes=${got}-` } : {} });
       } catch {
         await new Promise((res) => setTimeout(res, 2000));
         continue;

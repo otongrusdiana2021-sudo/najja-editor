@@ -604,3 +604,24 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Hasil: port terpasang, error di log 0, container `running` dengan 0 restart (mulai 10:03 UTC). `/healthz`, `/login`, dan `.well-known` 200, dan Range lewat nginx tetap `206`. Perbaikan ada di `devicecache.js` dan `media.js` di dalam container.
   - **Ukuran keberhasilan (dicek di log setelah pemilik membuka proyek di iPad):** paling banyak satu `416` per media, lalu tidak ada lagi unduhan penuh ke memori dan tidak ada aliran `206` selama play.
 
+- **iPad masih patah-patah setelah `58b9848`: unduhan salinan berhenti setiap kali play (diubah di kode 2026-11-23, belum di-deploy):**
+  - **Bukti (log nginx 10:03–10:07):**
+    - iPad memuat kode baru pukul 10:05:42, mendapat satu `416` (jalur pemulihan), lalu dimuat ulang.
+    - Setelah itu ada 189 permintaan potongan untuk **satu** video (`m_z3xj…`, `edit.mp4` 102 MB), dengan total **241,5 MB dalam ±2 menit**, atau 2,4× ukuran filenya. Sebagian besar potongannya kecil (96 di bawah 256 KB, 46 antara 256 KB–1 MB, 44 antara 1–8 MB), ditambah 3 lanjutan unduhan besar yang terputus.
+  - **Akar masalah:** sejak awal, unduhan salinan ke perangkat **dijeda selama preview memutar dari server** (`setCacheGate` di `app.js`).
+    - Di PC salinannya sudah lama ada, jadi PC tidak pernah streaming.
+    - Di iPad (perangkat kedua), pemilik terus menekan play saat menguji, jadi salinan 102 MB tidak pernah selesai.
+    - Sementara itu tiap elemen di pool potongan (`plan.js`, POOL 3) mengambil data sendiri dari server, sehingga setiap potongan menunggu jaringan. Video mentah cukup satu elemen yang membaca lurus, jadi tetap lancar.
+  - **Perubahan:**
+    - Unduhan ke perangkat kini hanya dijeda saat frame ditangkap (ekspor, frame MCP), tidak lagi saat play.
+    - Permintaannya memakai `priority: 'low'` (Fetch Priority; Safari 17.2+, Chrome 101+), supaya permintaan pemutar tetap didahulukan.
+    - Berlaku juga untuk unduhan ke memori. `engine.playingLocal()` tidak dipakai lagi.
+  - **Uji:**
+    - Suite lulus.
+    - Editor lokal termuat normal, dan `fetch` dengan `priority: 'low'` + Range dijawab `206`.
+    - Perilaku saat play tidak bisa diuji di localhost, karena file 121 MB terunduh lokal dalam ±1 dtk.
+  - **Ukuran keberhasilan setelah deploy (dicek di log saat pemilik memakai iPad):**
+    - Ada satu transfer besar yang selesai, yaitu sisa ±102 MB, walaupun iPad sedang play.
+    - Setelah itu tidak ada lagi permintaan `/edit` dari iPad.
+    - Potongan tidak lagi menunggu. Kalau masih patah, Diagnostik iPad (`frame_draw_ms`) menunjukkan apakah sisanya dari efek (WebGL `gpufx.js`).
+
