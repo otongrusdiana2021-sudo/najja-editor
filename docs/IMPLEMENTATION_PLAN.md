@@ -86,6 +86,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 |---|---|
 | P0-1 Antrian perintah MCP + mutex capture | ✅ selesai, di-commit di branch `feat/p0-1-mcp-command-queue` (**belum di-push dan belum di-deploy**). E2E belum dijalankan (lihat log) |
 | P0-2 Autosave + kunci ekspor | ✅ selesai, di-commit di branch `feat/p0-2-autosave-export-lock` (dibangun di atas P0-1; **belum di-push dan belum di-deploy**). Thumbnail per-autosave (bagian V14) ditunda ke P2 karena butuh benchmark |
+| P0-3 Test infra + CI | ✅ selesai, di-commit di branch `feat/p0-3-contract-ci` (di atas P0-2; **belum di-push**). CI belum pernah jalan di GitHub. E2E Playwright di CI ditunda |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -147,3 +148,28 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Penulisan IndexedDB saat `pagehide`/`beforeunload` dimulai seketika, tapi browser tidak menjamin transaksinya selesai sebelum halaman mati. Ini lebih baik dari sebelumnya, tapi bukan jaminan.
   - Thumbnail JPEG masih dibuat di setiap autosave (bagian V14). Ditunda ke P2 karena butuh benchmark main thread sebelum dan sesudah.
 - **Berikutnya:** P0-3 (snapshot kontrak MCP + guard skip `proxy.test.js` + CI).
+
+#### P0-3 — Test infra dan CI (2026-11-23)
+
+- **Tujuan:** T1 (tidak ada CI), T2 (test ffmpeg tanpa skip), T3 (kontrak 27 tool tidak dijaga test).
+- **Perubahan:**
+  - `test/mcp-contract.mjs` (baru): mengambil kontrak dari `tools/list` dan `prompts/list` handler protokol yang asli (bukan salinan), lalu membandingkannya dengan snapshot. `node test/mcp-contract.mjs --update` menulis snapshot dan **menolak** bila perubahannya merusak (aturan lengkap di `MCP_COMPATIBILITY_REPORT.md` §7).
+  - `test/fixtures/mcp-contract-v1.json` (baru): snapshot 27 tool + 4 prompt. Dibuat dari kode yang `mcp/` dan `lib/`-nya identik dengan v1.13.1 produksi (`git diff 86305a7 -- mcp/ lib/` kosong).
+  - `test/mcp-contract.test.js` (baru, 27 test):
+    - Kontrak v1 utuh, dan snapshot berisi 27 tool + 4 prompt.
+    - Isi `tools/list` = `TOOLS`.
+    - Setiap tool punya handler di `public/js/api.js` (cek statis), sehingga tidak ada yang menjawab "not supported".
+    - 16 jenis perubahan merusak ditolak, 7 jenis perubahan aditif diterima.
+  - `test/proxy.test.js`: test "light copy 60 fps" sekarang `{ skip }` bila ffmpeg/libx264 tidak ada. Guard-nya terpisah (`skipX264`) karena test ini tidak butuh libx265.
+  - `.github/workflows/ci.yml` (baru): setiap push dan PR, Node 22 (versi image produksi), pasang ffmpeg, `node --check` 59 modul `public/js`, lalu `npm test`. Izin hanya `contents: read`. Run lama dibatalkan bila ada push baru di ref yang sama.
+  - `package.json`: `test/mcp-contract.test.js` masuk `npm test`.
+- **Hasil test:**
+  - Unit lokal (Node 26, tanpa ffmpeg): **191 test, 177 lulus, 0 gagal, 14 dilewati**. Run lokal pertama yang hijau total (sebelumnya 1 gagal karena T2).
+  - Mutation check di kode asli: `split_clip` diganti nama sementara di `mcp/tools.js` → test kontrak gagal dengan pesan "tool split_clip: gone…", dan `--update` menolak menulis (exit 1). File dikembalikan, snapshot tidak tersentuh.
+  - Workflow: YAML valid (diparse Ruby), langkah `find … | xargs node --check` dijalankan lokal dan lulus.
+  - **Belum:** CI belum pernah jalan di GitHub (butuh push). Ada dua hal yang baru terbukti di run pertama: (1) suite di Node 22, karena lokal pakai Node 26 dan Docker daemon tidak jalan; (2) 5 test proxy yang butuh ffmpeg + libx264/libx265, yang belum pernah jalan di Mac ini dan akan jalan di CI.
+- **Risiko tersisa:**
+  - Push file `.github/workflows/` butuh token GitHub dengan scope `workflow`. Kalau kredensial git di Mac ini tidak punya scope itu, push branch ini akan ditolak GitHub.
+  - Bentuk output tool belum masuk snapshot (tidak ada `outputSchema`). Ditangani test per tool di fase B.
+  - E2E Playwright (Chromium + WebKit) belum ada di CI. Playwright bukan dependency project. Menambahkannya perlu memasang paket `playwright` dan browser, sebaiknya diuji lokal dulu.
+- **Berikutnya:** P0-4 (header keamanan, cache SW dibersihkan saat logout, nginx `.well-known`, DNS www, DEPLOY doc). Sebagian butuh perubahan di VPS/DNS, jadi perlu izin eksplisit.

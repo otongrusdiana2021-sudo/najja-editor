@@ -101,7 +101,7 @@ Nama tool di `mcp/tools.js` sama 1:1 dengan handler di `public/js/api.js` (27 = 
 ## 5. Strategi kompatibilitas
 
 **Aturan kontrak v1 (berlaku mulai sekarang):**
-1. 27 nama tool, schema input, dan bentuk output adalah **kontrak v1**. Snapshot schema (`test/mcp-contract.test.js`, golden file) gagal kalau ada tool yang dihapus, diganti nama, atau field wajib baru.
+1. 27 nama tool, schema input, dan bentuk output adalah **kontrak v1**. Snapshot schema (`test/mcp-contract.test.js`, golden file `test/fixtures/mcp-contract-v1.json`) gagal kalau ada tool yang dihapus, diganti nama, atau field wajib baru. Bentuk output belum masuk snapshot (lihat §7).
 2. Perubahan hanya **aditif**: parameter opsional baru, field output baru, tool baru.
 3. Tool yang mau diganti tetap ada sebagai **alias** minimal 2 versi minor, dengan catatan `deprecated` di deskripsinya.
 4. MCP harus tetap jalan di setiap fase migrasi. Engine yang diganti dibungkus adapter yang memenuhi kontrak yang sama.
@@ -136,13 +136,17 @@ Nama tool di `mcp/tools.js` sama 1:1 dengan handler di `public/js/api.js` (27 = 
 |---|---|---|
 | Protokol: initialize, list, call, error | unit | ✅ ada (`test/mcp.test.js`) |
 | OAuth: discovery, connect penuh, refresh, revoke | unit | ✅ ada (`test/oauth.test.js`) |
-| Snapshot kontrak 27 tool + 4 prompt | unit | ➕ baru (P0-3) |
-| Antrian perintah: urutan FIFO, perintah lewat tenggat dilewati, `runLocal` ikut antri, error tidak menghentikan antrian | unit | ✅ ditambahkan (`test/cmdqueue.test.js`, 11 test lulus) |
+| Snapshot kontrak 27 tool + 4 prompt | unit | ✅ ditambahkan di P0-3 (`test/mcp-contract.test.js` + `test/fixtures/mcp-contract-v1.json`, dijalankan CI). Lihat catatan di bawah |
+| Setiap tool MCP punya handler di editor (`public/js/api.js`) | unit | ✅ ditambahkan di P0-3 (cek statis) |
+| Antrian perintah: urutan FIFO, perintah lewat tenggat dilewati, `runLocal` ikut antri, error tidak menghentikan antrian | unit | ✅ ditambahkan (`test/cmdqueue.test.js`) |
+| Kunci ekspor: tool pengubah/seek ditolak, baca tetap jalan, dicek saat giliran tiba | unit | ✅ ditambahkan di P0-2 (`test/cmdqueue.test.js`) |
 | 3 `get_frame` paralel → 3 frame berbeda dan benar | e2e | ✅ ditambahkan ke `test/e2e/get-frame.mjs`, **belum dijalankan** (butuh Playwright + ffmpeg). Sudah diverifikasi manual di browser asli: v1.13.1 → biru/biru/biru, perbaikan → merah/hijau/biru |
+| Satu jalur sukses + satu jalur error per tool (27 tool) | e2e | ➕ baru (fase B) |
+
+**Snapshot kontrak (P0-3):** `node test/mcp-contract.mjs --update` menulis snapshot dari `tools/list` dan `prompts/list` handler protokol yang asli, dan **menolak** menulis bila ada perubahan yang merusak. Yang diperiksa: tool dan prompt tidak hilang atau diganti nama, parameter tidak hilang, tidak ada parameter atau argumen prompt wajib yang baru, tipe tidak berubah (integer → number boleh), nilai `enum` tidak berkurang, batas `minimum`/`maximum`/`minItems`/`maxItems` tidak menyempit, objek tidak mulai menolak field lain, tool read-only tidak berubah jadi pengubah, dan tool tidak menjadi destruktif. Deskripsi dan judul boleh diubah bebas. **Belum dicakup:** bentuk output tool, karena hasil tool berupa data bebas tanpa `outputSchema`. Itu ditangani test per tool di fase B.
 
 **Status M1 (2026-11-23):** diperbaiki di P0-1 (branch `feat/p0-1-mcp-command-queue`), belum di-push dan belum di-deploy ke produksi.
 
 **Kunci ekspor (P0-2, 2026-11-23):** selama ekspor merender, hanya `get_project`, `list_assets`, `list_media`, `list_styles`, `get_export_status`, dan `export_video` yang dijalankan. Tool lain menjawab error "Not run: a video export is rendering…" dan proyek tidak berubah. Kontrak (nama, schema, bentuk hasil) tetap. Branch `feat/p0-2-autosave-export-lock`, belum di-push dan belum di-deploy.
-| Satu jalur sukses + satu jalur error per tool (27 tool) | e2e | ➕ baru (fase B) |
 
 **MCP belum boleh dinyatakan selesai migrasi** sebelum semua test di atas lulus di desktop dan iPad.
