@@ -579,3 +579,23 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Hasil: port terpasang, error di log 0, container `running` dengan 0 restart. `/healthz`, `/login`, dan `.well-known` 200, dan Range lewat nginx tetap `206`. Perbaikan ada di `devicecache.js` di dalam container.
   - **Belum diukur:** apakah iPad kini memutar dari disk (log server seharusnya berhenti menerima permintaan `/edit` dari iPad setelah salinan selesai), dan Diagnostik iPad dibanding PC.
 
+- **iPad patah-patah di potongan (cut to cut), video mentah lancar (diperbaiki di kode 2026-11-23, belum di-deploy):**
+  - **Laporan pemilik:** di iPad video mentah lancar, tapi setelah dipotong-potong dan diberi efek jadi patah-patah. Di PC lancar.
+  - **Yang sudah dicek dan bukan penyebab:**
+    - Salinan `edit` di server sudah ramah-edit: keyframe tiap 0,5 dtk dan tanpa B-frame (`lib/media-proxy.js` `editArgs`).
+    - Engine sudah memakai pool 3 elemen per file yang menunggu di frame pertama potongan berikutnya (v1.12.7).
+  - **Bukti dari log setelah deploy `7f97dd9`:** iPad memuat `devicecache.js` baru pukul 09:48:37, tapi tetap mendapat `416` sekitar 1 dtk setelah setiap muat (09:48:38, 09:48:58, 09:49:16). Sesudahnya selalu ada unduhan baru ke memori (misalnya 102 MB pukul 09:48:01) dan 104 permintaan potongan `206`. Artinya iPad tetap memutar lewat Wi-Fi.
+  - **Akar masalah:** entri di OPFS berisi semua byte, tapi `meta.json` hilang atau tak terbaca (misalnya halaman dimuat ulang saat file itu ditulis). Pemeriksaan "sudah utuh" butuh `meta.size`, jadi app meminta `bytes=<ukuran>-`, mendapat `416`, menyerah, lalu jatuh ke unduhan ke memori. Hal ini berulang di setiap muat.
+    - Video mentah tetap lancar karena satu elemen membaca lurus dari stream.
+    - Potongan membuat elemen lain melompat ke posisi baru lewat jaringan, sehingga menunggu di setiap potongan. Di PC lompatan itu dibaca dari disk.
+  - **Reproduksi:** di Chrome (OPFS asli), entri lengkap yang `meta.json`-nya dihapus menghasilkan `[73364 → 416 "bytes */73364"]`, lalu `null`.
+  - **Perbaikan (`public/js/devicecache.js`):**
+    - Balasan `416` membawa ukuran file. Kalau byte di disk sama dengan ukuran itu, metadata ditulis ulang (tipe `video/mp4` untuk salinan server) dan salinan dari disk dipakai.
+    - Kalau byte di disk lebih banyak dari ukuran file, entri dimulai ulang dari nol, tidak menyerah.
+    - Di `media.js`, unduhan ke memori kini juga dianggap selesai dari jumlah byte, karena polanya sama (jeda di potongan terakhir). Bagian ini tidak punya test sendiri.
+  - **Hasil:**
+    - `test/device-cache.test.js` 5/5 lulus. Dua test baru gagal sebelum perbaikan.
+    - Di Chrome, skenario `meta.json` hilang kini cukup 1 permintaan (`416`), lalu salinan disk dipakai dengan isi identik dan `complete: true`.
+    - Suite: 291 test, 277 lulus, 0 gagal, 14 dilewati.
+  - **Belum diukur:** efek (filter di iPad lewat WebGL, `gpufx.js`) mungkin ikut menambah beban per frame. Diagnostik iPad akan menunjukkannya (`frame_draw_ms`) setelah streaming tidak lagi jadi penyebab.
+

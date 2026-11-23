@@ -175,6 +175,27 @@ export const deviceCache = {
         if (!stillWanted()) return null;
         let res;
         try { res = await fetchFrom(got); } catch { await new Promise((ok) => setTimeout(ok, 2000)); continue; }
+        if (res.status === 416) {
+          // (v1.13.2) Asked past the end: the reply names the file's size. Every byte may already be here while
+          // meta.json is missing or unreadable (a reload while it was written; seen on an iPad): then it is
+          // finished below. More bytes than the file (a broken entry): start over. Before, either gave up, and the
+          // device fell back to streaming and to a fresh download into memory on every load.
+          res.body?.cancel().catch(() => {});
+          const size = Number(/\/(\d+)/.exec(res.headers.get('content-range') || '')?.[1]) || 0;
+          if (size && got === size) {
+            meta = { id, name, key, type: '', created: Date.now(), ...meta, size, complete: false, lastUsed: Date.now() };
+            if (!meta.type && /_[ep]\d+$/.test(key)) meta.type = 'video/mp4'; // (the server's H.264 copies)
+            await writeMeta(dir, meta);
+            break;
+          }
+          if (!size || attempt > 0) return null;
+          for (const s of await segments(dir)) await dir.removeEntry(String(s.n).padStart(6, '0')).catch(() => {});
+          segs = [];
+          got = 0;
+          next = 0;
+          meta = null;
+          continue;
+        }
         if (!res.ok || !res.body) return null;
         if (got && res.status !== 206) { // the server ignored the range: start over
           for (const s of segs) await dir.removeEntry(String(s.n).padStart(6, '0')).catch(() => {});

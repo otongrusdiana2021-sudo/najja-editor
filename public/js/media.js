@@ -397,7 +397,8 @@ async function downloadToMemory(src, onProgress, stillWanted) {
       } catch {
         paused = true; // connection dropped: retry from where it stopped
       }
-      if (!paused && (!total || got >= total)) break;
+      // (v1.13.2) complete by bytes: a pause right after the last chunk used to ask past the end (416) and lose the copy
+      if ((total && got >= total) || (!paused && !total)) break;
     }
   } finally {
     onProgress?.(null);

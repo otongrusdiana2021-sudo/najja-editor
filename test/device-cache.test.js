@@ -108,3 +108,41 @@ test('a download paused in the middle still resumes where it stopped (Range), th
   assert.deepEqual(log, [0, 100_000], 'resumed from the first chunk with a Range request');
   assert.deepEqual(await bytesOf(url), VIDEO);
 });
+
+/** An entry as a device may hold it: segment files, and meta.json only when given. */
+async function seed(key, parts, meta) {
+  await deviceCache.available();
+  const dir = await media().getDirectoryHandle(key, { create: true });
+  for (const [i, part] of parts.entries()) {
+    const w = await (await dir.getFileHandle(String(i).padStart(6, '0'), { create: true })).createWritable();
+    await w.write(part);
+    await w.close();
+  }
+  if (meta) {
+    const w = await (await dir.getFileHandle('meta.json', { create: true })).createWritable();
+    await w.write(JSON.stringify(meta));
+    await w.close();
+  }
+}
+
+test('every byte on disk but no readable meta.json (a reload while it was written): the 416 size finishes it', async () => {
+  // (seen on an iPad after the fix above: 416 a second after every page load, then a fresh download into memory)
+  await seed('m_1_e1', [VIDEO.slice(0, 200_000), VIDEO.slice(200_000)], null);
+  const log = [];
+  const url = await deviceCache.download('m_1_e1', hooks({ fetchFrom: server(log) }));
+  assert.ok(url, 'the copy on disk is used');
+  assert.deepEqual(log, [VIDEO.length], 'one request: the server answers 416 with the file size, nothing is downloaded again');
+  const e = await entry('m_1_e1');
+  assert.deepEqual([e.complete, e.total], [true, VIDEO.length]);
+  assert.deepEqual(await bytesOf(url), VIDEO);
+  assert.equal((await fetch(url)).headers.get('content-type'), 'video/mp4', 'a video copy keeps its type (Safari plays blobs by type)');
+});
+
+test('more bytes on disk than the file has (a broken entry): it starts over instead of giving up', async () => {
+  await seed('m_1_e1', [VIDEO, VIDEO.slice(0, 1000)], null);
+  const log = [];
+  const url = await deviceCache.download('m_1_e1', hooks({ fetchFrom: server(log) }));
+  assert.ok(url);
+  assert.deepEqual(log, [VIDEO.length + 1000, 0], '416, then the whole file again');
+  assert.deepEqual(await bytesOf(url), VIDEO);
+});
