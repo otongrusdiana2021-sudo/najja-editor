@@ -28,6 +28,7 @@ const WARMUP_MS = 1500; // a hardware decoder's first frame may take this long
 const MAX_RESYNCS = 6; // in 10 s: a decoder that only gives frames on a flush cannot play a preview
 const FLUSH_MS = 3000;
 const PREFETCH_S = 3; // seconds of samples whose bytes are read ahead of the decoder
+const SCRUB_WAIT_MS = 1500; // a jump while paused waits at most this long for the picture of the jump before it
 
 export const decoderSupported = () => typeof VideoDecoder === 'function' && typeof EncodedVideoChunk === 'function' && typeof VideoFrame === 'function';
 
@@ -159,10 +160,58 @@ export class FrameSource {
     this.mode = playing ? 'play' : 'still';
     this.ahead = ahead;
     this.end = end;
-    if (this.jumps(t)) this.restart(t);
+    if (!playing) this.scrubAhead(t);
+    if (this.jumps(t)) {
+      // Paused (a scrub): while the picture of the last jump is still on its way (bytes from the server, the decoder),
+      // a new jump waits for it instead of throwing it away. Before, a finger moving faster than the bytes came
+      // restarted the decoder at every position and no picture was shown until it stopped (iPad, streamed copy).
+      if (!playing && this.inFlight && this.now() - this.restartAt < SCRUB_WAIT_MS) {
+        this.deferred = { t, end };
+        this.kick();
+        return;
+      }
+      this.restart(t);
+    }
+    this.deferred = null;
     this.target = t;
     this.trim(t);
     this.kick();
+  }
+  /** Paused and moving (a scrub): read the bytes a few seconds further in the direction of the finger already. */
+  scrubAhead(t) {
+    const last = this.lastStill;
+    this.lastStill = t;
+    if (last == null || Math.abs(t - last) < 1e-3) return;
+    const dir = Math.sign(t - last);
+    for (const s of [2, 5]) {
+      // (the group of pictures there: from its keyframe to the next one)
+      const k = this.file.keyIndexAt(Math.max(0, t + dir * s));
+      let j = k + 1;
+      while (j < this.S.length - 1 && !this.S[j].key) j++;
+      this.file.bytes.prefetch?.(this.S[k].offset, this.S[j].offset - this.S[k].offset + this.S[j].size);
+    }
+  }
+  /**
+   * The bytes of the samples from i on that will be decoded soon, as one request: while playing up to PREFETCH_S
+   * ahead (never far past the stretch's end), paused up to the frame wanted. (Asked sample by sample, every sample
+   * not here would wait for its own round trip.)
+   */
+  announce(i, { high = true } = {}) {
+    const S = this.S;
+    const b = this.file.bytes;
+    if (!b.prefetch || b.has?.(S[i].offset, S[i].size)) return;
+    const limit = this.mode === 'play' ? Math.min(this.end + 0.3, S[i].pts + PREFETCH_S) : Math.max(S[i].pts, this.target ?? 0) + 0.25;
+    let j = i;
+    while (j + 1 < S.length && S[j + 1].pts <= limit) j++;
+    j = Math.min(S.length - 1, j + 3 + (this.extra || 0));
+    b.prefetch(S[i].offset, S[j].offset + S[j].size - S[i].offset, { high });
+  }
+  /** The jump in flight showed its picture: go on to where the finger is now. */
+  settleJump() {
+    if (!this.inFlight || this.target == null || !this.final(this.target)) return;
+    this.inFlight = false;
+    const d = this.deferred;
+    if (d) { this.deferred = null; this.want(d.t, { end: d.end }); }
   }
   /** Does reaching t mean starting again at a keyframe (back in time, or a keyframe far after the decode position)? */
   jumps(t) {
@@ -201,6 +250,8 @@ export class FrameSource {
     this.gotOut = false;
     this.lastOut = this.now();
     this.primeAt = this.now();
+    this.restartAt = this.now();
+    this.inFlight = true;
   }
   /** The slot moves on to another stretch: its last picture belongs to the old one (not shown for the new one). */
   drop() {
@@ -281,6 +332,7 @@ export class FrameSource {
       this.primeAt = null;
     }
     if (wasNew) this.onFrame(this);
+    this.settleJump();
     this.kick();
   }
   fail(e) {
@@ -360,6 +412,7 @@ export class FrameSource {
     const bytes = this.file.bytes;
     let data = bytes.peek(s.offset, s.size);
     if (!data) {
+      this.announce(i);
       this.waitingBytes = true;
       try {
         data = await bytes.read(s.offset, s.size);
@@ -372,8 +425,11 @@ export class FrameSource {
       }
       if (gen !== this.gen || this.closed) return;
     }
-    const ahead = this.S[Math.min(this.S.length - 1, i + Math.round(PREFETCH_S / this.fd))];
-    bytes.prefetch(ahead.offset);
+    // while playing: the next stretch of bytes, a second before they are needed
+    if (this.mode === 'play') {
+      const m = Math.min(this.S.length - 1, i + Math.round(1 / this.fd));
+      if (this.S[m].pts <= this.end + 0.3) this.announce(m, { high: false });
+    }
     const ts = Math.round(s.pts * 1e6);
     this.pending.set(ts, i);
     this.next = i + 1;

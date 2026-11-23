@@ -7,7 +7,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { FrameSource, VideoFile } from '../public/js/framesource.js';
-import { MediaBytes } from '../public/js/mediabytes.js';
+import { MediaBytes, runsOf } from '../public/js/mediabytes.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(cond, ms = 3000, what = 'condition') {
@@ -237,6 +237,50 @@ test('bytes not here yet (streaming): the source says it waits for the network',
   D.close();
 });
 
+test('scrubbing faster than the network brings bytes: the picture still follows the finger', async () => {
+  // (iPad, light copy still streamed from the server: a scrub moving faster than 1 MB windows arrive restarted the
+  // decoder at every position, so no picture was ever decoded until the finger stopped — the preview stood still)
+  const N2 = 1800; // 60 s at 30 fps, ~8 KB a frame like the 720p light copy: a 1 MB window holds ~4 s
+  const long = { ...track, samples: Array.from({ length: N2 }, (_, i) => ({ offset: 48 + i * 8000, size: 8000, key: i % 15 === 0, pts: i / FPS })) };
+  const WIN = 1 << 20;
+  const loaded = new Set();
+  const inflight = new Map();
+  const net = {
+    peek(off, len) { return loaded.has(Math.floor(off / WIN)) && loaded.has(Math.floor((off + len - 1) / WIN)) ? new Uint8Array(len) : null; },
+    read(off, len) {
+      const ws = [Math.floor(off / WIN), Math.floor((off + len - 1) / WIN)];
+      return Promise.all(ws.map((w) => {
+        if (loaded.has(w)) return null;
+        if (!inflight.has(w)) inflight.set(w, sleep(250).then(() => { loaded.add(w); inflight.delete(w); })); // 250 ms a window (Wi-Fi)
+        return inflight.get(w);
+      })).then(() => new Uint8Array(len));
+    },
+    prefetch() {},
+  };
+  for (const dir of [1, -1]) {
+    loaded.clear();
+    const file = new VideoFile('copy', net, { track: long, cfg: { codec: track.codec } });
+    const D = new FrameSource(file, { env });
+    const a = dir > 0 ? 2 : 50;
+    D.want(a);
+    await until(() => D.final(a), 3000);
+    const first = D.frame(a).timestamp;
+    const shown = new Set(); // different pictures on screen while the finger moves (the first one not counted)
+    for (let k = 1; k <= 90; k++) { // 1.5 s of a fast scrub: 0.5 s of video every 16 ms (45 s in all)
+      const t = a + dir * k * 0.5;
+      D.want(t);
+      const f = D.frame(t);
+      if (f && f.timestamp !== first) shown.add(f.timestamp);
+      await sleep(16);
+    }
+    assert.ok(shown.size >= 4, `${dir > 0 ? 'forward' : 'back'}: only ${shown.size} new pictures in 1.5 s of scrubbing`);
+    const end = a + dir * 45;
+    await until(() => D.final(end), 4000, 'the exact frame once the finger stops');
+    assert.equal(D.frame(end).timestamp, usOf(Math.round(end * FPS)));
+    D.close();
+  }
+});
+
 // ---- byte reader
 const FILE = Uint8Array.from({ length: 3 * (1 << 20) + 500 }, (_, i) => (i * 7) % 251);
 function server(log, { range = true } = {}) {
@@ -250,7 +294,7 @@ function server(log, { range = true } = {}) {
   };
 }
 
-test('server copy: read with Range in 1 MB windows, a window serves every read inside it', async () => {
+test('server copy: a lone read fetches a little ahead (64 KB), and that serves the reads next to it', async () => {
   const log = [];
   const b = MediaBytes.fromUrl('/m/1/edit?v=1', { fetch: server(log) });
   assert.deepEqual(await b.read(100, 50), FILE.slice(100, 150));
@@ -262,6 +306,35 @@ test('server copy: read with Range in 1 MB windows, a window serves every read i
   assert.equal(log.length, 2);
   assert.deepEqual(b.peek(150, 10), FILE.slice(150, 160), 'in memory: no wait');
   assert.equal(b.remote(3 << 20, 10), true, 'not here yet');
+});
+
+test('a range announced is fetched exactly, in one request — not the whole window around it', async () => {
+  // (a cut needs ~150 KB; the first version fetched 1 MB windows: 6× too much on a timeline of jump cuts)
+  const log = [];
+  const b = MediaBytes.fromUrl('/m/1/edit?v=1', { fetch: server(log) });
+  b.prefetch(1_000_000, 150_000, { high: true });
+  await b.ensure(1_000_000, 1_150_000);
+  assert.deepEqual(log, [[1_000_000, 1_149_999]], 'one request for exactly that range');
+  for (let off = 1_000_000; off < 1_150_000; off += 8000) assert.deepEqual(b.peek(off, 100), FILE.slice(off, off + 100));
+  assert.equal(b.stats.bytes, 150_000);
+  // a second range overlapping it: only the missing part is asked for (a short one with the 64 KB read-ahead)
+  await b.ensure(1_100_000, 1_200_000);
+  assert.equal(log[1][0], 1_150_000);
+  assert.ok(log[1][1] < 1_150_000 + 65_536, `ends at ${log[1][1]}`);
+});
+
+test('the sound\'s own bytes: its runs between the video\'s are fetched without the video around them', async () => {
+  const log = [];
+  const b = MediaBytes.fromUrl('/m/1/edit?v=1', { fetch: server(log) });
+  // audio samples in runs of 4 × 2000 bytes, every 100 000 bytes (the video's runs in between)
+  const audio = [];
+  for (let r = 0; r < 8; r++) for (let k = 0; k < 4; k++) audio.push({ offset: 50_000 + r * 100_000 + k * 2000, size: 2000 });
+  const runs = runsOf(audio);
+  assert.equal(runs.length, 8);
+  await Promise.all(runs.map((x) => b.ensure(x.a, x.z, { exact: true })));
+  assert.equal(b.stats.bytes, 8 * 8000, 'only the sound: 64 KB, not the 750 KB of video between');
+  for (const x of audio) assert.deepEqual(await b.read(x.offset, x.size), FILE.slice(x.offset, x.offset + x.size));
+  assert.equal(log.length, 8);
 });
 
 test('the device copy arrives: the same reader reads it from then on, without the network', async () => {

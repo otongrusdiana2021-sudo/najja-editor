@@ -14,6 +14,7 @@ needs ffmpeg (fixtures, light copies). These tools do not, so they also run on a
 | `mkvideo.swift` | Makes the test video on macOS (AVFoundation): H.264 Main 1280×720 30 fps, a keyframe every 15 frames, no B-frames, moov first, AAC stereo. These are the settings of the server's light copy (`lib/media-proxy.js`). Run `swiftc -O mkvideo.swift -o mkvideo && ./mkvideo cuts.mp4 40` |
 | `measure.js` | Injected into the editor. `__measure(secs)` plays the project and counts wrong pictures, cuts whose first picture is wrong, freezes over 100 ms, and buffering. `__seeks(n)` runs paused seeks and records the time to the exact frame and whether the frame is right |
 | `run.mjs` | A/B in headless Chromium (Playwright), desktop or iPad profile (CPU 2× slower) |
+| `h2proxy.mjs` | HTTPS + HTTP/2 in front of the local server, like production. All media answers share one bandwidth (`RATE`), `LAT` adds latency, and `NODL=1` keeps the preview streaming. Use it with `run.mjs --base=https://127.0.0.1:3402` |
 | `webkit.mjs` | A/B in **Safari** (WebKit, the engine of every iPad browser). It serves a harness page on the editor's origin, so no automation or Safari settings are needed. Results are written as JSON lines |
 
 ## Set-up
@@ -43,5 +44,13 @@ What the options do:
 - `NODL=1` refuses whole-file downloads of media, so the device copy never arrives and the preview keeps streaming. That is the state of an iPad that has just opened the project.
 - `LAT=80` and `RATE` (default 2.5 MB/s, about 20 Mbps) slow media answers down like Wi-Fi.
 - `clear=1` removes Safari's earlier device copies.
+
+More `run.mjs` options:
+
+- `--scrub` (or `--scrub-only`): a finger scrubbing paused, 6 s of timeline in 3 s and in 1.2 s, forward then back. It reports how often the picture changes and how far it is behind, in frames.
+- `--audio`: plays with sound while the copy streams. It reports sound gaps, buffering and the bytes fetched.
+- `--trace`: lists every byte request with its timing.
+
+In Safari, add `&scrub=1` (or `&only=scrub`) to the harness address.
 
 Results from 2026-11-23 are in `bench/results/2026-11-23-p26-decoder.md`.

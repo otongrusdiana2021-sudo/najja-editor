@@ -90,3 +90,57 @@ window.__seeks = async function (n = 20, label = '') {
   const m = (await metrics.snapshot({})).series.seek_to_frame_ms;
   return { label, engine: E.frameMode, engine_seek_to_frame_ms: m ? { p50: m.p50, p95: m.p95 } : null, seeks: out.n, wrong_frame: out.wrong, timeouts: out.timeouts, p50_ms: out.ms[Math.floor(out.ms.length / 2)], p95_ms: out.ms[Math.floor(out.ms.length * 0.95)], max_ms: out.ms[out.ms.length - 1] };
 };
+// Scrubbing (a finger moving the timeline, paused): E.scrub(t) every animation frame along a path — forward, then back.
+// Counts how often the picture changes and how far it is behind the frame under the playhead (in frames).
+window.__scrub = async function (label = '', { secs = 3, span = 6, from = 1 } = {}) {
+  const E = window.najja.engine;
+  const { store } = await import('/js/store.js');
+  E.pause();
+  E.seek(from);
+  await E.settle(5000);
+  await new Promise((r) => setTimeout(r, 300));
+  const main = store.P.clips.filter((c) => c.trackId === 'main').sort((a, b) => a.start - b.start);
+  const cv = E.canvas; const ctx = E.ctx;
+  const read = () => {
+    const row = ctx.getImageData(0, Math.round(cv.height * (640 / 720)), cv.width, 1).data;
+    let sx = 0; let n = 0;
+    for (let x = 0; x < cv.width; x++) { const i = x * 4; if (row[i] > 220 && row[i + 1] > 220 && row[i + 2] > 220) { sx += x; n++; } }
+    return n ? Math.floor((sx / n) / (cv.width / 30)) : -1;
+  };
+  const out = [];
+  for (const dir of [1, -1]) {
+    const st = { renders: 0, changes: 0, lag: [], stuck: 0, lastSig: null, lastChange: performance.now(), blank: 0 };
+    const t0 = performance.now();
+    const a = dir > 0 ? from : from + span;
+    await new Promise((done) => {
+      const step = () => {
+        const k = Math.min(1, (performance.now() - t0) / (secs * 1000));
+        E.scrub(a + dir * span * k);
+        requestAnimationFrame(() => {
+          // (after the engine's own tick has drawn this frame)
+          const t = E.time;
+          const c = main.find((x) => t >= x.start && t < x.start + x.duration);
+          const obs = read();
+          st.renders++;
+          if (obs < 0) st.blank++;
+          else if (c) {
+            const lt = E.localTime(c, t);
+            let d = ((obs - Math.round(lt * 30)) % 30 + 30) % 30; if (d > 15) d -= 30;
+            st.lag.push(Math.abs(d));
+          }
+          const sig = `${c?.id}:${obs}`;
+          const now = performance.now();
+          if (sig !== st.lastSig) { st.changes++; st.stuck = Math.max(st.stuck, now - st.lastChange); st.lastSig = sig; st.lastChange = now; }
+          if (k < 1) step(); else done();
+        });
+      };
+      step();
+    });
+    await new Promise((r) => setTimeout(r, 400)); // (the scrub ends: the exact frame comes)
+    const settled = (() => { const t = E.time; const c = main.find((x) => t >= x.start && t < x.start + x.duration); const obs = read(); return c ? [Math.floor(E.localTime(c, t) * 30 + 1e-6) % 30, Math.round(E.localTime(c, t) * 30) % 30].includes(obs) : null; })();
+    st.lag.sort((x, y) => x - y);
+    const q = (f) => st.lag[Math.min(st.lag.length - 1, Math.floor(st.lag.length * f))];
+    out.push({ dir: dir > 0 ? 'forward' : 'back', renders: st.renders, picture_changes_per_s: +(st.changes / secs).toFixed(1), lag_frames_p50: q(0.5), lag_frames_p95: q(0.95), longest_still_ms: Math.round(st.stuck), blank: st.blank, exact_after_stop: settled });
+  }
+  return { label, engine: E.frameMode, scrub: out };
+};

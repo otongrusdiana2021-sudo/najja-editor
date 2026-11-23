@@ -337,7 +337,8 @@ async function downloadToDevice(id, src, onProgress, stillWanted) {
           id,
           name: entryOf(id)?.name || '',
           // (low priority: the player's own requests come first while it streams)
-          fetchFrom: (off) => fetch(src, { credentials: 'same-origin', priority: 'low', headers: off ? { Range: `bytes=${off}-` } : {} }),
+          // (no-store: a download held Chromium's cache lock on the URL, so the preview's own reads of it waited)
+          fetchFrom: (off) => fetch(src, { credentials: 'same-origin', cache: 'no-store', priority: 'low', headers: off ? { Range: `bytes=${off}-` } : {} }),
           shouldPause: () => !gateOpen(),
           waitResume: waitGate,
           stillWanted,
@@ -370,7 +371,7 @@ async function downloadToMemory(src, onProgress, stillWanted) {
       if (!stillWanted()) return null;
       let r;
       try {
-        r = await fetch(src, { credentials: 'same-origin', priority: 'low', headers: got ? { Range: `bytes=${got}-` } : {} });
+        r = await fetch(src, { credentials: 'same-origin', cache: 'no-store', priority: 'low', headers: got ? { Range: `bytes=${got}-` } : {} });
       } catch {
         await new Promise((res) => setTimeout(res, 2000));
         continue;

@@ -33,6 +33,7 @@ const DEC_AHEAD = 10;
 const DEC_PRIME = 3;
 // The picture is this far behind the clock: the playhead waits for it (after STALL_GRACE_MS), like a stalled video.
 const DEC_STALL_LAG = 0.25;
+const PREFETCH_CUTS_S = 4; // seconds of timeline whose cuts' bytes are fetched ahead while playing
 const ENGINE_PREF = 'najja.previewEngine'; // 'element': the <video> elements as before v1.14 (Diagnostik switch)
 const loadEnginePref = () => { try { return localStorage.getItem(ENGINE_PREF) === 'element' ? 'element' : 'auto'; } catch { return 'auto'; } };
 
@@ -332,6 +333,7 @@ export class Engine {
         }
       }
       this.sync();
+      this.prefetchCuts(now);
       this.emit('time');
     }
     if (this.exportTarget) this.renderExport();
@@ -881,6 +883,27 @@ export class Engine {
       if (!active) D.activeClip = null;
       // coming up next (or just ended) while playing: its first pictures; paused: exactly the frame at the playhead
       D.want(lt, this.playing ? { playing: true, ahead: DEC_PRIME, end } : { end });
+    }
+  }
+  /**
+   * (v1.14.1) While playing: fetch the bytes of the cuts of the next few seconds, in timeline order, before their
+   * decoder slots are free — from the keyframe before each in-point to its out-point (at most 1.5 s of it). A slot is
+   * free only 0.6 s before its next stretch (plan.js PREP), too short to wait for the network on Wi-Fi.
+   */
+  prefetchCuts(now) {
+    if (this.exportTarget || this.frameMode === 'element' || now - (this.pfAt || 0) < 200) return;
+    this.pfAt = now;
+    const t = this.time;
+    const next = (store.P?.clips || []).filter((c) => c.type === 'video' && c.start > t && c.start <= t + PREFETCH_CUTS_S).sort((a, b) => a.start - b.start);
+    for (const c of next) {
+      const f = videoFileFor(mediaRT.get(c.mediaId));
+      if (f?.state !== 'ready' || this.decFailed.has(c.mediaId)) continue;
+      const S = f.track.samples;
+      const k = f.keyIndexAt(c.in);
+      const until = Math.min(c.in + c.duration * (c.speed || 1), c.in + 1.5);
+      let j = k;
+      while (j + 1 < S.length && S[j + 1].pts <= until) j++;
+      f.bytes.prefetch(S[k].offset, S[j].offset + S[j].size - S[k].offset, { high: c.start - t < 1 });
     }
   }
   /** A decoder has the picture for its target (redraw), or failed (its media goes back to the <video> element). */

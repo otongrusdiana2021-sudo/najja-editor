@@ -709,3 +709,26 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - `framesource.js` dan `mediabytes.js` ada di dalam container.
   - **Langkah berikutnya:** pemilik mencoba di iPad. Yang dilihat di Diagnostik: "potongan siap tepat waktu / telat", "Frame pertama potongan (dekoder)", dan alasan buffer (jaringan atau dekoder).
 
+#### P2-6 lanjutan (v1.14.1): iPad masih patah-patah, dan pratinjau tidak bergerak saat timeline digeser (2026-11-23)
+
+- **Laporan pemilik:** "agak better" tapi masih patah-patah. Saat timeline digeser maju atau mundur, pratinjau diam.
+- **Bukti:**
+  - Log nginx menunjukkan iPad (CriOS) membaca jendela 1 MB dari salinan ringan 102 MB, sementara salinan itu diunduh penuh 2× dalam satu menit.
+  - Direproduksi di lab dengan salinan 2 menit dan 30 potongan, di-*stream* dengan jeda 150 ms / 10 Mbps. Hasil dekoder di Safari: 128 gambar salah, 14/30 potongan telat, 18 beku (sampai 766 ms), 9 buffer. Seluruh file 18,4 MB terunduh untuk potongan yang hanya butuh 3,0 MB.
+- **Akar masalah dan perbaikan:**
+  - **Pembacaan byte persis.** `mediabytes.js` kini membaca rentang yang diminta, bukan jendela 1 MB.
+    - Dekoder meminta satu rentang per potongan, dari keyframe sampai titik keluar.
+    - Suara hanya membaca deretan sampelnya sendiri.
+    - Mesin mengambil potongan 4 detik ke depan lebih dulu, sesuai urutan timeline.
+    - Pengambilan awal maksimal 3 sekaligus, dan bacaan yang dibutuhkan saat itu menyalipnya.
+  - **Blok suara 2 detik** untuk salinan yang di-*stream* (sebelumnya 8 detik), dan byte blok berikutnya diambil paralel.
+  - **`cache: 'no-store'`.** Cache HTTP Chromium meloloskan satu permintaan per URL sekaligus: 8 bacaan paralel butuh 1,25 dtk, versus 0,2 dtk dengan `no-store`. Unduhan salinan perangkat memegang kunci itu. Safari tidak mengantre begini (sudah diukur).
+  - **Geser timeline (scrub).** Lompatan saat jeda kini menunggu gambar yang sedang di-decode (maksimal 1,5 dtk), baru pindah ke posisi jari terakhir. Grup gambar ke arah gerakan jari diambil lebih dulu. Sebelumnya, jari yang lebih cepat dari jaringan membuat tidak ada gambar sama sekali.
+- **Hasil** (`bench/results/2026-11-23-p26-decoder.md`):
+  - Safari, uji yang sama: 0 gambar salah, 30/30 potongan tepat waktu, 0 beku, dan 0 buffer di 2 putaran. Geser maju tertinggal 0 frame, mundur p95 6–8 frame. Seek 53 ms.
+  - Chromium profil iPad **dengan suara** lewat proxy HTTP/2 (satu jalur 10 Mbps bersama): kecepatan putar 99% (sebelumnya 18–35%), 0 potongan telat, 0 buffer, 0 suara kosong.
+- **Test:** 18 test di `test/framesource.test.js` (baru: scrub lebih cepat dari jaringan, rentang persis, deretan sampel suara). Penuh: 310 test, 296 lulus, 0 gagal, 14 dilewati.
+- **Belum:**
+  - Belum diverifikasi di iPad asli.
+  - Unduhan salinan perangkat 102 MB yang terjadi 2× belum diselidiki; butuh Diagnostik JSON dari iPad.
+

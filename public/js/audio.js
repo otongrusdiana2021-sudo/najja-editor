@@ -18,10 +18,13 @@ import { mediaRT } from './media.js';
 import { blobOfUrl } from './util.js';
 import { metrics } from './metrics.js';
 import { ByteSource, demuxAudio, decodeAudioRange } from './fastexport.js';
-import { mediaBytes } from './mediabytes.js';
+import { mediaBytes, runsOf } from './mediabytes.js';
 import { voiceKey, processedFor } from './voicefx.js';
 
 const BLOCK = 8; // seconds of source decoded at a time
+// (v1.14.1) ... of a copy read from the server: a timeline of jump cuts needs a block per cut, and 8 s of sound per
+// 0.45 s cut was most of what came over Wi-Fi (the sound of the next cuts arrived late)
+const STREAM_BLOCK = 2;
 const AHEAD = 1.0; // timeline seconds of sound scheduled ahead of what the speakers play
 const PREFETCH = 8; // timeline seconds decoded ahead
 const START_LEAD = 0.05; // seconds between deciding to start and the first scheduled sample
@@ -48,6 +51,7 @@ class Source {
     this.id = id;
     this.url = url;
     this.bytes = bytes; // a copy on the server: read with Range (no blob)
+    this.block = bytes ? STREAM_BLOCK : BLOCK; // seconds of source per decoded block
     this.state = 'opening'; // opening | blocks | full | silent | failed
     this.blocks = new Map(); // block index (0 for a whole-file decode) -> { state, buffer, start, used }
     this.fails = 0;
@@ -77,16 +81,15 @@ class Source {
     this.state = blob && dur > 0 && dur <= FULL_MAX_S ? 'full' : 'failed'; // (a whole-file decode needs the file here)
   }
   /** Bytes of the samples of [t0, t1] (source seconds), read before the decoder starts (they may come from the server). */
-  async load(t0, t1) {
+  async load(t0, t1, { low = false } = {}) {
     if (!this.bytes || !this.track) return;
-    const S = this.track.samples;
-    let a = Infinity;
-    let z = 0;
-    for (const x of S) if (x.pts >= t0 - 0.3 && x.pts <= t1 + 0.3) { a = Math.min(a, x.offset); z = Math.max(z, x.offset + x.size); }
-    if (z > a) await withTimeout(this.bytes.read(a, z - a), READ_TIMEOUT_MS, 'reading the sound from the server');
+    // (v1.14.1) only the sound's own bytes: in an MP4 they lie in runs between the video's, and reading the whole span
+    // fetched ~10× more (all the video of those seconds) — on Wi-Fi that delayed the pictures of the next cuts
+    const runs = runsOf(this.track.samples.filter((x) => x.pts >= t0 - 0.3 && x.pts <= t1 + 0.3));
+    if (runs.length) await withTimeout(Promise.all(runs.map((r) => this.bytes.ensure(r.a, r.z, { exact: true, low }))), READ_TIMEOUT_MS, 'reading the sound from the server');
   }
-  blockOf(s) { return this.state === 'full' ? 0 : Math.max(0, Math.floor(s / BLOCK + 1e-9)); }
-  blockEnd(k) { return this.state === 'full' ? Infinity : (k + 1) * BLOCK; }
+  blockOf(s) { return this.state === 'full' ? 0 : Math.max(0, Math.floor(s / this.block + 1e-9)); }
+  blockEnd(k) { return this.state === 'full' ? Infinity : (k + 1) * this.block; }
 }
 
 let decodeCtx = null;
@@ -284,7 +287,7 @@ export class PreviewAudio {
     const lim = c.in + (tb - c.start) * sp;
     while (src < lim - 1e-6) {
       const k = s.blockOf(src);
-      const segS = Math.max(c.in, s.state === 'full' ? c.in : k * BLOCK);
+      const segS = Math.max(c.in, s.state === 'full' ? c.in : k * s.block);
       const segE = Math.min(endSrc, s.blockEnd(k));
       // (a whole-file decode has its own key: a file that switches from blocks to whole is scheduled again)
       out.push({ k, key: s.state === 'full' ? `${c.id}:all` : `${c.id}:${k}`, segS, segE, ts: c.start + (segS - c.in) / sp });
@@ -448,6 +451,9 @@ export class PreviewAudio {
     nb.q = { s, k, needAt };
     s.blocks.set(k, nb);
     this.queue.push(nb.q);
+    // (v1.14.1) a copy on the server: its bytes are fetched now, side by side with the other blocks' — the decoder
+    // then works through them without a network round trip each (before, one block's bytes after the other's)
+    if (s.bytes && s.state === 'blocks') s.load(k * s.block, (k + 1) * s.block, { low: needAt - this.E.time > 1.5 }).catch(() => {});
     this.pump();
   }
   async pump() {
@@ -484,16 +490,16 @@ export class PreviewAudio {
       if (mode === 'blocks') {
         // (a copy on the server: its bytes first, so a slow network is not taken for a stuck decoder)
         if (s.bytes) {
-          try { await s.load(k * BLOCK, (k + 1) * BLOCK); } catch (err) {
+          try { await s.load(k * s.block, (k + 1) * s.block); } catch (err) {
             if (s.blocks.get(k) === b) s.blocks.delete(k); // asked for again when needed
             metrics.count('audio_read_retry');
             this.problem('read', err, s);
             return;
           }
         }
-        const r = await withTimeout(decodeAudioRange(s.src, s.track, k * BLOCK, (k + 1) * BLOCK, { timeoutMs: BLOCK_TIMEOUT_MS }), BLOCK_TIMEOUT_MS + 1500, 'audio block');
+        const r = await withTimeout(decodeAudioRange(s.src, s.track, k * s.block, (k + 1) * s.block, { timeoutMs: BLOCK_TIMEOUT_MS }), BLOCK_TIMEOUT_MS + 1500, 'audio block');
         if (!r) throw new Error('no audio decoded');
-        this.checkSound(s, r.buffer, Math.max(0, r.start), (k + 1) * BLOCK);
+        this.checkSound(s, r.buffer, Math.max(0, r.start), (k + 1) * s.block);
         b.buffer = r.buffer;
         b.start = r.start;
       } else if (mode === 'full') {
