@@ -364,7 +364,7 @@ export class Library {
       const log = st.log.slice(0, 40);
       body = `
         <div class="lib-section"><h4>Aktivitas AI</h4>
-          ${log.length ? `<ul class="mcp-log">${log.map((l) => `<li class="${l.state}"><span class="lt">${escapeHtml(l.tool)}${l.local ? ' <em>(JSON)</em>' : ''}</span><span class="ls">${l.state === 'ok' ? `${l.ms} ms` : l.state === 'error' ? escapeHtml(l.error || 'gagal') : '…'}</span></li>`).join('')}</ul>` : '<p class="hint">Belum ada perintah dari AI.</p>'}</div>
+          ${log.length ? `<ul class="mcp-log">${log.map((l) => `<li class="${l.state}"><span class="lt">${escapeHtml(l.tool)}${l.local ? ' <em>(JSON)</em>' : ''}</span><span class="ls">${l.state === 'ok' ? `${l.ms} ms` : l.state === 'error' ? escapeHtml(l.error || 'gagal') : l.state === 'wait' ? 'antri' : '…'}</span></li>`).join('')}</ul>` : '<p class="hint">Belum ada perintah dari AI.</p>'}</div>
         <details class="lib-section tools-list"><summary>${(st.status?.tools || []).length} tool tersedia</summary>
           <ul>${(st.status?.tools || []).map((t) => `<li><code>${t.name}</code><span>${escapeHtml(t.description.split('. ')[0])}.</span></li>`).join('')}</ul></details>`;
     }

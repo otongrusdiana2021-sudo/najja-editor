@@ -7,6 +7,7 @@ import { renderFrame, preloadFonts, onFontsLoaded } from './render.js';
 import { clamp } from './util.js';
 import { metrics } from './metrics.js';
 import { ensureCutout, onMaskReady } from './segment.js';
+import { createQueue } from './cmdqueue.js';
 
 const AC = window.AudioContext || window.webkitAudioContext;
 // A main video reporting "not enough data" for less than this is ridden out (the clock keeps going): a clip that
@@ -805,8 +806,17 @@ export class Engine {
     }
   }
 
-  /** Render a still of the composition at time t (used by MCP get_frame, thumbnails, freeze frame). */
-  async capture(t, maxW = 960, { timeout = 20000 } = {}) {
+  /**
+   * Render a still of the composition at time t (used by MCP get_frame, thumbnails, freeze frame).
+   * (v1.13.2) One capture at a time: each seeks the shared engine and then waits for fonts and video frames, so two
+   * at once would both draw the later time (e.g. the cover being made while the AI asks for a frame).
+   */
+  capture(t, maxW = 960, opts = {}) {
+    this.captures ||= createQueue();
+    return this.captures.run(() => this.captureNow(t, maxW, opts));
+  }
+
+  async captureNow(t, maxW = 960, { timeout = 20000 } = {}) {
     const P = store.P;
     const wasPlaying = this.playing;
     if (wasPlaying) this.pause();

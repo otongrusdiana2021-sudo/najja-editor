@@ -202,7 +202,8 @@ class Bridge {
         reject(new Error(`The editor did not answer within ${Math.round(timeoutMs / 1000)}s (${tool}). Make sure the editor tab is open and not frozen.`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer, clientKey: client.key, owner });
-      if (!this.send(client.key, 'command', { id, tool, args })) {
+      // timeout_ms (v1.13.2): the editor runs tools one at a time and drops one still waiting when we stop waiting.
+      if (!this.send(client.key, 'command', { id, tool, args, timeout_ms: timeoutMs })) {
         clearTimeout(timer);
         this.pending.delete(id);
         reject(new Error('Could not reach the editor tab.'));

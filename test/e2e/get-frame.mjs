@@ -114,9 +114,24 @@ try {
     if (!ok) failed++;
     console.log(`${ok ? 'ok  ' : 'FAIL'}  get_frame(${t}): second ${got} of 8 (want ${want}), ${Date.now() - t0} ms${r.data.stale_video ? ', marked stale' : ''}`);
   }
+
+  // (v1.13.2) Calls arriving together: each must still get its own time. Before, they all seeked the one engine
+  // and then drew the last time (three identical pictures).
+  step('get_frame paralel (3 sekaligus)');
+  const PAR = [1.5, 6.5, 3.5];
+  const par = await Promise.all(PAR.map((t) => mcp('get_frame', { time: t, max_width: 270 })));
+  for (const [i, t] of PAR.entries()) {
+    const rgb = await avgColor(p, `data:image/jpeg;base64,${par[i].img}`, true);
+    const dist = palette.map((c) => Math.hypot(c[0] - rgb[0], c[1] - rgb[1], c[2] - rgb[2]));
+    const got = dist.indexOf(Math.min(...dist));
+    const want = Math.floor(t) % 8;
+    const ok = got === want && par[i].data.time === t;
+    if (!ok) failed++;
+    console.log(`${ok ? 'ok  ' : 'FAIL'}  get_frame(${t}) paralel: second ${got} of 8 (want ${want})`);
+  }
 } finally {
   await b.close();
 }
-console.log(failed ? `${failed} of ${TIMES.length} frames were wrong` : `all ${TIMES.length} frames exact on the first call (${MBPS} Mbps)`);
+console.log(failed ? `${failed} of ${TIMES.length + 3} frames were wrong` : `all ${TIMES.length + 3} frames exact on the first call (${MBPS} Mbps), 3 of them asked at once`);
 cleanup(); // the server child would otherwise keep the process alive
 process.exit(failed ? 1 : 0);
