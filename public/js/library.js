@@ -407,7 +407,8 @@ export class Library {
       const t0 = performance.now();
       try {
         const out = await bridge.runLocal(calls[i].tool, calls[i].args);
-        Object.assign(r, { state: 'ok', ms: Math.round(performance.now() - t0), note: out?.data?.id ? out.data.id : '' });
+        // (v1.13.2) the checker's notes (an unknown field, a value outside the list...) show next to the result
+        Object.assign(r, { state: 'ok', ms: Math.round(performance.now() - t0), note: [out?.data?.id, ...(out?.notes || [])].filter(Boolean).join(' · ') });
       } catch (err) {
         Object.assign(r, { state: 'error', error: err.message });
         failed = true;

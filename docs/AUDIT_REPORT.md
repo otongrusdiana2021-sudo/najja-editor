@@ -83,6 +83,7 @@ Kolom: **Risiko** T/S/R (Tinggi/Sedang/Rendah) · **Kompl.** S/M/L · **Status**
 | V16 | R | FAKTA | `gpufx.js:199`; `render.js:216, 257` | `webglcontextlost` mematikan WebGL permanen tanpa restore → chroma/blur diam-diam pindah ke CPU (lambat). Tidak ada jalur WebGPU di compositor | Handler `webglcontextrestored`. WebGPU hanya dengan feature detection + fallback | S | — |
 | V17 | R | FAKTA | `fastexport.js:1072` | `i % (fps*2)` tidak pernah 0 untuk fps pecahan (29,97) → GOP sangat panjang, seek buruk | `Math.round(fps*2)` | S | — |
 | V18 | R | FAKTA (teramati di browser lokal) | Polling sinkron proyek (`/api/projects/:id/rev`) | Proyek baru yang belum pernah tersimpan tetap dipoll ±1×/dtk → 404 berulang di console dan "request error: Project not found" di log server | Jangan poll sebelum save pertama sukses | S | — |
+| V19 | R | FAKTA (teramati di browser lokal) | `public/js/app.js` `pollRevision` | Proyek yang sedang terbuka lalu dihapus (dari perangkat lain atau tab lain) tetap dipoll `/rev` tiap detik → 404 berulang di console dan "Project not found" di log server, dan editor tidak memberi tahu pengguna bahwa proyeknya sudah tidak ada | Pada 404, hentikan polling untuk proyek itu dan tampilkan pemberitahuan (simpan sebagai salinan / kembali ke beranda) | S | — |
 
 **Status perbaikan (2026-11-23):** V1, V5, dan V18 diperbaiki di P0-2. V14 diperbaiki sebagian (flush draft saat unload dan backoff retry; thumbnail per-autosave ditunda ke P2). Detail dan bukti test ada di `IMPLEMENTATION_PLAN.md` → Log milestone P0-2. Belum di-deploy.
 

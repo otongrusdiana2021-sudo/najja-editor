@@ -199,3 +199,32 @@ test('bridge: commands from an older server (no timeout_ms) still run', async ()
   await bridge.run({ id: 'old', tool: 'set_project', args: {} });
   assert.equal(resultOf('old').result.data.ok, 1);
 });
+
+// ---- (P0-6b) pasted commands get the same argument check as AI clients (public/js/core/validate.js) ----
+test('bridge: a pasted command with a wrong type is refused before the project is touched', async () => {
+  let ran = false;
+  bridge.handlers = { tools: { update_clip: async () => { ran = true; return { data: {} }; } } };
+  await assert.rejects(bridge.runLocal('update_clip', { clip_id: 'c1', x: 'kiri' }), (err) => err.code === 'INVALID' && /x: expected a number, got string "kiri"/.test(err.message));
+  assert.equal(ran, false);
+  assert.equal(bridge.state.log[0].state, 'error');
+});
+
+test('bridge: a pasted command gets the converted arguments, and the notes come back with the result', async () => {
+  let got = null;
+  bridge.handlers = { tools: { update_clip: async (a) => { got = a; return { data: { id: 'c1' } }; } } };
+  const out = await bridge.runLocal('update_clip', { clip_id: 'c1', x: '0.5', colour: '#fff' });
+  assert.deepEqual(got, { clip_id: 'c1', x: 0.5, colour: '#fff' });
+  assert.equal(out.data.id, 'c1');
+  assert.deepEqual(out.notes, ['"colour" is not a parameter of this tool and was ignored']);
+  const clean = await bridge.runLocal('update_clip', { clip_id: 'c1', x: 0.5 });
+  assert.equal('notes' in clean, false, 'a clean call answers exactly as before');
+});
+
+test('the tool definitions and the checker are one module for the server and the editor', async () => {
+  const core = await import('../public/js/core/tools.js');
+  const mcpTools = await import('../mcp/tools.js');
+  assert.equal(core.TOOLS, mcpTools.TOOLS);
+  const v = await import('../public/js/core/validate.js');
+  const mv = await import('../mcp/validate.js');
+  assert.equal(v.checkArgs, mv.checkArgs);
+});

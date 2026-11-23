@@ -1,5 +1,13 @@
 // Browser side of the MCP bridge: receives tool calls from the Najja server (SSE) and returns results.
 import { createQueue, PURE_READS } from './cmdqueue.js';
+import { checkArgs, errorText } from './core/validate.js';
+
+let schemas = null;
+/** The tools' input schemas (public/js/core/tools.js), loaded the first time a command is pasted. */
+function toolSchemas() {
+  schemas ||= import('./core/tools.js').then(({ TOOLS }) => new Map(TOOLS.map((t) => [t.name, t.inputSchema])));
+  return schemas;
+}
 
 const listeners = new Set();
 // (v1.13.2) Tools run one at a time in this tab (AI commands and pasted JSON alike); pure reads skip the line.
@@ -77,9 +85,15 @@ export const bridge = {
     try {
       const fn = this.handlers?.tools?.[tool];
       if (!fn) throw new Error(`Tool "${tool}" tidak ada di editor ini`);
-      const result = await this.schedule(tool, () => fn(args), () => { t0 = performance.now(); entry.state = 'run'; this.emit(); });
+      // (v1.13.2, P0-6b) the same check the server makes for AI clients (public/js/core/validate.js): a wrong type
+      // is refused before the project is touched; the rest is converted or noted (notes come back with the result)
+      const checked = checkArgs((await toolSchemas()).get(tool), args);
+      if (checked.errors.length) throw Object.assign(new Error(errorText(tool, checked.errors)), { code: 'INVALID' });
+      const input = checked.args;
+      const out = await this.schedule(tool, () => fn(input), () => { t0 = performance.now(); entry.state = 'run'; this.emit(); });
+      const result = checked.notes.length ? { ...out, notes: checked.notes } : out;
       entry.state = 'ok';
-      this.handlers?.onDone?.(tool, args, result);
+      this.handlers?.onDone?.(tool, input, result);
       return result;
     } catch (err) {
       entry.state = 'error';

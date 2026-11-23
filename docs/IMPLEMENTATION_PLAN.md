@@ -90,7 +90,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy`, ikut di-push lewat branch `feat/p0-5-design-export` (CI hijau, run 45129262367). **Belum dipasang:** snippet nginx `.well-known` di VPS (butuh izin) dan record DNS `www` (butuh akses pengelola DNS) |
 | P0-5 Ekspor Najja Desain aman | ✅ selesai, branch `feat/p0-5-design-export` (berisi P0-1 sampai P0-5) **sudah di-push**. CI hijau di Node 22 (run 45129262367). Belum di-merge ke `main`, belum di-deploy. Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
-| P0-6b Service layer `public/js/core/` | ⏳ belum mulai. Dipecah lagi (lihat log P0-6a) |
+| P0-6b Service layer `public/js/core/` | 🟡 langkah 1 selesai (validator + schema bersama, perintah tempel divalidasi), di-commit di branch `feat/p0-6b-core-validate` (di atas P0-6a; belum di-push). Langkah 2–3 belum |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -294,3 +294,27 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   2. Operasi klip murni (tambah, ubah posisi, hapus, pindah, split) dipindah dari `actions.js`/`api.js` ke `core/commands.js` tanpa mengubah perilaku, dengan test kesetaraan sebelum dan sesudah.
   3. `api.js` dan UI memanggil `core/`.
 - **Berikutnya:** P0-6b langkah 1.
+
+#### P0-6b langkah 1 — Validator dan schema tool bersama di `public/js/core/` (2026-11-23)
+
+- **Tujuan:** satu sumber aturan untuk server dan editor. Perintah yang ditempel di panel AI · MCP (`bridge.runLocal`) jalan langsung di browser, sehingga sebelumnya tidak ikut divalidasi.
+- **Perubahan:**
+  - `git mv mcp/tools.js public/js/core/tools.js` dan `git mv mcp/validate.js public/js/core/validate.js`. Import diperbaiki (`../presets.js`, `../kinetic.js`).
+  - `mcp/tools.js` dan `mcp/validate.js` kini hanya meneruskan ekspor, sehingga semua import lama tetap jalan (`server.js`, `mcp-stdio.js`, test). Docker tetap menyalin `mcp/` dan `public/` seperti sebelumnya.
+  - `public/js/bridge.js` `runLocal`:
+    - Memakai `checkArgs` dan schema yang sama. Tipe salah ditolak (kode `INVALID`) sebelum proyek disentuh.
+    - Argumen yang dikonversi diteruskan, dan catatan dikembalikan sebagai `result.notes`. Panggilan bersih menjawab persis seperti sebelumnya.
+    - Schema dimuat lazily dengan dynamic import, hanya saat perintah ditempel pertama kali, sehingga editor tidak memuat 29 KB tambahan saat dibuka.
+  - `public/js/library.js`: catatan validasi tampil di baris hasil panel, di sebelah ID klip, lewat `escapeHtml` yang sudah ada.
+  - `test/cmdqueue.test.js` (+3 test).
+- **Hasil test:**
+  - Unit: **217 test, 203 lulus, 0 gagal, 14 dilewati**.
+  - Mutation check: `bridge.js` lama → 2 test perintah tempel gagal.
+  - Browser asli:
+    - Server di-restart dengan susunan modul baru, dan `tools/list` tetap 27 tool.
+    - `/js/core/validate.js` dan `/js/core/tools.js` dimuat dengan status 200.
+    - `runLocal update_clip x:"kiri"` → `INVALID`, dan `x` tetap `0`. `x:"0.25"` → `0.25`, dengan catatan untuk `colour`.
+    - Panel **Tempel JSON** sungguhan (2 perintah): `add_text` jalan dengan catatan *"warna" is not a parameter…* di barisnya, `size:"90"` tersimpan sebagai angka 90. `update_clip` ditolak dengan pesan validasi, dan toast berbunyi "1 dari 2 perintah jalan; berhenti di yang gagal".
+    - Proyek uji dihapus.
+- **Temuan baru:** V19 (lihat `AUDIT_REPORT.md`).
+- **Berikutnya (P0-6b langkah 2):** operasi klip murni ke `core/commands.js`, dengan test kesetaraan sebelum dan sesudah.
