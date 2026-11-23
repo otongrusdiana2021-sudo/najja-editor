@@ -15,6 +15,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import { createMcpHandler, formatToolResult } from './mcp/protocol.js';
 import { TOOLS } from './mcp/tools.js';
+import { checkArgs, errorText } from './mcp/validate.js';
 import { createStorage } from './lib/storage.js';
 import { createAuth } from './lib/auth.js';
 import { createOAuth, ACCESS_PREFIX, protectedResourceMetadata, authorizationServerMetadata, redirectLabel } from './lib/oauth.js';
@@ -934,6 +935,14 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       const body = await readJson(req);
       if (body.clientInfo) bridge.noteMcpClient(body.clientInfo, body.protocolVersion, 'stdio', who.id);
       if (!body.name) return sendJson(res, 200, { ok: true });
+      // (v1.13.2) mcp-stdio.js checked the arguments already (mcp/protocol.js); a direct call gets the same refusal
+      // of wrong types here (its notes come from the protocol side only, so they are not said twice)
+      const tool = TOOLS.find((t) => t.name === body.name);
+      if (tool) {
+        const checked = checkArgs(tool.inputSchema, body.arguments ?? {});
+        if (checked.errors.length) return sendJson(res, 200, { content: [{ type: 'text', text: `Error: ${errorText(body.name, checked.errors)}` }], isError: true });
+        body.arguments = checked.args;
+      }
       try {
         const result = await callTool(body.name, body.arguments || {}, who);
         return sendJson(res, 200, formatToolResult(result));

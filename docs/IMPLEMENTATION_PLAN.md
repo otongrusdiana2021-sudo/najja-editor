@@ -89,6 +89,8 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-3 Test infra + CI | ✅ selesai. Branch `feat/p0-3-contract-ci` (berisi P0-1 + P0-2 + P0-3) **sudah di-push** ke GitHub (belum di-merge ke `main`, belum di-deploy). Run CI pertama **hijau** (run 45125714348). E2E Playwright di CI ditunda |
 | P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy`, ikut di-push lewat branch `feat/p0-5-design-export` (CI hijau, run 45129262367). **Belum dipasang:** snippet nginx `.well-known` di VPS (butuh izin) dan record DNS `www` (butuh akses pengelola DNS) |
 | P0-5 Ekspor Najja Desain aman | ✅ selesai, branch `feat/p0-5-design-export` (berisi P0-1 sampai P0-5) **sudah di-push**. CI hijau di Node 22 (run 45129262367). Belum di-merge ke `main`, belum di-deploy. Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
+| P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
+| P0-6b Service layer `public/js/core/` | ⏳ belum mulai. Dipecah lagi (lihat log P0-6a) |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -255,3 +257,40 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Probe memakai memori sebesar kanvas ekspor sesaat. Ini sama dengan yang dipakai ekspor itu sendiri, dan hanya dijalankan di atas 16,7 MP.
   - Foto yang memang sudah terhapus di server akan memblokir ekspor sampai foto itu diganti. Ini disengaja: lebih baik daripada file tanpa foto produk.
 - **Berikutnya:** P0-6 (service layer `public/js/core/` + validasi schema di server). Ini milestone besar dan sebaiknya dipecah.
+
+#### P0-6a — Validasi argumen MCP di server (2026-11-23)
+
+- **Kenapa dipecah:** P0-6 punya dua bagian yang tidak saling bergantung: validasi schema di server (M5) dan service layer `core/` (M2). Validasi kecil, berisiko rendah, dan langsung mencegah data rusak, jadi dikerjakan dulu. Service layer adalah refactor besar, dan dikerjakan bertahap di P0-6b.
+- **Fakta sebelum mengubah:**
+  - Argumen tool diteruskan apa adanya ke tab editor. Contoh: `update_clip` mengubah `x: "abc"` menjadi `NaN` (`set('x', Number(a.x))`, `api.js:95`), dan `opacity` menjadi `NaN` lewat `clamp` (`api.js:99`). Nilai itu tersimpan sebagai `null` di JSON proyek.
+  - Banyak `enum` **tidak** dicek handler (mis. `font`, `animation_in`, `preset`), dan `history` tanpa `action` menjalankan undo. Menolak hal-hal ini di server akan memutus panggilan yang selama ini jalan, dan itu melanggar aturan kontrak "hanya aditif".
+- **Kebijakan (`mcp/validate.js`):**
+  - **Ditolak:** tipe yang mustahil benar, bahkan setelah konversi yang dulu dilakukan editor. Contoh: object/array di tempat skalar, teks non-angka atau boolean di tempat angka, skalar di tempat array/object (bertingkat, mis. `items[0].start`). Dikembalikan sebagai *tool error* (`isError`) supaya AI bisa membetulkan sendiri, dan editor tidak menerima apa pun.
+  - **Dikonversi:** apa yang dulu dikonversi editor, sekarang dilakukan sekali di server: `"1.5"` → `1.5`, `"true"`/`"false"` → boolean, angka → teks.
+  - **Dicatat saja:** field wajib kosong, `enum` di luar daftar, nilai di luar rentang, bukan bilangan bulat, dan field tak dikenal. Panggilan tetap diteruskan, dan catatan `Note: …` ditambahkan sebagai item terakhir hasil (item pertama tetap data). Untuk error dari handler, catatan ikut di pesan error.
+  - `null` berarti "tidak diisi" dan diteruskan tanpa diubah.
+- **Perubahan:**
+  - `mcp/validate.js` (baru).
+  - `mcp/protocol.js` `tools/call`: dipakai bersama HTTP `/mcp` dan stdio.
+  - `server.js` `/api/tool`: endpoint yang dipakai `mcp-stdio.js`. Di sini hanya penolakan tipe, tanpa catatan, supaya catatan tidak muncul dua kali.
+  - `test/mcp-validate.test.js` (baru, 8 test), `test/security.test.js` (+1), `package.json`.
+- **Kontrak MCP:** nama, schema, dan bentuk hasil tidak berubah (`test/mcp-contract.test.js` lulus). Perubahan perilaku yang disengaja:
+  - Tipe mustahil ditolak.
+  - Hasil bisa membawa item catatan tambahan di akhir `content`.
+  - Pesan error tipe berubah dari error handler (kalau dulu ada) menjadi pesan validasi.
+- **Hasil test:**
+  - Unit: **214 test, 200 lulus, 0 gagal, 14 dilewati**.
+  - **Test kompatibilitas:** untuk ke-27 tool, argumen valid yang dibangkitkan dari schema-nya sendiri (lengkap, dan hanya field wajib) lolos **tanpa diubah, tanpa error, tanpa catatan**.
+  - Mutation check: `protocol.js` dan `server.js` lama → 4 test integrasi gagal.
+  - MCP sungguhan (HTTP `/mcp` lokal, tab editor terbuka):
+    - `update_clip x:"kiri"` → `isError` "Invalid arguments for update_clip: x: expected a number, got string "kiri". Nothing was changed.", dan `x` di proyek tetap `0`.
+    - `opacity:"0.5"` → tersimpan `0.5`.
+    - `add_text size:"120"` → tersimpan angka `120`, dengan catatan untuk field `colour` yang salah eja.
+    - Log bridge di editor hanya berisi 4 perintah yang sah. Yang ditolak tidak pernah sampai ke tab.
+    - Log server bersih. Proyek uji dihapus.
+- **Belum dicakup:** perintah yang ditempel manual di panel AI · MCP (`bridge.runLocal`) jalan langsung di browser, tidak lewat server, jadi tidak divalidasi. Akan tercakup saat validasi dipindah ke `core/` (P0-6b).
+- **P0-6b (usulan pemecahan):**
+  1. `public/js/core/validate.js` memakai aturan yang sama (modul bersama untuk browser dan server).
+  2. Operasi klip murni (tambah, ubah posisi, hapus, pindah, split) dipindah dari `actions.js`/`api.js` ke `core/commands.js` tanpa mengubah perilaku, dengan test kesetaraan sebelum dan sesudah.
+  3. `api.js` dan UI memanggil `core/`.
+- **Berikutnya:** P0-6b langkah 1.

@@ -208,3 +208,13 @@ test('security headers: scripts, JSON and errors get nosniff but no page policy'
   const mcp = await req(local.port, { method: 'POST', path: '/mcp', headers: { ...json, ...H }, body: rpcBody });
   assert.equal(mcp.headers['x-content-type-options'], 'nosniff', '/mcp');
 });
+
+// ---- (P0-6a) /api/tool (mcp-stdio.js forwards there) refuses wrong argument types too ----
+test('/api/tool: a wrong argument type is refused before any editor is asked', async () => {
+  const H = { ...json, host: `localhost:${local.port}` };
+  const r = await req(local.port, { method: 'POST', path: '/api/tool', headers: H, body: JSON.stringify({ name: 'update_clip', arguments: { clip_id: 'c1', opacity: 'setengah' } }) });
+  assert.equal(r.status, 200);
+  const j = JSON.parse(r.body);
+  assert.equal(j.isError, true);
+  assert.match(j.content[0].text, /Invalid arguments for update_clip: opacity: expected a number, got string "setengah"/);
+});

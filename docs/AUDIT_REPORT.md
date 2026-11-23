@@ -59,6 +59,8 @@ Kolom: **Risiko** T/S/R (Tinggi/Sedang/Rendah) · **Kompl.** S/M/L · **Status**
 | M4 | S | FAKTA | `public/js/api.js:434-470` | Ekspor tanpa `job_id`, satu ekspor sekaligus, tidak bisa dibatalkan lewat MCP | Job system aditif | M | P0-2 |
 | M5 | S | FAKTA | `mcp/protocol.js:99-108` | Schema input tidak ditegakkan di server → argumen salah baru gagal di tab (atau diam-diam diabaikan) | Validasi schema di server | M | — |
 
+**Status perbaikan (2026-11-23):** M1 diperbaiki di P0-1. M5 diperbaiki di P0-6a (validasi argumen di server, tanpa memutus panggilan lama). M8 disiapkan di P0-4 (snippet nginx, belum dipasang).
+
 ### 3.2 Video engine
 
 | ID | Risiko | Status | Lokasi | Masalah → dampak ke user | Solusi | Kompl. | Dependensi |
