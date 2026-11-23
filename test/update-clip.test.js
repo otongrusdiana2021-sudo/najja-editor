@@ -134,6 +134,21 @@ scenario('a bad value after a good one: refused, and what came before it stays (
   try { await up({ clip_id: r.vid, x: 0.3, filter: 'nope' }); } catch (err) { return { refused: err.message, xAfter: store.clip(r.vid).x, undoSteps: store.past.length }; }
   return { refused: null };
 });
+// (V20) every way update_clip can stop part-way, and what is left of the project after it
+const refusedState = (r, roles) => ({ x: store.clip(r.vid)?.x, txtX: store.clip(r.txt)?.x, mainOrder: store.P.clips.filter((c) => c.trackId === 'main').sort((a, b) => a.start - b.start).map((c) => Object.keys(r).find((k) => r[k] === c.id) || 'new'), undoSteps: store.past.length });
+scenario('V20: a magnet move, then a refused filter', {}, async (r) => {
+  try { await up({ clip_id: r.sol, start: 0, filter: 'nope' }); } catch (err) { return { refused: err.message, ...refusedState(r) }; }
+  return { refused: null };
+});
+scenario('V20: remove_background on a text, after a good value', {}, async (r) => {
+  try { await up({ clip_id: r.txt, x: 0.2, remove_background: true }); } catch (err) { return { refused: err.message, ...refusedState(r) }; }
+  return { refused: null };
+});
+scenario('V20: an unknown clip effect, after a good value', {}, async (r) => {
+  try { await up({ clip_id: r.vid, x: 0.2, clip_effects: [{ effect: 'nope' }] }); } catch (err) { return { refused: err.message, ...refusedState(r) }; }
+  return { refused: null };
+});
+scenario('clip effects that exist are set, with the other values', {}, (r) => up({ clip_id: r.vid, x: 0.2, clip_effects: [{ effect: 'shake', intensity: 0.5 }] }));
 scenario('a bad colour is refused', {}, (r) => up({ clip_id: r.sol, color: 'merah' }));
 scenario('an unknown clip is refused', {}, () => up({ clip_id: 'c_nope', x: 1 }));
 scenario('add_text with style, position and animation (shared helpers)', {}, () => tools.add_text({ text: 'Diskon', preset: 'outline', font: 'Scholar', size: 140, color: '#ffcc00', x: 0.1, y: -0.3, animation_in: 'fade', start: 1, duration: 2 }));
