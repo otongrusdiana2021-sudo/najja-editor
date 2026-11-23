@@ -92,7 +92,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
 | P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
 | P1-2 Job system | ✅ selesai. PR #3 (`01fbfff`) **di produksi sejak 2026-11-23**. Jalur sukses `apply_style`/`get_transcript` di latar belakang belum diuji dengan layanan AI sungguhan |
-| DESIGN §3.1 → Ukuran layar per perangkat | ✅ selesai di `main` (belum di-deploy). Desain tetap; tiap perangkat mengatur skalanya di menu akun. Belum dicoba di iPad asli dan Safari Mac |
+| DESIGN §3.1 → Ukuran layar per perangkat | ✅ selesai. **Di produksi sejak 2026-11-23** (`0744fd6`). Desain tetap; tiap perangkat mengatur skalanya di menu akun. Belum dicoba di iPad asli dan Safari Mac |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -530,3 +530,9 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - **Test:** `test/screen-size.test.js` 5 test (saran perangkat, preset, kunci zoom, viewport meta, breakpoint). Suite: **285 test, 271 lulus, 0 gagal, 14 dilewati**.
     - Seret klip dengan mouse sungguhan (panel uji): di 100% +0,5 dtk tepat, di 90% 1,25 → 1,75 dtk (seharusnya 1,750).
   - **Belum diuji:** iPad asli (Safari) dan Safari Mac.
+
+- **Deploy produksi `0744fd6` (Ukuran layar), 2026-11-23:**
+  - Satu perintah dari Mac (`npm run deploy`): test lokal 271 lulus, 0 gagal, CI hijau (run 45146361737), lalu di VPS `01fbfff` → `0744fd6`. Image lama dicadangkan sebagai `najja-editor-najja:backup-01fbfff`.
+  - Hasil: port `127.0.0.1:3333` terpasang, error di log 0. Dari luar: `/healthz`, `/login`, dan `/.well-known/oauth-authorization-server` 200.
+  - Kode baru ada di container yang berjalan (`screen.js`, dialog di `account.js`, konversi di `timeline.js`). Container `running`, 0 restart. File JS dari luar butuh login (401), sesuai mode token.
+  - **Belum dicek:** dialog Ukuran layar di akun yang login, dan di iPad asli. Pemilik diminta mencoba.
