@@ -154,6 +154,7 @@ Kolom: **Risiko** T/S/R (Tinggi/Sedang/Rendah) · **Kompl.** S/M/L · **Status**
 | T2 | R | FAKTA | `test/proxy.test.js:136` | Satu test ffmpeg tidak memakai `{ skip }` → gagal (bukan dilewati) di mesin tanpa ffmpeg | Tambah `{ skip }` | S | — |
 | T3 | S | FAKTA | `test/mcp.test.js` | Unit test MCP hanya protokol/HTTP. Perilaku 27 tool hanya di e2e. Tidak ada test paralel | Snapshot kontrak + test antrian + e2e per tool | M | M1 |
 | T4 | S | FAKTA | — | Tidak ada test perangkat iPad sungguhan. E2E iPad = emulasi viewport + sentuh di Chromium | Uji manual terjadwal di iPad (Safari) per rilis + WebKit Playwright | M | — |
+| T5 | S | FAKTA (CI merah sekali, lalu hijau dengan kode yang sama); penyebab = DUGAAN | CI run 45132571639; `test/security.test.js`, `test/ai.test.js` | Ada test yang kadang gagal di CI (flaky), dan namanya tidak tercatat karena log butuh login. Kandidat terkuat: `security.test.js` (2 server) dan `ai.test.js` (1 server) memilih port acak di rentang yang sama (39500–39899) sementara file test jalan paralel. Port bentrok membuat server gagal start, dan semua test di file itu gagal (±0,75% per run) | Port diminta ke OS (`listen(0)`, seperti `image.test.js`). CI kini menulis test yang gagal sebagai anotasi publik (`test/ci-annotate.mjs`), jadi kalau terulang, namanya terlihat | S | — |
 
 **Status perbaikan (2026-11-23):** T1 (CI unit di GitHub Actions; e2e belum), T2, dan T3 (snapshot kontrak) dikerjakan di P0-3. Run CI pertama di GitHub sukses (Node 22). Detail di `IMPLEMENTATION_PLAN.md` → Log milestone P0-3.
 

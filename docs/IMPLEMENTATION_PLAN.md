@@ -90,7 +90,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy`, ikut di-push lewat branch `feat/p0-5-design-export` (CI hijau, run 45129262367). **Belum dipasang:** snippet nginx `.well-known` di VPS (butuh izin) dan record DNS `www` (butuh akses pengelola DNS) |
 | P0-5 Ekspor Najja Desain aman | ✅ selesai, branch `feat/p0-5-design-export` (berisi P0-1 sampai P0-5) **sudah di-push**. CI hijau di Node 22 (run 45129262367). Belum di-merge ke `main`, belum di-deploy. Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
-| P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema bersama) dan langkah 2 (split/hapus/duplikat/pindah/tambah klip di `core/commands.js`) selesai, branch `feat/p0-6b-core-commands` (belum di-push). Sisa: `update_clip` dan teks/subtitle ke `core/`, serta helper model dari `store.js` |
+| P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema bersama) dan langkah 2 (split/hapus/duplikat/pindah/tambah klip di `core/commands.js`) selesai, branch `feat/p0-6b-core-commands` (sudah di-push; CI hijau di run 45133468567, setelah satu run merah yang ternyata flaky, lihat T5). Sisa: `update_clip` dan teks/subtitle ke `core/`, serta helper model dari `store.js` |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -346,4 +346,9 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Teks, subtitle, efek, dan keyframe.
   - Helper model (`makeClip`, `placeClip`, `splitClip`, `insertIntoMain`…) yang masih di `store.js`.
   - Masing-masing dipindah dengan pola rekam-dulu yang sama.
+- **CI (2026-11-23):**
+  - Run pertama (45132571639, commit `b6a8dac`) **gagal** di langkah unit test.
+  - Di Mac tidak bisa direproduksi: Node 20 dan 26 lulus, `TZ=UTC` + locale C lulus, 6× konkurensi 3 lulus, semua import relatif cocok huruf besar/kecil, dan rekaman kesetaraan stabil 25×.
+  - Log Actions butuh login, jadi ditambahkan langkah CI yang mengubah test gagal menjadi anotasi publik (`test/ci-annotate.mjs`, commit `86854dc`, sudah diuji pada output TAP asli).
+  - Run berikutnya (45133468567) dengan kode aplikasi yang sama **hijau**. Artinya kegagalan pertama intermiten, dan nama test-nya tidak tercatat (lihat T5).
 - **Berikutnya:** P0-6b langkah 3 (`update_clip` ke `core/`) atau lanjut ke P1.
