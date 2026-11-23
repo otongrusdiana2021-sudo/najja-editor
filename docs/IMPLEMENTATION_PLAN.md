@@ -604,7 +604,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Hasil: port terpasang, error di log 0, container `running` dengan 0 restart (mulai 10:03 UTC). `/healthz`, `/login`, dan `.well-known` 200, dan Range lewat nginx tetap `206`. Perbaikan ada di `devicecache.js` dan `media.js` di dalam container.
   - **Ukuran keberhasilan (dicek di log setelah pemilik membuka proyek di iPad):** paling banyak satu `416` per media, lalu tidak ada lagi unduhan penuh ke memori dan tidak ada aliran `206` selama play.
 
-- **iPad masih patah-patah setelah `58b9848`: unduhan salinan berhenti setiap kali play (diubah di kode 2026-11-23, belum di-deploy):**
+- **iPad masih patah-patah setelah `58b9848`: unduhan salinan berhenti setiap kali play (diubah dan di-deploy 2026-11-23, `015d2eb`):**
   - **Bukti (log nginx 10:03–10:07):**
     - iPad memuat kode baru pukul 10:05:42, mendapat satu `416` (jalur pemulihan), lalu dimuat ulang.
     - Setelah itu ada 189 permintaan potongan untuk **satu** video (`m_z3xj…`, `edit.mp4` 102 MB), dengan total **241,5 MB dalam ±2 menit**, atau 2,4× ukuran filenya. Sebagian besar potongannya kecil (96 di bawah 256 KB, 46 antara 256 KB–1 MB, 44 antara 1–8 MB), ditambah 3 lanjutan unduhan besar yang terputus.
@@ -625,7 +625,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
     - Setelah itu tidak ada lagi permintaan `/edit` dari iPad.
     - Potongan tidak lagi menunggu. Kalau masih patah, Diagnostik iPad (`frame_draw_ms`) menunjukkan apakah sisanya dari efek (WebGL `gpufx.js`).
 
-- **Test job "restart" yang kadang gagal (T5) diperbaiki di akarnya, `lib/jobs.js` (2026-11-23, belum di-deploy):**
+- **Test job "restart" yang kadang gagal (T5) diperbaiki di akarnya, `lib/jobs.js` (di-deploy 2026-11-23, `015d2eb`):**
   - **Gejala:** `test/jobs.test.js` "restart: queued and interrupted jobs…" gagal sekitar 1 dari 12 run file lengkap (2 dari 25, 1 dari 5). Waktunya habis di `until()` yang menunggu journal di disk berisi `running`. Karena `deploy-vps.sh` menjalankan `npm test` dulu, satu run sial bisa memblokir deploy.
   - **Bukti:** skrip yang mengulang langkah awal test 400× menghasilkan 28 run buruk. Di setiap run buruk, job `a` `running` di memori dan handler-nya sudah mulai, tapi file journal-nya tetap `queued` selamanya.
   - **Akar masalah (bug di kode, bukan di test):**
@@ -640,4 +640,16 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
     - Test baru yang deterministik (tulisan pertama tiap job diperlambat 80 ms) gagal 10/10 sebelum perbaikan dan lulus 10/10 sesudahnya.
     - Loop 400× turun dari 28 buruk menjadi 0.
     - `jobs.test.js` lulus 50/50, dan suite penuh 2× (292 test, 278 lulus, 0 gagal, 14 dilewati).
+
+- **Deploy produksi `015d2eb` (unduhan salinan saat play + urutan journal job), 2026-11-23:**
+  - **Percobaan pertama (10:47 UTC)** berhenti di langkah SSH: `Connection to 31.97.223.23 port 22: Operation timed out`. VPS tidak tersentuh dan tetap di `58b9848`.
+    - Satu menit kemudian port 22, SSH, dan `/healthz` normal, jadi ini gangguan jaringan sesaat.
+    - Sebelum mencoba ulang, sudah dicek bahwa VPS bersih dan masih di versi lama.
+    - Deploy ini sempat menunggu ±17 menit karena kuota API GitHub tanpa login (60 per jam) habis oleh pengecekan CI berulang. Skrip deploy juga memakai API itu.
+  - **Percobaan kedua:** VPS `58b9848` → `015d2eb`. Image lama dicadangkan sebagai `backup-58b9848`.
+  - **Hasil:**
+    - Error di log 0, container `running` dengan 0 restart.
+    - `/healthz`, `/login`, dan `.well-known` 200, dan Range lewat nginx tetap `206`.
+    - Di dalam container ada gerbang unduhan baru (`app.js`), `priority: 'low'` (`media.js`), dan `inTurn` (`lib/jobs.js`).
+  - **Ukuran keberhasilan (dicek di log saat pemilik memakai iPad):** satu transfer besar salinan selesai walaupun sedang play, lalu tidak ada lagi permintaan `/edit` dari iPad.
 
