@@ -112,7 +112,9 @@ test('restart: queued and interrupted jobs continue from the journal; broken fil
   q1.register('edit', { run: () => new Promise(() => {}) }); // the "server" dies while this runs
   const a = await q1.enqueue({ kind: 'edit', data: { mediaId: 'a' }, owner: 'u1' });
   const b = await q1.enqueue({ kind: 'edit', data: { mediaId: 'b' }, owner: 'u2' });
-  await until(() => q1.get(a.id).state === 'running');
+  // (T5) wait for the journal ON DISK to say running, not only the job in memory: the state flips before the
+  // write lands, and under a busy parallel test run the second queue read "queued" (interrupted 0, flaky)
+  await until(() => { try { return JSON.parse(fs.readFileSync(path.join(dir, `${a.id}.json`), 'utf8')).state === 'running'; } catch { return false; } });
   fs.writeFileSync(path.join(dir, 'j_broken.json'), '{not json');
   const q2 = createJobs({ dir, limits: { fast: 2, slow: 1 }, ...fast });
   const done = [];
