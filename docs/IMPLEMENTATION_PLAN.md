@@ -94,7 +94,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
 | P1-2 Job system | ✅ selesai. PR #3 (`01fbfff`) **di produksi sejak 2026-11-23**. Jalur sukses `apply_style`/`get_transcript` di latar belakang belum diuji dengan layanan AI sungguhan |
 | DESIGN §3.1 → Ukuran layar per perangkat | ✅ selesai. **Di produksi sejak 2026-11-23** (`0744fd6`). Desain tetap; tiap perangkat mengatur skalanya di menu akun. Belum dicoba di iPad asli dan Safari Mac |
-| P2-6 Mesin pratinjau dekoder (WebCodecs) | ✅ selesai, diukur di Safari Mac + Chromium. **Di produksi sejak 2026-11-23** (`a5fdff1`). **Belum diverifikasi di iPad asli** |
+| P2-6 Mesin pratinjau dekoder (WebCodecs) | ✅ selesai, diukur di Safari Mac + Chromium. **Di produksi sejak 2026-11-23** (`a5fdff1`, lanjutan v1.14.1 `5691dc6`). **Belum diverifikasi di iPad asli** |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -731,4 +731,11 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 - **Belum:**
   - Belum diverifikasi di iPad asli.
   - Unduhan salinan perangkat 102 MB yang terjadi 2× belum diselidiki; butuh Diagnostik JSON dari iPad.
+
+- **Deploy produksi `5691dc6` (P2-6 v1.14.1), 2026-11-23 14:50 UTC:**
+  - VPS `a5fdff1` → `5691dc6`. Image lama dicadangkan sebagai `backup-a5fdff1`.
+  - Test lokal 296 lulus / 0 gagal, CI hijau (run 45197983812).
+  - Container `healthy`, 0 restart, 0 error di log. `/healthz`, `/login`, dan `.well-known` 200; Range lewat nginx tetap `206`.
+  - Kode baru ada di dalam container: `no-store`, `settleJump`, `prefetchCuts`, `STREAM_BLOCK`.
+  - **Berikutnya:** pemilik mencoba putar dan geser timeline di iPad. Kalau masih kurang, minta Diagnostik JSON untuk menyelidiki unduhan salinan 102 MB yang terjadi 2×.
 
