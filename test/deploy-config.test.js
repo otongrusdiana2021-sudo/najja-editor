@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -25,4 +26,10 @@ test('proxy mode (aaPanel, nginx…): Caddy is never started, Najja listens on 1
 
 test('Caddy mode (no other web server) is unchanged: Caddy, Najja and the AI service', { skip }, () => {
   assert.deepEqual(services('docker-compose.yml'), ['ai', 'caddy', 'najja']);
+});
+
+test('aaPanel snippet: no nginx proxy cache on the editor site, so video Range requests reach the app (206)', () => {
+  const conf = readFileSync(new URL('../deploy/aapanel/najja-proxy.conf', import.meta.url), 'utf8');
+  const directives = conf.split('\n').map((l) => l.replace(/#.*/, '').trim()).filter(Boolean);
+  assert.deepEqual(directives, ['proxy_cache off;'], 'only this line: no location, nothing else changes for other requests');
 });

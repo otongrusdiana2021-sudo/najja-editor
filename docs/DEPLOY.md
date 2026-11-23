@@ -58,6 +58,24 @@ curl -s https://editor.domainkamu.com/.well-known/oauth-authorization-server   #
 
 Batalkan dengan menghapus file itu, lalu `nginx -t && nginx -s reload`.
 
+### aaPanel: video harus bisa dikirim per potongan (Range) (v1.13.2)
+
+`/www/server/nginx/conf/proxy.conf` bawaan aaPanel menyalakan `proxy_cache cache_one;` untuk **semua** situs. Kalau cache proxy nyala, nginx tidak meneruskan header `Range` ke app. App juga tidak mengizinkan nginx menyimpan apa pun, sehingga setiap permintaan potongan dijawab file **utuh** (`200`), bukan potongan (`206`). Akibatnya:
+
+- Di Chrome, preview mengunduh ulang video dari awal setiap kali melompat, dan layar tetap hitam selama menunggu.
+- Di Safari (iPad, Mac), video tidak bisa diputar sama sekali, karena Safari mensyaratkan `206`.
+- Unduhan ke penyimpanan perangkat yang terputus tidak bisa dilanjutkan.
+
+Perbaikannya: pasang `deploy/aapanel/najja-proxy.conf` (isinya hanya `proxy_cache off;`) ke folder extension situs. Situs lain tetap memakai cache aaPanel.
+
+```bash
+cp deploy/aapanel/najja-proxy.conf /www/server/panel/vhost/nginx/extension/editor.domainkamu.com/
+nginx -t && nginx -s reload
+curl -s -o /dev/null -w '%{http_code}\n' -r 0-9 https://editor.domainkamu.com/favicon.svg   # 206, bukan 200
+```
+
+Batalkan dengan menghapus file itu, lalu `nginx -t && nginx -s reload`.
+
 ## Produksi editor.najja.id
 
 Fakta (dicek read-only pada 2026-11-23):
@@ -70,6 +88,7 @@ Fakta (dicek read-only pada 2026-11-23):
 | Konfigurasi rahasia | `/opt/najja-editor/.env` (jangan di-commit, jangan dibagikan) |
 | DNS | `editor.najja.id` → `31.97.223.23`. `www.editor.najja.id` **belum punya record** |
 | OAuth `.well-known` | `extension/editor.najja.id/najja-wellknown.conf` terpasang sejak 2026-11-23 (path OAuth discovery diteruskan ke app) |
+| Cache proxy nginx | `extension/editor.najja.id/najja-proxy.conf` (`proxy_cache off;`) terpasang sejak 2026-11-23, supaya video dikirim per potongan (`206`) |
 
 **Deploy satu perintah dari Mac** (seperti `deploy/deploy.sh` di proyek ecom):
 

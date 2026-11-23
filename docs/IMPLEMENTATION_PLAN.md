@@ -536,3 +536,17 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Hasil: port `127.0.0.1:3333` terpasang, error di log 0. Dari luar: `/healthz`, `/login`, dan `/.well-known/oauth-authorization-server` 200.
   - Kode baru ada di container yang berjalan (`screen.js`, dialog di `account.js`, konversi di `timeline.js`). Container `running`, 0 restart. File JS dari luar butuh login (401), sesuai mode token.
   - **Belum dicek:** dialog Ukuran layar di akun yang login, dan di iPad asli. Pemilik diminta mencoba.
+
+- **Preview video hitam: nginx membuang header Range (diperbaiki di VPS 2026-11-23):**
+  - **Laporan pemilik:** preview hitam saat play, padahal thumbnail timeline tampil.
+  - **Bukti:**
+    - Log nginx 40 menit terakhir: `/api/media/<id>/edit` diminta berulang oleh Chrome 157 (8×) dan Safari 26.6 (5×, perangkat lain, kemungkinan iPad). Semuanya `200` dan terpotong di 1–52 MB, tidak ada satu pun `206`.
+    - Permintaan Range langsung ke app (`127.0.0.1:3333`) dijawab `206`, tapi lewat editor.najja.id dijawab `200` file utuh.
+  - **Akar masalah:** `proxy.conf` global aaPanel berisi `proxy_cache cache_one;`. Dengan cache proxy nyala, nginx tidak meneruskan `Range` ke app (dokumentasi nginx, `proxy_cache`). Ini sudah ada sejak situs dipasang, **bukan** akibat perubahan kode hari ini.
+  - **Akibat:**
+    - Chrome mengunduh ulang video dari awal setiap kali preview melompat, sehingga layar hitam selama menunggu.
+    - Safari tidak memutar video tanpa `206`.
+    - Unduhan ke penyimpanan perangkat yang terputus harus mulai dari nol.
+  - **Perbaikan (dengan "ya" pemilik):** `deploy/aapanel/najja-proxy.conf` (`proxy_cache off;`) dipasang di `extension/editor.najja.id/`. `nginx -t` lulus, lalu reload. Situs lain tidak berubah. Test baru di `test/deploy-config.test.js` menjaga isi snippet.
+  - **Hasil:** permintaan Range lewat editor.najja.id kini `206` (`bytes 0-9/504`). Permintaan biasa tetap `200`, dan `/healthz`, `/login`, serta `.well-known` tetap 200. Media `/edit` memakai `sendFile` yang sama, jadi ikut. Tidak ada error baru di log nginx setelah reload.
+  - **Belum dicek:** pemutaran di akun pemilik (butuh login) dan di iPad. Pemilik diminta memuat ulang editor lalu mencoba.
