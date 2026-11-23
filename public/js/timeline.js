@@ -24,6 +24,7 @@ const TOP_PAD = RULER_H + 12;
 const ZMIN = 6;
 const ZMAX = 900;
 const LONG_PRESS = 380;
+const RESUME_MS = 250; // (v1.14.2) a scrub that stopped playback plays on this long after the timeline is at rest
 
 /** Lane groups below the main track, in display order. */
 export const CATEGORIES = {
@@ -511,6 +512,7 @@ export class Timeline {
     // Pinch to zoom (touch). The pan of the same gesture must not move the playhead.
     const dist = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
     this.scroll.addEventListener('touchstart', (e) => {
+      this.fingerDown = true;
       if (e.touches.length === 2) { this.pinch = { d0: dist(e.touches) || 1, pps0: this.pps }; this.cancelPress?.(); }
     }, { passive: true });
     this.scroll.addEventListener('touchmove', (e) => {
@@ -521,6 +523,7 @@ export class Timeline {
       }
     }, { passive: false });
     const endPinch = (e) => {
+      if (!e.touches.length) { this.fingerDown = false; if (this.resumeAfterScrub) this.resumeSoon(); }
       if (!this.pinch || e.touches.length >= 2) return;
       this.pinch = null;
       this.renderPending = false;
@@ -532,13 +535,15 @@ export class Timeline {
 
     // Ruler: tap = jump there, drag = scrub (mouse; touch scrolls natively)
     this.rulerWrap.addEventListener('pointerdown', (e) => {
+      // (v1.14.2) a tap on the ruler while playing jumps there and plays on
+      const jump = (ev) => { const was = this.engine.playing || this.resumeAfterScrub; this.seekTo(this.timeAt(ev.clientX)); if (was) this.resumeNow(); };
       if (e.pointerType === 'touch') {
         const sx = e.clientX;
-        const up = (ev) => { window.removeEventListener('pointerup', up); if (Math.abs(ev.clientX - sx) < 6) this.seekTo(this.timeAt(ev.clientX)); };
+        const up = (ev) => { window.removeEventListener('pointerup', up); if (Math.abs(ev.clientX - sx) < 6) jump(ev); };
         window.addEventListener('pointerup', up);
         return;
       }
-      this.startPan(e, (ev) => this.seekTo(this.timeAt(ev.clientX)));
+      this.startPan(e, jump);
     });
 
     this.lanes.addEventListener('pointerdown', (e) => this.onPointerDown(e));
@@ -588,8 +593,32 @@ export class Timeline {
     if (this.pinch || this.suppressSeek) return;
     // The person moved the timeline: the time under the centre line is the new playhead position.
     this.userScrollUntil = performance.now() + 180;
-    if (this.engine.playing) this.engine.pause();
+    // The picture follows the finger (paused while it moves). (v1.14.2) A scrub that stopped playback starts it again
+    // where the timeline comes to rest — the owner's choice: only when it was playing (paused stays paused: finding a
+    // cut point must not run away).
+    if (this.engine.playing) { this.engine.pause(); this.resumeAfterScrub = true; }
     this.engine.scrub(clamp(sl / this.pps, 0, store.duration()));
+    if (this.resumeAfterScrub) this.resumeSoon();
+  }
+
+  /** Play again once the timeline is at rest: no finger or mouse on it, and no scroll for RESUME_MS (momentum ended). */
+  resumeSoon() {
+    clearTimeout(this.resumeTimer);
+    this.resumeTimer = setTimeout(() => {
+      if (!this.resumeAfterScrub) return;
+      if (this.fingerDown || this.body.classList.contains('panning')) { this.resumeSoon(); return; }
+      this.resumeNow();
+    }, RESUME_MS);
+  }
+  resumeNow() {
+    clearTimeout(this.resumeTimer);
+    this.resumeAfterScrub = false;
+    if (!this.engine.playing && this.engine.time < store.duration() - 0.05) this.engine.play();
+  }
+  /** Editing (a clip moved or trimmed): a pending resume is dropped. */
+  cancelResume() {
+    clearTimeout(this.resumeTimer);
+    this.resumeAfterScrub = false;
   }
 
   /**
@@ -844,6 +873,7 @@ export class Timeline {
       this.dragging = clip.id;
       this.suppressSeek = true;
       el.classList.add('dragging');
+      this.cancelResume();
       this.engine.pause();
     };
     if (immediate) begin();
@@ -909,6 +939,7 @@ export class Timeline {
   startTrim(e, clip, side) {
     e.stopPropagation();
     e.preventDefault();
+    this.cancelResume();
     this.engine.pause();
     this.suppressSeek = true;
     if (e.pointerType === 'touch') this.touchDrag = true;

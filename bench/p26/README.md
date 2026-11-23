@@ -15,6 +15,7 @@ needs ffmpeg (fixtures, light copies). These tools do not, so they also run on a
 | `measure.js` | Injected into the editor. `__measure(secs)` plays the project and counts wrong pictures, cuts whose first picture is wrong, freezes over 100 ms, and buffering. `__seeks(n)` runs paused seeks and records the time to the exact frame and whether the frame is right |
 | `run.mjs` | A/B in headless Chromium (Playwright), desktop or iPad profile (CPU 2× slower) |
 | `h2proxy.mjs` | HTTPS + HTTP/2 in front of the local server, like production. All media answers share one bandwidth (`RATE`), `LAT` adds latency, and `NODL=1` keeps the preview streaming. Use it with `run.mjs --base=https://127.0.0.1:3402` |
+| `autoplay.mjs` | Touch scrubbing in the iPad profile: playback stops while the timeline moves, plays on once it is at rest (only if it was playing), stays paused otherwise; a ruler tap while playing plays on |
 | `webkit.mjs` | A/B in **Safari** (WebKit, the engine of every iPad browser). It serves a harness page on the editor's origin, so no automation or Safari settings are needed. Results are written as JSON lines |
 
 ## Set-up

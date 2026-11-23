@@ -739,3 +739,19 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Kode baru ada di dalam container: `no-store`, `settleJump`, `prefetchCuts`, `STREAM_BLOCK`.
   - **Berikutnya:** pemilik mencoba putar dan geser timeline di iPad. Kalau masih kurang, minta Diagnostik JSON untuk menyelidiki unduhan salinan 102 MB yang terjadi 2×.
 
+#### Timeline: putar lagi otomatis setelah digeser (v1.14.2, 2026-11-23)
+
+- **Permintaan pemilik:** "fitur auto play saat dimajumundurkan". Sebelumnya, menggeser timeline saat play selalu menghentikan video, dan pemilik harus menekan play lagi.
+- **Pilihan pemilik** (ditanyakan dengan opsi): putar lagi otomatis hanya kalau tadi sedang play. Kalau tadi diam (mencari titik potong), tetap diam.
+- **`timeline.js`:**
+  - Geser dengan jari, roda mouse, atau seret yang memotong pemutaran: video lanjut play 250 ms setelah timeline diam. Artinya jari sudah diangkat, luncuran (momentum) selesai, dan mouse tidak sedang menyeret.
+  - Ketuk penggaris saat play: lompat ke situ dan terus play.
+  - Memindah atau memangkas klip membatalkan putar-lagi yang tertunda.
+- **Dicek** dengan Chromium profil iPad dengan sentuhan (`bench/p26/autoplay.mjs`):
+  - Berhenti selama digeser, lalu lanjut dari posisi baru (6,53 dtk → 6,75 dtk).
+  - Tidak play selama jari menahan timeline.
+  - Geser saat diam tetap diam.
+  - Ketuk penggaris saat play lanjut play.
+  - Roda mouse di desktop: perilakunya sama.
+- `npm test`: 310 test, 296 lulus, 0 gagal, 14 dilewati. Belum diverifikasi di iPad asli.
+
