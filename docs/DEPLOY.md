@@ -69,6 +69,7 @@ Fakta (dicek read-only pada 2026-11-23):
 | Data | Volume Docker `najja-editor_najja-data`. Tidak ikut berubah saat update kode |
 | Konfigurasi rahasia | `/opt/najja-editor/.env` (jangan di-commit, jangan dibagikan) |
 | DNS | `editor.najja.id` → `31.97.223.23`. `www.editor.najja.id` **belum punya record** |
+| OAuth `.well-known` | `extension/editor.najja.id/najja-wellknown.conf` terpasang sejak 2026-11-23 (path OAuth discovery diteruskan ke app) |
 
 **Update ke versi baru** (kode dari git, data tetap di volume):
 

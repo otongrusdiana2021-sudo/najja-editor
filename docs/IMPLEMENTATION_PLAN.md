@@ -87,7 +87,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-1 Antrian perintah MCP + mutex capture | ✅ selesai, di-commit di branch `feat/p0-1-mcp-command-queue` (**belum di-push dan belum di-deploy**). E2E belum dijalankan (lihat log) |
 | P0-2 Autosave + kunci ekspor | ✅ selesai, di-commit di branch `feat/p0-2-autosave-export-lock` (dibangun di atas P0-1; **belum di-push dan belum di-deploy**). Thumbnail per-autosave (bagian V14) ditunda ke P2 karena butuh benchmark |
 | P0-3 Test infra + CI | ✅ selesai. Branch `feat/p0-3-contract-ci` (berisi P0-1 + P0-2 + P0-3) **sudah di-push** ke GitHub (belum di-merge ke `main`, belum di-deploy). Run CI pertama **hijau** (run 45125714348). E2E Playwright di CI ditunda |
-| P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy`, ikut di-push lewat branch `feat/p0-5-design-export` (CI hijau, run 45129262367). **Belum dipasang:** snippet nginx `.well-known` di VPS (butuh izin) dan record DNS `www` (butuh akses pengelola DNS) |
+| P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy`, ikut di-push lewat branch `feat/p0-5-design-export` (CI hijau, run 45129262367). Snippet nginx `.well-known` **dipasang di VPS 2026-11-23**. **Belum:** record DNS `www` (butuh akses pengelola DNS) |
 | P0-5 Ekspor Najja Desain aman | ✅ selesai, branch `feat/p0-5-design-export` (berisi P0-1 sampai P0-5) **sudah di-push**. CI hijau di Node 22 (run 45129262367). Belum di-merge ke `main`, belum di-deploy. Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
 | P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
@@ -427,3 +427,18 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Semua proyek dan desain uji dihapus, termasuk satu yang sempat dibuat ulang oleh race di kode lama.
 - **Kontrak:** tidak ada perubahan pada tool MCP. REST `PUT /api/projects/:id` kini bisa menjawab 410. Klien yang dipakai (editor dan Desain) menanganinya.
 - **CI:** branch `fix/v19-deleted-project` (berisi semua kerjaan sampai V19 dan perbaikan test jobs) di-push. Run 45136491124 hijau di Node 22.
+
+#### S2/M8 — snippet nginx `.well-known` dipasang di VPS (2026-11-23)
+
+- **Izin:** pemilik meminta pemasangan secara eksplisit. Perubahan hanya **satu file baru**; file vhost aaPanel tidak diedit.
+- **Langkah (lewat SSH sebagai root):**
+  1. Baseline dari luar: tiga path OAuth `/.well-known/` = 404, ACME = 404 (file tidak ada), `/oauth/authorization-server` = 200, `/login` = 200. `nginx -t` awal lolos. `/usr/bin/nginx` → `/www/server/nginx/sbin/nginx`, sama dengan master yang berjalan (PID 831).
+  2. `deploy/aapanel/najja-wellknown.conf` dipasang ke `/www/server/panel/vhost/nginx/extension/editor.najja.id/` (mode 600 root, sama dengan `site_total.conf`). SHA-256 sama dengan versi di repo (`bc67ca4e…`).
+  3. `nginx -t` lolos. Skripnya disiapkan untuk menghapus file itu tanpa reload kalau tes gagal.
+  4. `nginx -s reload`: worker lama berhenti dengan rapi, dan 2 worker baru berjalan.
+- **Verifikasi dari luar:**
+  - `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource/mcp`, dan `/.well-known/openid-configuration` = **200 JSON**. Isinya: issuer `https://editor.najja.id`, endpoint HTTPS, resource `https://editor.najja.id/mcp`.
+  - ACME tetap 404 seperti sebelumnya. `/oauth/*`, `/login`, dan `/` sama seperti sebelumnya.
+  - Rantai discovery MCP: `POST /mcp` tanpa token → 401 dengan `resource_metadata` → URL itu 200.
+- **Rollback:** hapus file tersebut, lalu `nginx -t && nginx -s reload`.
+- **Belum dicoba:** menyambungkan klien AI sungguhan lewat discovery `/.well-known/`, karena butuh akun pengguna. Jalur yang dipakai klien kini menjawab benar.
