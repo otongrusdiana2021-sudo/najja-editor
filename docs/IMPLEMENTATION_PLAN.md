@@ -94,7 +94,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
 | P1-2 Job system | ✅ selesai. PR #3 (`01fbfff`) **di produksi sejak 2026-11-23**. Jalur sukses `apply_style`/`get_transcript` di latar belakang belum diuji dengan layanan AI sungguhan |
 | DESIGN §3.1 → Ukuran layar per perangkat | ✅ selesai. **Di produksi sejak 2026-11-23** (`0744fd6`). Desain tetap; tiap perangkat mengatur skalanya di menu akun. Belum dicoba di iPad asli dan Safari Mac |
-| P2-6 Mesin pratinjau dekoder (WebCodecs) | ✅ selesai di kode dan diukur di Safari Mac + Chromium (2026-11-23). **Belum di produksi, belum diverifikasi di iPad asli** |
+| P2-6 Mesin pratinjau dekoder (WebCodecs) | ✅ selesai, diukur di Safari Mac + Chromium. **Di produksi sejak 2026-11-23** (`a5fdff1`). **Belum diverifikasi di iPad asli** |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -701,4 +701,11 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Belum diverifikasi di iPad asli.
   - Klip bersuara yang dipercepat masih memakai `<video>`.
   - `bench/run.mjs` B9 dengan ffmpeg belum dijalankan.
+
+- **Deploy produksi `a5fdff1` (P2-6), 2026-11-23 14:12 UTC:**
+  - VPS `015d2eb` → `a5fdff1`. Image lama dicadangkan sebagai `backup-015d2eb`.
+  - Test lokal 293 lulus / 0 gagal (disk Mac sedang di atas batas 512 MB), CI hijau (run 45191236583).
+  - Container `healthy`, 0 restart, 0 error di log. `/healthz`, `/login`, dan `.well-known` 200; Range lewat nginx tetap `206`.
+  - `framesource.js` dan `mediabytes.js` ada di dalam container.
+  - **Langkah berikutnya:** pemilik mencoba di iPad. Yang dilihat di Diagnostik: "potongan siap tepat waktu / telat", "Frame pertama potongan (dekoder)", dan alasan buffer (jaringan atau dekoder).
 
