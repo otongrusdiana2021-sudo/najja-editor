@@ -75,7 +75,7 @@ Fakta (dicek read-only pada 2026-11-23):
 
 > **Sejak 2026-11-23** `/opt/najja-editor/.env` berisi `COMPOSE_FILE=docker-compose.yml:deploy/compose.proxy.yml`, jadi `docker compose …` biasa di folder itu sudah memakai kedua file (sudah dicek: port `127.0.0.1:3333` ikut, dan `up -d --dry-run najja` tidak mengganti container). Cadangan `.env` sebelum perubahan ada di `/root/najja-env-backups/` (di luar repo).
 >
-> ⚠️ **Selalu sebut nama service** (`najja`, `ai`), sama seperti installer. `docker compose up -d` **tanpa** nama service juga akan menyalakan `caddy` (port 80/443, bentrok dengan nginx aaPanel). Usulan perbaikan terpisah: `profiles: ["caddy"]` untuk `caddy` di `deploy/compose.proxy.yml`.
+> Di mode proxy, `caddy` punya `profiles: ["caddy"]` (`deploy/compose.proxy.yml`, v1.13.2), jadi `docker compose up -d` tanpa nama service pun **tidak** menyalakannya. Sebelumnya `caddy` ikut menyala dan bentrok dengan nginx aaPanel di port 80/443. Dijaga `test/deploy-config.test.js`. Tetap sebaiknya menyebut nama service (`najja`, `ai`), sama seperti installer.
 >
 > ⚠️ Selalu pakai **kedua** file compose. `docker compose up` biasa hanya memakai `docker-compose.yml`, sehingga container baru **tidak** mem-publish `127.0.0.1:3333` dan situs langsung 502. Ini terjadi sekali saat deploy 2026-11-23 (±2 menit down). File yang dipakai sebuah container bisa dicek di label `com.docker.compose.project.config_files` (`docker inspect`).
 
