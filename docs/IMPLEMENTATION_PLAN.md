@@ -755,3 +755,9 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Roda mouse di desktop: perilakunya sama.
 - `npm test`: 310 test, 296 lulus, 0 gagal, 14 dilewati. Belum diverifikasi di iPad asli.
 
+- **Deploy produksi `27208b1` (v1.14.2, putar lagi setelah geser), 2026-11-23 15:03 UTC:**
+  - VPS `5691dc6` → `27208b1`. Image lama dicadangkan sebagai `backup-5691dc6`.
+  - Test lokal 296 lulus / 0 gagal, CI hijau (run 45200540431).
+  - Container `healthy`, 0 restart, 0 error di log. `/healthz`, `/login`, dan `.well-known` 200; Range tetap `206`.
+  - `resumeAfterScrub` ada di dalam container.
+
