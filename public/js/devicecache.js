@@ -167,7 +167,10 @@ export const deviceCache = {
       let got = segs.reduce((a, s) => a + s.file.size, 0);
       let next = segs.length ? segs[segs.length - 1].n + 1 : 0;
       if (meta?.complete && got === meta.size) return this.open(key);
-      for (let attempt = 0; attempt < 30; attempt++) {
+      // (v1.13.2) Every byte is already here but the entry was never marked complete (a download paused right after
+      // its last chunk, before this fix): finish it. Asking the server for more would only get 416.
+      const whole = meta?.size > 0 && got === meta.size;
+      for (let attempt = 0; attempt < 30 && !whole; attempt++) {
         await waitResume();
         if (!stillWanted()) return null;
         let res;
@@ -213,7 +216,9 @@ export const deviceCache = {
           paused = true; // connection dropped: retry from where it stopped
         }
         await closeSeg();
-        if (!paused && got >= total) break;
+        // (v1.13.2) Complete by bytes, not by how the last read ended: a pause (or a dropped connection) that came
+        // right after the last chunk used to send the next try past the end (416) and leave the copy unusable.
+        if (got >= total) break;
       }
       segs = await segments(dir);
       got = segs.reduce((a, s) => a + s.file.size, 0);

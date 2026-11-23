@@ -550,3 +550,27 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - **Perbaikan (dengan "ya" pemilik):** `deploy/aapanel/najja-proxy.conf` (`proxy_cache off;`) dipasang di `extension/editor.najja.id/`. `nginx -t` lulus, lalu reload. Situs lain tidak berubah. Test baru di `test/deploy-config.test.js` menjaga isi snippet.
   - **Hasil:** permintaan Range lewat editor.najja.id kini `206` (`bytes 0-9/504`). Permintaan biasa tetap `200`, dan `/healthz`, `/login`, serta `.well-known` tetap 200. Media `/edit` memakai `sendFile` yang sama, jadi ikut. Tidak ada error baru di log nginx setelah reload.
   - **Belum dicek:** pemutaran di akun pemilik (butuh login) dan di iPad. Pemilik diminta memuat ulang editor lalu mencoba.
+
+- **iPad kurang mulus dibanding PC: salinan video di iPad macet di 100% (diperbaiki di kode 2026-11-23, belum di-deploy):**
+  - **Bukti dari log nginx setelah perbaikan Range:**
+    - Chrome di PC hanya meminta 1 metadata media, karena ia memutar salinan dari disk perangkat.
+    - iPad (Safari 26.6) mengirim **141 permintaan potongan** ke `/edit` dalam ±2,5 menit, ditambah 7 yang dibatalkan, jadi videonya di-stream lewat Wi-Fi.
+    - Unduhan penuh 69 MB selesai pukul 09:39:28, lalu **langsung** ada permintaan melewati akhir file (`416`), dan terulang pukul 09:39:35 dan 09:39:54. Setelah itu muncul unduhan baru dari nol yang terpotong (2,3 / 2,5 / 16,5 MB).
+  - **Akar masalah:** di `public/js/devicecache.js`, unduhan berhenti sementara selama preview memutar dari server (`shouldPause`). Unduhan dianggap selesai hanya kalau bacaan terakhir **tidak** dijeda (`!paused && got >= total`).
+    - Kalau jeda jatuh tepat setelah potongan terakhir, semua byte sudah di disk tapi tidak ditandai lengkap.
+    - Percobaan berikutnya meminta `bytes=<ukuran>-` dan dijawab `416`, lalu `download()` menyerah dan app jatuh ke unduhan ke memori.
+    - Percobaan sesudahnya terus `416` karena entri tidak pernah lengkap, jadi iPad tidak pernah memutar dari disk.
+    - Di iPad jeda ini sering terjadi, karena selama preview memutar dari server, unduhan selalu dijeda.
+  - **Reproduksi:**
+    - Di Chrome (OPFS asli), jeda pada potongan terakhir menghasilkan permintaan `[0 → 200, 73364 → 416]`, nilai kembali `null`, dan entri berisi 73364 byte dengan `complete: false`. Pola ini sama dengan log iPad.
+    - Test baru `test/device-cache.test.js` (OPFS palsu di memori) gagal 2 dari 3 sebelum perbaikan.
+  - **Perbaikan:**
+    - Selesai ditentukan dari byte yang diterima (`got >= total`), bukan dari cara bacaan terakhir berakhir.
+    - Entri yang sudah berisi semua byte tapi belum ditandai lengkap (seperti di iPad sekarang) langsung diselesaikan tanpa jaringan.
+    - Lanjut-dari-tengah (Range) tidak berubah dan dijaga test ketiga.
+  - **Hasil:**
+    - Test 3/3 lulus. Suite 289 test, 275 lulus, 0 gagal, 14 dilewati.
+    - Di Chrome, skenario yang sama kini 1 permintaan, salinan dari disk bisa diputar, dan isinya identik.
+  - **Belum diketahui:** apakah ini **satu-satunya** penyebab iPad kurang mulus. Ukuran pembanding: setelah deploy, iPad seharusnya berhenti mengirim permintaan `/edit` begitu salinannya selesai, lalu Diagnostik (menu ⋯) di iPad dan PC dibandingkan untuk FPS dan frame yang hilang.
+  - **Catatan kecil (tidak diubah):** `open()` menulis metadata tanpa menunggu, sehingga daftar penyimpanan bisa sesaat membaca entri sebagai belum lengkap. Ini tidak memengaruhi pemutaran.
+
