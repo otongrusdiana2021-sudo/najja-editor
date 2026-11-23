@@ -351,4 +351,5 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Di Mac tidak bisa direproduksi: Node 20 dan 26 lulus, `TZ=UTC` + locale C lulus, 6× konkurensi 3 lulus, semua import relatif cocok huruf besar/kecil, dan rekaman kesetaraan stabil 25×.
   - Log Actions butuh login, jadi ditambahkan langkah CI yang mengubah test gagal menjadi anotasi publik (`test/ci-annotate.mjs`, commit `86854dc`, sudah diuji pada output TAP asli).
   - Run berikutnya (45133468567) dengan kode aplikasi yang sama **hijau**. Artinya kegagalan pertama intermiten, dan nama test-nya tidak tercatat (lihat T5).
+  - Perbaikan port test (`267463d`, port diminta ke OS) di-push. Run 45133833509 **hijau**. Belum terbukti bahwa ini memang penyebab flaky-nya; kalau terulang, anotasi CI akan menyebut test-nya.
 - **Berikutnya:** P0-6b langkah 3 (`update_clip` ke `core/`) atau lanjut ke P1.
