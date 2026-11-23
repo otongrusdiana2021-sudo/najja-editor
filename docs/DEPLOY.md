@@ -65,7 +65,7 @@ Fakta (dicek read-only pada 2026-11-23):
 | Bagian | Nilai |
 |---|---|
 | Server | VPS `najja-vps`, nginx 1.24 dari aaPanel. Vhost `/www/server/panel/vhost/nginx/editor.najja.id.conf`: reverse proxy `location ^~ /` → `http://127.0.0.1:3333`, HSTS dipasang nginx |
-| App | `/opt/najja-editor`: checkout git dari GitHub, Docker Compose dengan **dua file**: `docker-compose.yml` + `deploy/compose.proxy.yml` (file kedua mem-publish `127.0.0.1:3333`, tempat nginx meneruskan). Container `najja-editor-najja-1` dan `najja-editor-ai-1`. Service `caddy` tidak dipakai. Versi berjalan: `96d2e9f` (main setelah PR #1, dipasang 2026-11-23; sebelumnya `86305a7` = v1.13.1) |
+| App | `/opt/najja-editor`: checkout git dari GitHub, Docker Compose dengan **dua file**: `docker-compose.yml` + `deploy/compose.proxy.yml` (file kedua mem-publish `127.0.0.1:3333`, tempat nginx meneruskan). Container `najja-editor-najja-1` dan `najja-editor-ai-1`. Service `caddy` tidak dipakai. Versi berjalan: `01fbfff` (main setelah PR #3, dipasang 2026-11-23; sebelumnya `96d2e9f`, dan sebelum itu `86305a7` = v1.13.1). Image cadangan: `backup-7a98b22`, `v1.13.1-backup` |
 | Data | Volume Docker `najja-editor_najja-data`. Tidak ikut berubah saat update kode |
 | Konfigurasi rahasia | `/opt/najja-editor/.env` (jangan di-commit, jangan dibagikan) |
 | DNS | `editor.najja.id` → `31.97.223.23`. `www.editor.najja.id` **belum punya record** |

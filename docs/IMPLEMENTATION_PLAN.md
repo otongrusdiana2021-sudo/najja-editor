@@ -91,7 +91,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-5 Ekspor Najja Desain aman | ✅ selesai, branch `feat/p0-5-design-export` (berisi P0-1 sampai P0-5) **sudah di-push**. CI hijau di Node 22 (run 45129262367). Belum di-merge ke `main`, belum di-deploy. Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
 | P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
-| P1-2 Job system | ✅ selesai di branch `feat/p1-2-jobs` (belum di-push, belum di-deploy). Jalur sukses `apply_style`/`get_transcript` di latar belakang belum diuji dengan layanan AI sungguhan |
+| P1-2 Job system | ✅ selesai. PR #3 (`01fbfff`) **di produksi sejak 2026-11-23**. Jalur sukses `apply_style`/`get_transcript` di latar belakang belum diuji dengan layanan AI sungguhan |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -505,3 +505,9 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 - **Belum diuji:**
   - Jalur **sukses** `apply_style`/`get_transcript` di latar belakang, termasuk pembatalan di tengah transkripsi. Ini butuh layanan AI dan model yang tidak ada di server lokal.
   - Di produksi.
+
+- **Deploy produksi `01fbfff` (PR #3), 2026-11-23:**
+  - Persiapan: CI `main` hijau (tree identik dengan branch PR), VPS bersih di `7a98b22`, dan image dicadangkan sebagai `najja-editor-najja:backup-7a98b22`.
+  - Proses: fast-forward, lalu build 2 dtk (container lama tetap melayani), lalu `docker compose up -d najja` (`COMPOSE_FILE` memakai kedua file).
+  - Hasil: port `127.0.0.1:3333` langsung terpasang, `healthz` 200 dalam 2 dtk, **tanpa downtime yang teramati**.
+  - App di container memuat 30 tool (termasuk `get_job`, `list_jobs`, `cancel_job`). Log 0 error, dan endpoint publik normal.
