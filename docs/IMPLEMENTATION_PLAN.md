@@ -86,7 +86,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 |---|---|
 | P0-1 Antrian perintah MCP + mutex capture | ✅ selesai, di-commit di branch `feat/p0-1-mcp-command-queue` (**belum di-push dan belum di-deploy**). E2E belum dijalankan (lihat log) |
 | P0-2 Autosave + kunci ekspor | ✅ selesai, di-commit di branch `feat/p0-2-autosave-export-lock` (dibangun di atas P0-1; **belum di-push dan belum di-deploy**). Thumbnail per-autosave (bagian V14) ditunda ke P2 karena butuh benchmark |
-| P0-3 Test infra + CI | ✅ selesai, di-commit di branch `feat/p0-3-contract-ci` (di atas P0-2; **belum di-push**). CI belum pernah jalan di GitHub. E2E Playwright di CI ditunda |
+| P0-3 Test infra + CI | ✅ selesai. Branch `feat/p0-3-contract-ci` (berisi P0-1 + P0-2 + P0-3) **sudah di-push** ke GitHub (belum di-merge ke `main`, belum di-deploy). Run CI pertama **hijau** (run 45125714348). E2E Playwright di CI ditunda |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -167,9 +167,8 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Unit lokal (Node 26, tanpa ffmpeg): **191 test, 177 lulus, 0 gagal, 14 dilewati**. Run lokal pertama yang hijau total (sebelumnya 1 gagal karena T2).
   - Mutation check di kode asli: `split_clip` diganti nama sementara di `mcp/tools.js` → test kontrak gagal dengan pesan "tool split_clip: gone…", dan `--update` menolak menulis (exit 1). File dikembalikan, snapshot tidak tersentuh.
   - Workflow: YAML valid (diparse Ruby), langkah `find … | xargs node --check` dijalankan lokal dan lulus.
-  - **Belum:** CI belum pernah jalan di GitHub (butuh push). Ada dua hal yang baru terbukti di run pertama: (1) suite di Node 22, karena lokal pakai Node 26 dan Docker daemon tidak jalan; (2) 5 test proxy yang butuh ffmpeg + libx264/libx265, yang belum pernah jalan di Mac ini dan akan jalan di CI.
+  - **CI di GitHub (2026-11-23):** branch di-push (token keychain ternyata punya scope `workflow`). Run pertama https://github.com/otongrusdiana2021-sudo/najja-editor/actions/runs/45125714348 **sukses**. Semua langkah lulus: pasang ffmpeg 15 dtk, cek sintaks 1 dtk, `npm test` di Node 22 10 dtk. Jadi suite lulus di Node 22. Jumlah test per status belum dilihat karena log Actions hanya bisa dibuka setelah login GitHub. Durasi `npm test` 10 dtk (lokal tanpa ffmpeg 1,5 dtk) **mengindikasikan** test proxy ffmpeg ikut jalan, tapi itu belum dipastikan dari log.
 - **Risiko tersisa:**
-  - Push file `.github/workflows/` butuh token GitHub dengan scope `workflow`. Kalau kredensial git di Mac ini tidak punya scope itu, push branch ini akan ditolak GitHub.
   - Bentuk output tool belum masuk snapshot (tidak ada `outputSchema`). Ditangani test per tool di fase B.
   - E2E Playwright (Chromium + WebKit) belum ada di CI. Playwright bukan dependency project. Menambahkannya perlu memasang paket `playwright` dan browser, sebaiknya diuji lokal dulu.
 - **Berikutnya:** P0-4 (header keamanan, cache SW dibersihkan saat logout, nginx `.well-known`, DNS www, DEPLOY doc). Sebagian butuh perubahan di VPS/DNS, jadi perlu izin eksplisit.

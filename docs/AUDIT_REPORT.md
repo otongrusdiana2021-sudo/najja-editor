@@ -147,7 +147,7 @@ Kolom: **Risiko** T/S/R (Tinggi/Sedang/Rendah) · **Kompl.** S/M/L · **Status**
 | T3 | S | FAKTA | `test/mcp.test.js` | Unit test MCP hanya protokol/HTTP. Perilaku 27 tool hanya di e2e. Tidak ada test paralel | Snapshot kontrak + test antrian + e2e per tool | M | M1 |
 | T4 | S | FAKTA | — | Tidak ada test perangkat iPad sungguhan. E2E iPad = emulasi viewport + sentuh di Chromium | Uji manual terjadwal di iPad (Safari) per rilis + WebKit Playwright | M | — |
 
-**Status perbaikan (2026-11-23):** T1 (CI unit di GitHub Actions; e2e belum), T2, dan T3 (snapshot kontrak) dikerjakan di P0-3. CI belum pernah jalan di GitHub karena branch belum di-push. Detail di `IMPLEMENTATION_PLAN.md` → Log milestone P0-3.
+**Status perbaikan (2026-11-23):** T1 (CI unit di GitHub Actions; e2e belum), T2, dan T3 (snapshot kontrak) dikerjakan di P0-3. Run CI pertama di GitHub sukses (Node 22). Detail di `IMPLEMENTATION_PLAN.md` → Log milestone P0-3.
 
 ### 3.7 Kualitas hasil Style Konsep (dari proyek produksi "cek ai test · Editorial Review")
 
