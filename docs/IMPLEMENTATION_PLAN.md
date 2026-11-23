@@ -551,7 +551,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - **Hasil:** permintaan Range lewat editor.najja.id kini `206` (`bytes 0-9/504`). Permintaan biasa tetap `200`, dan `/healthz`, `/login`, serta `.well-known` tetap 200. Media `/edit` memakai `sendFile` yang sama, jadi ikut. Tidak ada error baru di log nginx setelah reload.
   - **Belum dicek:** pemutaran di akun pemilik (butuh login) dan di iPad. Pemilik diminta memuat ulang editor lalu mencoba.
 
-- **iPad kurang mulus dibanding PC: salinan video di iPad macet di 100% (diperbaiki di kode 2026-11-23, belum di-deploy):**
+- **iPad kurang mulus dibanding PC: salinan video di iPad macet di 100% (diperbaiki dan di-deploy 2026-11-23, `7f97dd9`):**
   - **Bukti dari log nginx setelah perbaikan Range:**
     - Chrome di PC hanya meminta 1 metadata media, karena ia memutar salinan dari disk perangkat.
     - iPad (Safari 26.6) mengirim **141 permintaan potongan** ke `/edit` dalam ±2,5 menit, ditambah 7 yang dibatalkan, jadi videonya di-stream lewat Wi-Fi.
@@ -573,4 +573,9 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
     - Di Chrome, skenario yang sama kini 1 permintaan, salinan dari disk bisa diputar, dan isinya identik.
   - **Belum diketahui:** apakah ini **satu-satunya** penyebab iPad kurang mulus. Ukuran pembanding: setelah deploy, iPad seharusnya berhenti mengirim permintaan `/edit` begitu salinannya selesai, lalu Diagnostik (menu ⋯) di iPad dan PC dibandingkan untuk FPS dan frame yang hilang.
   - **Catatan kecil (tidak diubah):** `open()` menulis metadata tanpa menunggu, sehingga daftar penyimpanan bisa sesaat membaca entri sebagai belum lengkap. Ini tidak memengaruhi pemutaran.
+
+- **Deploy produksi `7f97dd9` (perbaikan salinan video di perangkat), 2026-11-23:**
+  - `npm run deploy` berjalan: test lokal 275 lulus, 0 gagal, CI hijau, lalu VPS `0744fd6` → `7f97dd9`. Image lama dicadangkan sebagai `backup-0744fd6`.
+  - Hasil: port terpasang, error di log 0, container `running` dengan 0 restart. `/healthz`, `/login`, dan `.well-known` 200, dan Range lewat nginx tetap `206`. Perbaikan ada di `devicecache.js` di dalam container.
+  - **Belum diukur:** apakah iPad kini memutar dari disk (log server seharusnya berhenti menerima permintaan `/edit` dari iPad setelah salinan selesai), dan Diagnostik iPad dibanding PC.
 
