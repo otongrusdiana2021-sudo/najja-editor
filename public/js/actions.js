@@ -405,13 +405,21 @@ export function removeClipEffect(clipId, index) {
   store.mutate('Hapus efek klip', () => { c.fx = (c.fx || []).filter((_, i) => i !== index); if (!c.fx.length) delete c.fx; });
 }
 /** Replace the clip's effects: [{ type, intensity }] (empty: none). */
-export function setClipEffects(clipId, list = []) {
-  const c = fxClip(clipId);
-  const fx = list.slice(0, CLIP_FX_MAX).map((f) => {
+/**
+ * The effects setClipEffects would put on the clip, checked the same way (throws the same errors) without changing
+ * anything. (v1.13.2, V20) update_clip calls it first, so a refused list leaves the project as it was.
+ */
+export function checkClipEffects(clipId, list = []) {
+  fxClip(clipId);
+  return list.slice(0, CLIP_FX_MAX).map((f) => {
     const type = f.type || f.effect;
     if (!EFFECTS.some((e) => e.id === type)) throw new Error(`Efek tidak dikenal: ${type}`);
     return { type, intensity: Math.max(0, Math.min(1, Number(f.intensity ?? 0.8))) };
   });
+}
+export function setClipEffects(clipId, list = []) {
+  const c = fxClip(clipId);
+  const fx = checkClipEffects(clipId, list);
   store.mutate('Efek klip', () => { if (fx.length) c.fx = fx; else delete c.fx; });
   return fx;
 }

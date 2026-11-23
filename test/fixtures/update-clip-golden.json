@@ -1052,7 +1052,7 @@
     "error": null,
     "result": {
       "refused": "Unknown filter \"nope\". Valid: none, crystal, uhd4k, clear, vivid, warm, cool, bw, noir, vintage, retro, kodak, cinematic, moody, faded, drama, sunset, pink, mint, dream, vividWarm, warmMatte, cleanNatural",
-      "xAfter": 0.3,
+      "xAfter": 0,
       "undoSteps": 0
     },
     "selection": null,
@@ -1095,7 +1095,7 @@
         2
       ]
     ],
-    "sha256": "273ff4a7cf16c6fea0c4e9f2ca488fb8c8ac125e036149fca452ac4c1783dfc0"
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
   },
   "V20: a magnet move, then a refused filter": {
     "error": null,
@@ -1104,18 +1104,18 @@
       "x": 0,
       "txtX": 0,
       "mainOrder": [
-        "sol",
-        "vid"
+        "vid",
+        "sol"
       ],
-      "undoSteps": 1
+      "undoSteps": 0
     },
     "selection": null,
-    "history": 1,
+    "history": 0,
     "clips": [
       [
         "vid",
         "main",
-        2,
+        0,
         10
       ],
       [
@@ -1133,7 +1133,7 @@
       [
         "sol",
         "main",
-        0,
+        10,
         2
       ],
       [
@@ -1149,76 +1149,22 @@
         2
       ]
     ],
-    "sha256": "f70c7efb4db0bba5f9ae8114b3963a56f9bafc20faf6959f9c9c73874e6bcc78"
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
   },
   "V20: remove_background on a text, after a good value": {
     "error": null,
     "result": {
       "refused": "remove_background is for video and photo clips",
       "x": 0,
-      "txtX": 0.2,
-      "mainOrder": [
-        "vid",
-        "sol"
-      ],
-      "undoSteps": 1
-    },
-    "selection": null,
-    "history": 1,
-    "clips": [
-      [
-        "vid",
-        "main",
-        0,
-        10
-      ],
-      [
-        "img",
-        "track4",
-        1,
-        3
-      ],
-      [
-        "txt",
-        "track3",
-        0,
-        3
-      ],
-      [
-        "sol",
-        "main",
-        10,
-        2
-      ],
-      [
-        "eff",
-        "track1",
-        0,
-        2
-      ],
-      [
-        "badge",
-        "track2",
-        0,
-        2
-      ]
-    ],
-    "sha256": "f182021abf4fef320cbd155bd055c4a4ced131450ff25b82ad68dc6159d03c2a"
-  },
-  "V20: an unknown clip effect, after a good value": {
-    "error": null,
-    "result": {
-      "refused": "Efek tidak dikenal: nope",
-      "x": 0.2,
       "txtX": 0,
       "mainOrder": [
         "vid",
         "sol"
       ],
-      "undoSteps": 1
+      "undoSteps": 0
     },
     "selection": null,
-    "history": 1,
+    "history": 0,
     "clips": [
       [
         "vid",
@@ -1257,7 +1203,61 @@
         2
       ]
     ],
-    "sha256": "1691838f9b7a18dff68a90f719e2850cb8f9de2934d1b774b6966315b626112e"
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "V20: an unknown clip effect, after a good value": {
+    "error": null,
+    "result": {
+      "refused": "Efek tidak dikenal: nope",
+      "x": 0,
+      "txtX": 0,
+      "mainOrder": [
+        "vid",
+        "sol"
+      ],
+      "undoSteps": 0
+    },
+    "selection": null,
+    "history": 0,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
   },
   "clip effects that exist are set, with the other values": {
     "error": null,

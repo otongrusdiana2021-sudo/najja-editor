@@ -207,6 +207,12 @@ export const tools = {
   async update_clip(a) {
     const c = getClip(a.clip_id);
     let note = null;
+    // (v1.13.2, V20) everything is checked before anything changes, so a refused call leaves the project exactly as
+    // it was (before, the values ahead of a refused one were already in, without an undo step, and a magnet move
+    // had already happened): the edit runs on a copy first, then the background and effect checks
+    updateClip(JSON.parse(store.snapshot()), c.id, { ...a });
+    if (a.remove_background != null) need(c.type === 'video' || c.type === 'image', 'remove_background is for video and photo clips');
+    if (Array.isArray(a.clip_effects)) actions.checkClipEffects(c.id, a.clip_effects.map((f) => ({ type: f.effect || f.type, intensity: f.intensity })));
     if (a.start != null && c.trackId === 'main' && store.P.magnet) actions.moveClip(c.id, { start: Number(a.start) });
     // (v1.13.2, P0-6b) the edit itself is core/clipedit.js updateClip (pure, the same code the tests replay)
     store.mutate('AI: ubah klip', (P) => { updateClip(P, c.id, a); });

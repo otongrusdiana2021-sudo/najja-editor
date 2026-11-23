@@ -377,3 +377,24 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
     - Warna latar dan warna kedua berubah. `color: "merah"` ditolak dengan pesan yang sama seperti dulu.
     - `inspector.js` termuat. Console bersih. Proyek uji dihapus.
 - **Berikutnya:** perbaiki V20 (validasi semua argumen dulu, baru mengubah proyek), lalu sisa P0-6b atau lanjut ke P1.
+
+#### Perbaikan V20 — `update_clip` yang ditolak tidak mengubah apa pun (2026-11-23)
+
+- **Masalah:** panggilan `update_clip` yang ditolak tetap meninggalkan perubahan. Ada empat jalur:
+  1. Nilai sebelum argumen yang ditolak sudah masuk, tanpa langkah undo.
+  2. `start` di trek utama dengan magnet sudah memindahkan klip sebelum argumen lain dicek.
+  3. `remove_background` di klip non-video/foto dicek setelah mutasi.
+  4. `clip_effects` dengan efek tak dikenal dicek setelah mutasi.
+  AI menerima error dan menganggap tidak ada yang berubah.
+- **Cara:**
+  1. Commit `82a4cb5` merekam keempat jalur itu dari kode **sebelum** perbaikan, plus satu `clip_effects` valid sebagai pembanding.
+  2. Perbaikan dikerjakan, lalu golden direkam ulang. Diff golden di commit perbaikan adalah perubahan perilakunya.
+- **Perbaikan:**
+  - `api.js` `update_clip`: sebelum apa pun berubah, `updateClip` dijalankan pada **salinan** proyek (`store.snapshot()`), lalu cek `remove_background` dan `clip_effects`. Baru setelah semuanya lolos: pindah magnet, mutasi, dan sisanya.
+  - `actions.js`: `checkClipEffects()` (aturan dan pesan sama, diambil dari `setClipEffects`).
+- **Hasil:**
+  - Golden: **hanya 4 skenario V20 yang berubah**. Sesudah perbaikan, `x` tetap, klip tidak pindah, dan 0 langkah undo. **Pesan penolakan identik**. 22 skenario lain tidak berubah.
+  - Unit: **266 test, 252 lulus, 0 gagal**, 2×.
+  - Browser (handler editor yang dipakai MCP): tiga panggilan yang ditolak meninggalkan proyek persis sama (urutan klip, `x`, 3 langkah undo, panjang snapshot). Panggilan valid tetap pindah dan mengubah `x` dengan 2 langkah undo, seperti dulu. Console bersih.
+- **Kontrak MCP:** nama, schema, dan pesan error sama. Perubahan perilaku: panggilan yang ditolak tidak lagi mengubah proyek (perbaikan bug).
+- **Belum tercakup:** kegagalan **layanan** hapus latar (mis. model belum siap) yang terjadi setelah perubahan lain. Itu bukan argumen yang ditolak, dan perubahan lainnya sah dengan langkah undo sendiri.
