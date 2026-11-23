@@ -94,7 +94,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
 | P1-2 Job system | ✅ selesai. PR #3 (`01fbfff`) **di produksi sejak 2026-11-23**. Jalur sukses `apply_style`/`get_transcript` di latar belakang belum diuji dengan layanan AI sungguhan |
 | DESIGN §3.1 → Ukuran layar per perangkat | ✅ selesai. **Di produksi sejak 2026-11-23** (`0744fd6`). Desain tetap; tiap perangkat mengatur skalanya di menu akun. Belum dicoba di iPad asli dan Safari Mac |
-| P2-6 Mesin pratinjau dekoder (WebCodecs) | ✅ selesai, diukur di Safari Mac + Chromium. **Di produksi sejak 2026-11-23** (`a5fdff1`, lanjutan v1.14.1 `5691dc6`). **Belum diverifikasi di iPad asli** |
+| P2-6 Mesin pratinjau dekoder (WebCodecs) | ✅ selesai. **Di produksi sejak 2026-11-23** (`a5fdff1`, lanjutan `5691dc6`, `27208b1`, `5b3a824`). **Diverifikasi pemilik di iPad 10 (Chrome for iPad): "sudah mulus"** |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -784,4 +784,8 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Klip bersuara yang dipercepat masih memakai `<video>`.
 
 - **Deploy produksi `5b3a824` (P2-6 v1.14.3), 2026-11-23 15:22 UTC:** VPS `27208b1` → `5b3a824`, image lama `backup-27208b1`. Test lokal 298 lulus / 0 gagal, CI hijau (run 45203806654). Container `healthy`, 0 restart, 0 error di log, Range tetap `206`. `JOIN_GAP`, `MEMORY_PREVIEW_MAX`, dan `picturesReadyAt` ada di dalam container. **Berikutnya:** pemilik mencoba di iPad 10 dan mengirim Diagnostik JSON (kenapa salinan di perangkat tidak tersimpan).
+
+- **Verifikasi pemilik, 2026-11-23 (setelah `5b3a824`):** di iPad 10, pemilik melaporkan "sudah mulus". **Masih terbuka:**
+  - Kenapa salinan 97 MB tidak tersimpan di perangkat iPad. Kini tidak lagi mengganggu karena file besar di-*stream*, tapi tetap perlu Diagnostik JSON.
+  - Klip bersuara yang dipercepat masih memakai `<video>`.
 
