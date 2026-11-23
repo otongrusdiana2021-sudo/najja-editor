@@ -71,6 +71,15 @@ Fakta (dicek read-only pada 2026-11-23):
 | DNS | `editor.najja.id` → `31.97.223.23`. `www.editor.najja.id` **belum punya record** |
 | OAuth `.well-known` | `extension/editor.najja.id/najja-wellknown.conf` terpasang sejak 2026-11-23 (path OAuth discovery diteruskan ke app) |
 
+**Deploy satu perintah dari Mac** (seperti `deploy/deploy.sh` di proyek ecom):
+
+```bash
+npm run deploy            # test → push main → tunggu CI hijau → di VPS: cadangan image, git ff, build, ganti container, cek port + healthz
+DRY_RUN=1 npm run deploy  # hanya memeriksa, tidak push dan tidak mengubah VPS
+```
+
+Kalau port `127.0.0.1:3333` atau `/healthz` gagal setelah container diganti, skrip otomatis kembali ke image cadangan (`najja-editor-najja:backup-<commit lama>`). Langkah manualnya ada di bawah.
+
 **Update ke versi baru** (kode dari git, data tetap di volume):
 
 > **Sejak 2026-11-23** `/opt/najja-editor/.env` berisi `COMPOSE_FILE=docker-compose.yml:deploy/compose.proxy.yml`, jadi `docker compose …` biasa di folder itu sudah memakai kedua file (sudah dicek: port `127.0.0.1:3333` ikut, dan `up -d --dry-run najja` tidak mengganti container). Cadangan `.env` sebelum perubahan ada di `/root/najja-env-backups/` (di luar repo).
