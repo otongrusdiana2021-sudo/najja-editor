@@ -99,6 +99,8 @@ Kolom: **Risiko** T/S/R (Tinggi/Sedang/Rendah) · **Kompl.** S/M/L · **Status**
 | D9 | R–S | FAKTA | `design/stage.js:253-258` | Di layar sentuh, satu jari di area kosong selalu menggeser kanvas → tidak ada multi-select lewat sentuh. Pencil diperlakukan sama dengan jari | Gestur seleksi sentuh (mis. tekan lama + tarik), mode Pencil | M | — |
 | D10 | R–S | DUGAAN | `public/css/design.css:15`; `design.html:8` | Topbar tetap tanpa `safe-area-inset` → saat dipasang sebagai PWA bisa tertutup status bar | `viewport-fit=cover` + `env(safe-area-inset-top)` | S | Uji visual iPad |
 
+**Status perbaikan (2026-11-23):** D1, D2, dan D3 diperbaiki di P0-5 (ekspor berhenti dengan daftar foto bila foto gagal; font yang belum termuat diberi tahu dengan opsi "Tetap unduh"; ukuran di atas batas perangkat diperkecil otomatis). D1 di iPad asli belum diuji. Detail di `IMPLEMENTATION_PLAN.md` → Log milestone P0-5.
+
 ### 3.4 UX, aksesibilitas, design token
 
 | ID | Risiko | Status | Lokasi | Masalah → dampak ke user | Solusi | Kompl. | Dependensi |

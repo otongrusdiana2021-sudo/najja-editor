@@ -88,6 +88,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-2 Autosave + kunci ekspor | ✅ selesai, di-commit di branch `feat/p0-2-autosave-export-lock` (dibangun di atas P0-1; **belum di-push dan belum di-deploy**). Thumbnail per-autosave (bagian V14) ditunda ke P2 karena butuh benchmark |
 | P0-3 Test infra + CI | ✅ selesai. Branch `feat/p0-3-contract-ci` (berisi P0-1 + P0-2 + P0-3) **sudah di-push** ke GitHub (belum di-merge ke `main`, belum di-deploy). Run CI pertama **hijau** (run 45125714348). E2E Playwright di CI ditunda |
 | P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy` (di atas P0-3; belum di-push). **Belum dipasang:** snippet nginx `.well-known` di VPS (butuh izin) dan record DNS `www` (butuh akses pengelola DNS) |
+| P0-5 Ekspor Najja Desain aman | ✅ selesai, di-commit di branch `feat/p0-5-design-export` (di atas P0-4; belum di-push). Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -211,3 +212,46 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - CSP baru report-only. Mengubahnya jadi wajib sebaiknya setelah dipantau di produksi, termasuk fitur vendor.
   - `X-Frame-Options: SAMEORIGIN` akan memblokir siapa pun yang selama ini menyematkan editor dari domain lain. Di repo dan di dashboard ecom tidak ditemukan pemakaian seperti itu.
 - **Berikutnya:** pasang S2 di VPS (dengan izin), lalu P0-5 (keamanan ekspor Najja Desain: D2, D1, D3).
+
+#### P0-5 — Ekspor Najja Desain aman (2026-11-23)
+
+- **Tujuan:** D2 (foto gagal dimuat dibuang diam-diam), D1 (ukuran di atas batas perangkat), D3 (font belum termuat).
+- **Perubahan:**
+  - `public/js/design/exportcheck.js` (baru, tanpa DOM):
+    - `photosOf()`: foto yang dipakai, beserta nomor halamannya.
+    - `fontsOf()`: font per tampilan teks, dengan bobot yang benar-benar ada dan huruf yang dipakai, supaya subset font yang dibutuhkan ikut dimuat.
+    - `exportScale()`: skala terbesar yang bisa digambar perangkat.
+    - `photoLabel()`.
+    - `SAFE_PIXELS` = 4096 × 4096 (batas luas kanvas Safari iOS/iPadOS).
+  - `public/js/design/assets.js`:
+    - `exportSources()` mengembalikan `failed` (id, halaman, error), bukan menelan error dengan `catch {}`.
+    - `original()` mengambil ulang foto asli bila yang tersisa hanya salinan layar. Sebelumnya fungsi ini bisa mengembalikan kosong.
+  - `public/js/design/draw.js`: `canvasFits(w, h)` membuat kanvas, menggambar satu piksel di pojok terjauh, membacanya kembali, lalu langsung membebaskan memorinya.
+  - `public/js/design/app.js` `exportFiles()`:
+    - Foto gagal → berhenti dengan kode `PHOTOS` dan daftar nama fotonya.
+    - Font yang belum termuat, setelah dimuat ulang dengan huruf yang dipakai (tunggu maks 3 dtk) → berhenti dengan kode `FONTS`, kecuali `anyway: true`.
+    - Ukuran di atas `SAFE_PIXELS` ditanyakan ke perangkat. Bila tidak sanggup, diekspor pada skala terbesar yang muat.
+    - Hasil ekspor sekarang menyertakan `width`, `height`, dan `reduced` (aditif).
+  - `public/js/design/ui.js` (dialog ekspor, tanpa elemen baru):
+    - Alasan berhenti ditampilkan di catatan dialog yang sudah ada, dengan warna `--danger`, ditambah toast.
+    - Untuk font, tombol Unduh berubah menjadi "Tetap unduh".
+    - Ukuran besar diberi tahu sebelum ekspor.
+    - Toast hasil menyebut ukuran bila hasilnya diperkecil.
+    - Tombol 2× tetap dinonaktifkan seperti sebelumnya.
+  - `test/design-export.test.js` (baru, 6 test), `package.json`.
+- **Hasil test:**
+  - Unit: **205 test, 191 lulus, 0 gagal, 14 dilewati**.
+  - Mutation check: `assets.js` lama → test `exportSources` gagal.
+  - Browser asli (Chromium, server lokal, desain "Foto Produk" + foto 800×600 + teks Bangers):
+    - Ekspor normal: 1080×1080, `reduced: false`.
+    - Foto dibuat 404: ekspor berhenti dengan `PHOTOS` dan nama "kaos-merah". Dialog menampilkan catatan merah dan toast, tidak ada file. Setelah jaringan pulih, ekspor berhasil.
+    - `document.fonts.check` dibuat gagal untuk Bangers: berhenti dengan `FONTS`. Dialog menampilkan catatan dan tombol "Tetap unduh" (tombol aktif), dan `anyway` menghasilkan file.
+    - Probe kanvas di Chromium: 5000×4000 dan 8000×8000 muat, 20000×20000 tidak muat. Keempat probe (termasuk 64 MP) total 100 ms.
+    - Desain 5000×4000 (20 MP, di atas batas aman) diekspor penuh 5000×4000 dalam 346 ms.
+    - Console dan log server bersih. Data uji (desain + foto) dihapus.
+  - Tombol Unduh di dialog tidak ditekan sampai mengunduh, supaya tidak ada file tersimpan di folder Downloads pengguna. Jalur unduhnya tidak berubah.
+- **Belum diuji:** jalur "diperkecil otomatis" di iPad Safari asli. Di Chromium jalur ini tidak terpicu karena probe selalu muat; logikanya hanya dibuktikan di unit test dengan probe palsu.
+- **Risiko tersisa:**
+  - Probe memakai memori sebesar kanvas ekspor sesaat. Ini sama dengan yang dipakai ekspor itu sendiri, dan hanya dijalankan di atas 16,7 MP.
+  - Foto yang memang sudah terhapus di server akan memblokir ekspor sampai foto itu diganti. Ini disengaja: lebih baik daripada file tanpa foto produk.
+- **Berikutnya:** P0-6 (service layer `public/js/core/` + validasi schema di server). Ini milestone besar dan sebaiknya dipecah.
