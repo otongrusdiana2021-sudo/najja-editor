@@ -65,7 +65,7 @@ Fakta (dicek read-only pada 2026-11-23):
 | Bagian | Nilai |
 |---|---|
 | Server | VPS `najja-vps`, nginx 1.24 dari aaPanel. Vhost `/www/server/panel/vhost/nginx/editor.najja.id.conf`: reverse proxy `location ^~ /` → `http://127.0.0.1:3333`, HSTS dipasang nginx |
-| App | `/opt/najja-editor`: checkout git dari GitHub (commit `86305a7` = v1.13.1, tanpa perubahan lokal), Docker Compose. Container `najja-editor-najja-1` (`127.0.0.1:3333`) dan `najja-editor-ai-1`. Service `caddy` di compose **tidak** dipakai (nginx aaPanel yang menerima HTTPS) |
+| App | `/opt/najja-editor`: checkout git dari GitHub, Docker Compose dengan **dua file**: `docker-compose.yml` + `deploy/compose.proxy.yml` (file kedua mem-publish `127.0.0.1:3333`, tempat nginx meneruskan). Container `najja-editor-najja-1` dan `najja-editor-ai-1`. Service `caddy` tidak dipakai. Versi berjalan: `96d2e9f` (main setelah PR #1, dipasang 2026-11-23; sebelumnya `86305a7` = v1.13.1) |
 | Data | Volume Docker `najja-editor_najja-data`. Tidak ikut berubah saat update kode |
 | Konfigurasi rahasia | `/opt/najja-editor/.env` (jangan di-commit, jangan dibagikan) |
 | DNS | `editor.najja.id` → `31.97.223.23`. `www.editor.najja.id` **belum punya record** |
@@ -73,21 +73,27 @@ Fakta (dicek read-only pada 2026-11-23):
 
 **Update ke versi baru** (kode dari git, data tetap di volume):
 
+> ⚠️ Selalu pakai **kedua** file compose. `docker compose up` biasa hanya memakai `docker-compose.yml`, sehingga container baru **tidak** mem-publish `127.0.0.1:3333` dan situs langsung 502. Ini terjadi sekali saat deploy 2026-11-23 (±2 menit down). File yang dipakai sebuah container bisa dicek di label `com.docker.compose.project.config_files` (`docker inspect`).
+
 1. Pastikan CI hijau untuk commit yang mau dipasang (tab Actions di GitHub).
 2. Di VPS:
    ```bash
    cd /opt/najja-editor
-   git rev-parse --short HEAD          # catat, untuk rollback
-   git fetch origin
-   git checkout <commit-atau-tag>      # atau: git pull --ff-only origin main
-   docker compose up -d --build
+   alias dc='docker compose -f docker-compose.yml -f deploy/compose.proxy.yml'
+   git rev-parse --short HEAD                               # catat, untuk rollback
+   docker tag najja-editor-najja:latest najja-editor-najja:backup-$(git rev-parse --short HEAD)
+   git fetch origin main && git merge --ff-only FETCH_HEAD  # atau: git checkout <commit-atau-tag>
+   dc build najja                                           # container lama tetap melayani selama build
+   dc up -d najja                                           # ganti container (beberapa detik)
    ```
+   Container `ai` tidak perlu dibangun ulang kalau `ai/` dan `Dockerfile.ai` tidak berubah.
 3. Cek:
    ```bash
-   curl -s https://editor.najja.id/healthz                      # versi baru
+   docker ps --format '{{.Names}} | {{.Ports}}' | grep najja   # harus: 127.0.0.1:3333->3333/tcp
+   curl -s https://editor.najja.id/healthz
    curl -sI https://editor.najja.id/login | grep -iE 'x-frame|content-security|referrer|nosniff'
    ```
-4. Rollback bila perlu: `git checkout <commit-yang-dicatat> && docker compose up -d --build`.
+4. Rollback cepat (tanpa build): `docker tag najja-editor-najja:backup-<commit> najja-editor-najja:latest && git checkout <commit> && dc up -d najja`.
 
 **`www.editor.najja.id`:** butuh record DNS di pengelola domain `najja.id` (A `www.editor` → `31.97.223.23`, atau CNAME ke `editor.najja.id`). Setelah itu di aaPanel: tambahkan domain `www.editor.najja.id` ke situs, terbitkan ulang SSL untuk kedua nama, lalu buat redirect 301 dari `www.editor.najja.id` ke `https://editor.najja.id`.
 
