@@ -96,10 +96,16 @@ export const bridge = {
   /**
    * (v1.13.2) Run a tool in turn: after the tools before it have finished, unless it only reads (PURE_READS).
    * onStart runs when the tool really starts. deadline: a Date.now() time after which a waiting tool is dropped.
+   * handlers.blocked(tool) (P0-2) is asked when the tool's turn comes: a reason refuses it (an export started while
+   * it waited, say) with code 'BUSY'; the editor is not changed.
    */
   schedule(tool, task, onStart, deadline = null) {
     if (PURE_READS.has(tool)) { onStart?.(); return task(); }
-    return queue.run(task, { deadline, onStart });
+    return queue.run(() => {
+      const why = this.handlers?.blocked?.(tool);
+      if (why) throw Object.assign(new Error(why), { code: 'BUSY' });
+      return task();
+    }, { deadline, onStart });
   },
 
   async run(cmd) {

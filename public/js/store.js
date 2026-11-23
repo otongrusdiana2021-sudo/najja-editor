@@ -399,8 +399,15 @@ class Store {
     this.dirty = false;
     this.conflict = null; // { rev, updatedAt } of the server version while a conflict waits for the user
     this._saving = null;
+    // (v1.13.2) loads: bumped when a project is opened (setProject). edits: bumped on every change to save
+    // (scheduleSave, also when media info changes without touch). A save's answer belongs to the project as it was
+    // loaded, not to the object: undo/redo replace the object. Before, a change made while a save was running could
+    // be marked saved when it did not touch updatedAt.
+    this.loads = 0;
+    this.edits = 0;
+    this.retryMs = 0; // wait before the next try after a failed save: 5 s, doubled per failure, at most 60 s
     const save = debounce(() => this.save(), 700);
-    this.scheduleSave = Object.assign(() => { this.dirty = true; this.saveDraft(); save(); }, { flush: () => save.flush() });
+    this.scheduleSave = Object.assign(() => { this.edits++; this.dirty = true; this.saveDraft(); save(); }, { flush: () => save.flush() });
     // Unsaved changes are also kept on this device (IndexedDB) right away: a closed tab, a crash or a lost
     // connection does not lose them; they are offered again when the project is opened.
     this.saveDraft = debounce(() => {
@@ -479,6 +486,7 @@ class Store {
     if (!this._live) return;
     this.project = JSON.parse(this._live);
     this._live = null;
+    this.edits++; // a save running now may hold the half-done change: it is saved again after it
     this.emit('project');
   }
   undo() {
@@ -515,6 +523,7 @@ class Store {
   /** baseRev: server revision of `p` (default: its stored rev). dirty: `p` has changes the server does not have. */
   setProject(p, { keepHistory = false, baseRev = null, dirty = false } = {}) {
     this.project = p;
+    this.loads++;
     this.baseRev = baseRev ?? (p.rev || 0);
     this.dirty = dirty;
     this.conflict = null;
@@ -581,22 +590,27 @@ class Store {
     this.saveState = 'saving';
     this.emit('save', this.saveState);
     const rec = clone(this.project);
-    const project = this.project;
-    const stamp = project.updatedAt;
+    const { id } = rec;
+    const load = this.loads;
+    const edits = this.edits;
     try { rec.thumb = this.thumbProvider ? await this.thumbProvider() : undefined; } catch { /* ignore */ }
     rec.duration = this.duration();
     try {
       const ack = metrics.timer('save_ack_ms');
       const res = await storage.putProject(rec, { baseRev: this.baseRev, force });
       ack();
-      if (this.project !== project) return; // another project was opened meanwhile
+      // Another project was opened meanwhile. (Before v1.13.2 this compared the project object, which undo/redo
+      // replace: the answer was dropped, baseRev went stale and the next save showed a false conflict.)
+      if (this.loads !== load) return;
       if (res?.rev != null) this.baseRev = res.rev;
       this.conflict = null;
-      if (project.updatedAt === stamp) { // nothing changed while saving
+      this.retryMs = 0;
+      clearTimeout(this.retryTimer);
+      if (this.edits === edits) { // nothing changed while saving
         this.dirty = false;
-        if (storage.server) db.deleteDraft(project.id);
+        if (storage.server) db.deleteDraft(id)?.catch?.(() => {});
       }
-      prefs.set('lastProject', project.id);
+      prefs.set('lastProject', id);
       this.saveState = this.dirty ? 'saving' : 'saved';
       if (this.dirty) this.scheduleSave();
     } catch (err) {
@@ -613,7 +627,8 @@ class Store {
       console.warn('save failed', err);
       this.saveState = 'error';
       clearTimeout(this.retryTimer);
-      this.retryTimer = setTimeout(() => this.scheduleSave(), 5000);
+      this.retryMs = Math.min(60000, this.retryMs ? this.retryMs * 2 : 5000);
+      this.retryTimer = setTimeout(() => this.scheduleSave(), this.retryMs);
     }
     this.emit('save', this.saveState);
   }

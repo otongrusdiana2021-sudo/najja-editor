@@ -11,6 +11,18 @@
 export const PURE_READS = new Set(['get_project', 'list_assets', 'list_media', 'list_styles', 'get_export_status']);
 
 /**
+ * (P0-2) While a video export renders, only these tools run: the pure reads, and export_video (it answers "an
+ * export is already running" itself). Every other tool would change the project being rendered or move the
+ * playhead: get_frame and playback pause and seek the engine that a real-time export plays.
+ */
+export const DURING_EXPORT = new Set([...PURE_READS, 'export_video']);
+export const EXPORT_BUSY = 'Not run: a video export is rendering, and this tool would change the project or move the playhead. Poll get_export_status and call it again when the export is done.';
+/** Why `tool` may not start now, or null. exporting: a video export is rendering. */
+export function blockedReason(tool, { exporting = false } = {}) {
+  return exporting && !DURING_EXPORT.has(tool) ? EXPORT_BUSY : null;
+}
+
+/**
  * A FIFO queue: each task starts after every task queued before it has finished (resolved or failed).
  * With a deadline (a time of `now()`), a task still waiting at its deadline does not start and rejects with
  * code 'EXPIRED' (the caller has given up on it, so its edit would only surprise the user).

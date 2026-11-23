@@ -16,6 +16,7 @@ import { Toolbar } from './toolbar.js';
 import * as actions from './actions.js';
 import { tools } from './api.js';
 import { bridge } from './bridge.js';
+import { blockedReason } from './cmdqueue.js';
 import { exportVideo, exportState, cancelExport, supportedFormats, exportSize } from './exporter.js';
 import { fastExportAvailable } from './fastexport.js';
 import { RESOLUTIONS, FPS_OPTIONS } from './presets.js';
@@ -298,12 +299,36 @@ if (window.visualViewport) {
 
 // ---------------------------------------------------------------------------------------------
 // Keyboard shortcuts
+/**
+ * (v1.13.2) While an export renders no shortcut runs: Space would pause the timeline a real-time export plays, and
+ * undo, split or delete would change the project being rendered. Space/Enter would also press a button still
+ * focused behind the export card (the play button, say), so they are held back too, except on the card's own
+ * buttons (Batal). A line on the card says why nothing happened.
+ */
+const APP_MOD_KEYS = new Set(['z', 'y', 'b', 'd', 'c', 'v', 'e', 'i', 'o', 'k', 's', '=', '+', '-', '0']);
+function exportKeys(e, k, mod) {
+  if (['tab', 'shift', 'control', 'meta', 'alt', 'capslock'].includes(k)) return;
+  if (document.activeElement?.closest?.('.export-overlay')) return;
+  if (k === ' ' || k === 'enter' || (mod && APP_MOD_KEYS.has(k))) { e.preventDefault(); e.stopPropagation(); }
+  const card = exportOverlay?.querySelector('.export-card');
+  if (!card) return;
+  let note = card.querySelector('.ex-keys');
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'hint ex-keys';
+    note.textContent = 'Pintasan keyboard tidak aktif selama ekspor. Tekan Batal untuk berhenti.';
+    card.querySelector('.ex-actions')?.before(note);
+  }
+  clearTimeout(note.timer);
+  note.timer = setTimeout(() => note.remove(), 3000);
+}
 const isTyping = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) && !['range', 'checkbox', 'button', 'color'].includes(el.type);
 window.addEventListener('keydown', (e) => {
   if (document.querySelector('.modal-wrap')) return;
   if (isTyping(document.activeElement)) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
+  if (exportState.state === 'running') { exportKeys(e, k, mod); return; }
   const stop = () => { e.preventDefault(); e.stopPropagation(); };
   if (k === ' ') { stop(); engine.toggle(); return; }
   if (mod && k === 'z') { stop(); e.shiftKey ? store.redo() : store.undo(); return; }
@@ -342,10 +367,21 @@ window.addEventListener('drop', async (e) => {
     } catch (err) { toast(err.message, { type: 'error', timeout: 4500 }); }
   }
 });
+/**
+ * (v1.13.2) Leaving or hiding the page: the device draft is written now (it waits 400 ms otherwise, so the last
+ * edit was lost when the tab closed sooner) and the server save starts.
+ */
+function flushNow() {
+  store.saveDraft.flush();
+  if (store.dirty) store.scheduleSave.flush();
+}
 window.addEventListener('beforeunload', (e) => {
-  store.scheduleSave.flush?.();
+  flushNow();
   if (uploadsPending() || remote.pending > 0) { e.preventDefault(); e.returnValue = ''; }
 });
+window.addEventListener('pagehide', flushNow); // Safari on iPad may close a tab without beforeunload
+// Back online: save now instead of waiting out the retry (up to 60 s after several failures).
+window.addEventListener('online', () => { if (store.dirty && !store.conflict) store.scheduleSave.flush(); });
 
 function shortcutsDialog() {
   const rows = [
@@ -573,6 +609,9 @@ function conflictDialog({ local = null } = {}) {
 let pollingRev = false;
 async function pollRevision() {
   if (!storage.server || document.hidden || pollingRev || store.conflict || store._live || exportState.state === 'running') return;
+  // (v1.13.2) never saved to the server yet (a new project, the empty one behind the home screen): nothing to
+  // follow, and asking every second only got 404s
+  if (!store.baseRev) return;
   pollingRev = true;
   try {
     const id = store.P.id;
@@ -598,7 +637,7 @@ async function pollRevision() {
   }
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { if (store.dirty) store.scheduleSave.flush(); } else pollRevision();
+  if (document.hidden) flushNow(); else pollRevision();
 });
 
 async function openProject(id) {
@@ -891,6 +930,8 @@ async function editorForAI(tool) {
 const toolsForMcp = Object.fromEntries(Object.entries(tools).map(([name, fn]) => [name, async (args) => { await editorForAI(name); return fn(args); }]));
 bridge.start({
   tools: toolsForMcp,
+  // (v1.13.2) asked when a tool's turn comes: during an export only reads (and export_video) run
+  blocked: (tool) => blockedReason(tool, { exporting: exportState.state === 'running' }),
   onDone: (tool) => {
     const label = AI_LABEL[tool];
     if (label) toast(`AI ${label}`, { type: 'ai', timeout: 1800 });

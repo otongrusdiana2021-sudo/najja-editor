@@ -141,6 +141,8 @@ Nama tool di `mcp/tools.js` sama 1:1 dengan handler di `public/js/api.js` (27 = 
 | 3 `get_frame` paralel → 3 frame berbeda dan benar | e2e | ✅ ditambahkan ke `test/e2e/get-frame.mjs`, **belum dijalankan** (butuh Playwright + ffmpeg). Sudah diverifikasi manual di browser asli: v1.13.1 → biru/biru/biru, perbaikan → merah/hijau/biru |
 
 **Status M1 (2026-11-23):** diperbaiki di P0-1 (branch `feat/p0-1-mcp-command-queue`), belum di-push dan belum di-deploy ke produksi.
+
+**Kunci ekspor (P0-2, 2026-11-23):** selama ekspor merender, hanya `get_project`, `list_assets`, `list_media`, `list_styles`, `get_export_status`, dan `export_video` yang dijalankan. Tool lain menjawab error "Not run: a video export is rendering…" dan proyek tidak berubah. Kontrak (nama, schema, bentuk hasil) tetap. Branch `feat/p0-2-autosave-export-lock`, belum di-push dan belum di-deploy.
 | Satu jalur sukses + satu jalur error per tool (27 tool) | e2e | ➕ baru (fase B) |
 
 **MCP belum boleh dinyatakan selesai migrasi** sebelum semua test di atas lulus di desktop dan iPad.

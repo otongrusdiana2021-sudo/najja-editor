@@ -85,6 +85,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | Milestone | Status |
 |---|---|
 | P0-1 Antrian perintah MCP + mutex capture | ✅ selesai, di-commit di branch `feat/p0-1-mcp-command-queue` (**belum di-push dan belum di-deploy**). E2E belum dijalankan (lihat log) |
+| P0-2 Autosave + kunci ekspor | ✅ selesai, di-commit di branch `feat/p0-2-autosave-export-lock` (dibangun di atas P0-1; **belum di-push dan belum di-deploy**). Thumbnail per-autosave (bagian V14) ditunda ke P2 karena butuh benchmark |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -110,3 +111,39 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Tool panjang (`apply_style`, `get_transcript` sampai 50 menit) sekarang menahan tool pengubah lain di belakangnya. Itu memang benar (tidak boleh selip), tapi AI akan menerima error timeout/"Not run" untuk perintah yang antri terlalu lama. Solusi permanen ada di P1-2 (job ID).
   - Edit manual user di UI tidak ikut antrian MCP. Tabrakan edit user vs AI ditangani di P0-6/P1-5 (revisi + `expected_rev`).
 - **Berikutnya:** P0-2 (autosave + kunci ekspor), lalu P0-3 (snapshot kontrak MCP + CI).
+
+#### P0-2 — Autosave benar + kunci ekspor (2026-11-23)
+
+- **Tujuan:** V1 (konflik palsu setelah undo saat save), V5 (pintasan dan tool MCP aktif saat ekspor), V14 (draft tidak di-flush saat tab ditutup, retry tanpa backoff), plus V18 (polling `/rev` 404 untuk proyek yang belum tersimpan).
+- **Perubahan:**
+  - `public/js/store.js`:
+    - Balasan save tidak lagi dibuang saat objek proyek diganti undo/redo/batal-geser. Pembandingnya sekarang `loads` (naik hanya saat proyek dibuka lewat `setProject`), bukan identitas objek. V1 kini **FAKTA**: server menolak `baseRev` basi dengan 409 (`lib/storage.js:122`), dan bug-nya direproduksi di unit test.
+    - "Ada perubahan selama save" sekarang dihitung lewat `edits` yang naik di setiap `scheduleSave()`, bukan `updatedAt`. Ini juga menutup bug yang ditemukan saat implementasi: perubahan info media yang memanggil `scheduleSave()` tanpa `touch()` (`media.js`, `stylerun.js`, misalnya saat upload selesai) di tengah save dulu ditandai tersimpan padahal belum sampai server.
+    - Batal-geser (`cancelLive`) di tengah save memicu save ulang, supaya server tidak menyimpan posisi setengah-geser.
+    - Retry setelah gagal: 5, 10, 20, 40, lalu 60 dtk (maksimal), kembali ke awal setelah sukses.
+  - `public/js/app.js`:
+    - `flushNow()` menulis draft perangkat seketika (bukan setelah 400 ms) dan memulai save. Dipanggil di `beforeunload`, `pagehide` (Safari iPad bisa menutup tab tanpa `beforeunload`), dan saat tab disembunyikan.
+    - Event `online` langsung menyimpan tanpa menunggu sisa backoff.
+    - Polling revisi dilewati selama `baseRev` = 0 (V18).
+    - Saat ekspor berjalan, pintasan keyboard tidak menjalankan apa pun. Spasi, Enter, dan kombinasi Ctrl/⌘ milik app ditahan supaya tidak "menekan" tombol yang masih fokus di belakang overlay (kecuali tombol di kartu ekspor sendiri, misalnya Batal). Kartu ekspor menampilkan "Pintasan keyboard tidak aktif selama ekspor. Tekan Batal untuk berhenti." selama 3 dtk. Pesannya ditaruh di kartu karena toast (z-index 60) tertutup overlay (z-index 90).
+  - `public/js/cmdqueue.js`: `DURING_EXPORT` (baca murni + `export_video`) dan `blockedReason()`.
+  - `public/js/bridge.js`: `schedule()` menanyakan `handlers.blocked(tool)` **saat giliran tool tiba**, sehingga tool yang sudah antri sebelum ekspor dimulai pun ditolak (kode `BUSY`, proyek tidak berubah).
+  - `test/store-save.test.js` (baru, 7 test), `test/cmdqueue.test.js` (+3 test), `package.json`.
+- **Kontrak MCP:** nama, schema, dan bentuk hasil tidak berubah. Perubahan perilaku yang disengaja: selama ekspor merender, tool selain baca murni dan `export_video` menjawab error "Not run: a video export is rendering… Poll get_export_status and call it again when the export is done." Sebelumnya `get_frame`/`playback` bisa menjeda dan men-seek engine yang sedang diputar ekspor real-time, dan tool edit mengubah proyek yang sedang dirender.
+- **Hasil test:**
+  - Unit: **164 test, 150 lulus, 1 gagal, 13 dilewati**. Satu-satunya yang gagal adalah `proxy.test.js:132` karena ffmpeg tidak ada (T2, jatah P0-3). 7 kegagalan "disk penuh" di baseline hilang karena ruang disk sudah ada (1,8 GB), bukan karena perubahan kode. 10 test baru lulus.
+  - Mutation check: `store.js` lama → 5 dari 7 test store gagal (2 sisanya memang menjaga perilaku yang sudah benar: proyek lain dibuka saat save, dan konflik asli tetap ditanyakan). `bridge.js` lama → 2 test kunci ekspor gagal.
+  - Browser asli (server lokal, storage server sungguhan):
+    - Undo di tengah save yang diperlambat: tidak ada konflik, `saveState` = `saved`, server rev 3 berisi hasil undo.
+    - Ekspor cepat (WebCodecs) 1080p: Spasi, ⌘Z, dan Delete tidak berefek, catatan muncul di kartu, `update_clip`/`get_frame`/`playback` → `BUSY`, `get_project`/`get_export_status` tetap jalan, ekspor selesai.
+    - Ekspor real-time (WebM) 5 dtk: Spasi di tengah ekspor tidak menjeda engine, ekspor selesai dalam 5,18 dtk.
+    - `pagehide` → draft ditulis pada 0 ms (sebelumnya menunggu 400 ms).
+    - Proyek belum tersimpan → 0 request `/rev` dalam 3,5 dtk (sebelumnya ±1/dtk, 404).
+    - Console dan log server tanpa error.
+    - Data uji (1 proyek, 2 file ekspor) dihapus dari `data/` lokal.
+  - **Belum:** `npm run test:e2e` (butuh paket Playwright + ffmpeg), iPad Safari asli (`pagehide` dan pintasan keyboard eksternal), deploy.
+- **Risiko tersisa:**
+  - `exportState.state` baru menjadi `running` setelah `ensureCutout()` selesai (`exporter.js:118`). Selama model hapus-latar dimuat di awal ekspor, tool dan pintasan belum terkunci. Jendelanya pendek dan hanya terjadi kalau ada klip "Hapus latar otomatis". Bisa ditutup di P1-2 (job system).
+  - Penulisan IndexedDB saat `pagehide`/`beforeunload` dimulai seketika, tapi browser tidak menjamin transaksinya selesai sebelum halaman mati. Ini lebih baik dari sebelumnya, tapi bukan jaminan.
+  - Thumbnail JPEG masih dibuat di setiap autosave (bagian V14). Ditunda ke P2 karena butuh benchmark main thread sebelum dan sesudah.
+- **Berikutnya:** P0-3 (snapshot kontrak MCP + guard skip `proxy.test.js` + CI).

@@ -1,7 +1,7 @@
 // (v1.13.2) Tools run one at a time in the editor tab (public/js/cmdqueue.js, public/js/bridge.js). Run with: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createQueue, PURE_READS } from '../public/js/cmdqueue.js';
+import { createQueue, PURE_READS, DURING_EXPORT, EXPORT_BUSY, blockedReason } from '../public/js/cmdqueue.js';
 import { TOOLS } from '../mcp/tools.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -66,6 +66,16 @@ test('PURE_READS are real MCP tools marked read-only; get_frame is not one (it s
   }
   assert.equal(PURE_READS.has('get_frame'), false);
   assert.equal(PURE_READS.has('playback'), false);
+});
+
+test('during an export only the pure reads and export_video may start; with no export nothing is refused', () => {
+  for (const name of DURING_EXPORT) assert.ok(TOOLS.some((x) => x.name === name), `${name} is an MCP tool`);
+  for (const { name } of TOOLS) {
+    assert.equal(blockedReason(name, { exporting: false }), null, `${name} runs when no export renders`);
+    assert.equal(blockedReason(name, { exporting: true }), DURING_EXPORT.has(name) ? null : EXPORT_BUSY, `${name} during an export`);
+  }
+  for (const name of ['get_frame', 'playback', 'history', 'update_clip', 'apply_style']) assert.equal(blockedReason(name, { exporting: true }), EXPORT_BUSY);
+  assert.match(EXPORT_BUSY, /get_export_status/, 'the error tells the AI what to do instead');
 });
 
 // ---- The bridge itself, with a stand-in engine that behaves like engine.capture (seek, wait, draw this.time) ----
@@ -144,6 +154,43 @@ test('bridge: pasted JSON (runLocal) waits its turn behind AI commands, and the 
   await Promise.all([ai, local]);
   assert.equal(maxActive, 1);
   assert.equal(bridge.state.log[0].state, 'ok');
+});
+
+test('bridge: during an export, tools that change the project or seek are refused; reads and export_video still answer', async () => {
+  let exporting = true;
+  const ran = [];
+  const names = ['update_clip', 'get_frame', 'playback', 'get_project', 'export_video'];
+  bridge.handlers = {
+    tools: Object.fromEntries(names.map((n) => [n, async () => { ran.push(n); return { data: { n } }; }])),
+    blocked: (t) => blockedReason(t, { exporting }),
+  };
+  posted.length = 0;
+  await Promise.all(names.map((n) => bridge.run({ id: n, tool: n, args: {}, timeout_ms: 30_000 })));
+  assert.deepEqual(ran.sort(), ['export_video', 'get_project']);
+  for (const n of ['update_clip', 'get_frame', 'playback']) assert.equal(resultOf(n).error, EXPORT_BUSY, n);
+  await assert.rejects(bridge.runLocal('update_clip', {}), { code: 'BUSY' });
+  exporting = false;
+  await bridge.run({ id: 'after', tool: 'update_clip', args: {}, timeout_ms: 30_000 });
+  assert.equal(resultOf('after').result.data.n, 'update_clip', 'after the export the same tool runs');
+});
+
+test('bridge: an export that starts while a tool waits in line refuses it when its turn comes', async () => {
+  let exporting = false;
+  let ran = false;
+  bridge.handlers = {
+    tools: {
+      apply_style: async () => { await sleep(40); exporting = true; return { data: {} }; }, // the user starts an export meanwhile
+      update_clip: async () => { ran = true; return { data: {} }; },
+    },
+    blocked: (t) => blockedReason(t, { exporting }),
+  };
+  posted.length = 0;
+  await Promise.all([
+    bridge.run({ id: 's', tool: 'apply_style', args: {}, timeout_ms: 60_000 }),
+    bridge.run({ id: 'u', tool: 'update_clip', args: {}, timeout_ms: 30_000 }),
+  ]);
+  assert.equal(ran, false);
+  assert.equal(resultOf('u').error, EXPORT_BUSY);
 });
 
 test('bridge: commands from an older server (no timeout_ms) still run', async () => {
