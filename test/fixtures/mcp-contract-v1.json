@@ -1749,6 +1749,9 @@
           },
           "refresh": {
             "type": "boolean"
+          },
+          "background": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -1767,6 +1770,9 @@
               "editorial",
               "storypop"
             ]
+          },
+          "background": {
+            "type": "boolean"
           },
           "product": {
             "type": "object",
@@ -2074,6 +2080,47 @@
       "input": {
         "type": "object",
         "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "get_job": {
+      "readOnly": true,
+      "destructive": false,
+      "input": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "list_jobs": {
+      "readOnly": true,
+      "destructive": false,
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "cancel_job": {
+      "readOnly": false,
+      "destructive": false,
+      "input": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
         "additionalProperties": false
       }
     }

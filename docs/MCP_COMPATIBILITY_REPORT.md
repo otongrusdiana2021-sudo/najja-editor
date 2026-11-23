@@ -151,6 +151,8 @@ Nama tool di `mcp/tools.js` sama 1:1 dengan handler di `public/js/api.js` (27 = 
 
 **Fase B dimulai (P0-6b, 2026-11-23):** split/hapus/duplikat/pindah/tambah klip sekarang fungsi murni di `public/js/core/commands.js`, dipakai UI dan tool MCP lewat `actions.js`. Perilaku dibuktikan identik dengan rekaman dari kode sebelumnya (`test/core-commands.test.js`). Langkah 3: `update_clip` dan helper gaya/visual/animasi (dipakai juga `add_*`) ada di `public/js/core/clipedit.js`, juga terbukti identik dengan rekaman (`test/update-clip.test.js`). Temuan V20 (perubahan sebagian saat argumen ditolak) dipertahankan dan diperbaiki terpisah.
 
+**Status M4 (P1-2, 2026-11-23):** job system ada. Tool baru `get_job`, `list_jobs`, `cancel_job`. `export_video`/`get_export_status` mengembalikan `job_id`. `apply_style`/`get_transcript` mendapat `background` opsional. Semuanya aditif (snapshot 27 → 30 tool). Branch `feat/p1-2-jobs`.
+
 **Status M8 (2026-11-23):** snippet `deploy/aapanel/najja-wellknown.conf` disiapkan di P0-4 (meneruskan hanya `/.well-known/oauth-*` dan `/.well-known/openid-configuration` ke app). **Dipasang di VPS 2026-11-23** (dengan izin pemilik): `nginx -t` lolos, lalu reload. Dari luar, ketiga path `/.well-known/` OAuth kini 200 JSON (sebelumnya 404), jalur ACME dan cadangan `/oauth/*` tidak berubah. Rollback: hapus file `extension/editor.najja.id/najja-wellknown.conf`, lalu `nginx -t && nginx -s reload`.
 
 **Status M1 (2026-11-23):** diperbaiki di P0-1 (branch `feat/p0-1-mcp-command-queue`), belum di-push dan belum di-deploy ke produksi.

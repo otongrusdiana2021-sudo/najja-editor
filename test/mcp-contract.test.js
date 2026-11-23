@@ -16,10 +16,13 @@ test('contract v1: every tool and prompt of the snapshot still works the way cli
   if (added.length) t.diagnostic(`new since the snapshot (fine; run node test/mcp-contract.mjs --update): ${added.join(', ')}`);
 });
 
-test('contract v1 snapshot holds the 27 tools and 4 prompts of v1.13.1', () => {
-  assert.equal(Object.keys(snap.tools).length, 27);
+// The 27 tools of v1.13.1: the snapshot may grow (v1.13.2 added get_job, list_jobs, cancel_job) but keeps them all.
+const V1_13_1 = ['get_project', 'list_assets', 'new_project', 'set_project', 'import_media', 'list_media', 'add_media_clip', 'add_text', 'add_subtitles', 'add_sticker', 'add_solid', 'add_effect', 'update_clip', 'apply_filter', 'apply_transition', 'split_clip', 'delete_clip', 'move_clip', 'duplicate_clip', 'playback', 'get_frame', 'history', 'export_video', 'list_styles', 'get_transcript', 'apply_style', 'get_export_status'];
+
+test('contract v1 snapshot holds every tool of v1.13.1 and the 4 prompts', () => {
+  assert.equal(V1_13_1.length, 27);
+  for (const name of V1_13_1) assert.ok(snap.tools[name], name);
   assert.equal(Object.keys(snap.prompts).length, 4);
-  for (const name of ['get_project', 'get_frame', 'update_clip', 'export_video', 'get_export_status', 'apply_style']) assert.ok(snap.tools[name], name);
 });
 
 test('the contract is what tools/list really sends (no tool missing from the handler)', () => {
@@ -71,7 +74,7 @@ for (const [what, change] of Object.entries(BREAKING)) {
 }
 
 const ADDITIVE = {
-  'a new tool': (c) => { c.tools.get_job = { readOnly: true, destructive: false, input: { type: 'object', properties: {} } }; },
+  'a new tool': (c) => { c.tools.get_clip = { readOnly: true, destructive: false, input: { type: 'object', properties: {} } }; },
   'a new optional parameter': (c) => { c.tools.add_text.input.properties.expected_rev = { type: 'number' }; },
   'a new accepted value': (c) => { c.tools.history.input.properties.action.enum.push('clear'); },
   'a wider range': (c) => { c.tools.history.input.properties.steps.maximum = 100; },

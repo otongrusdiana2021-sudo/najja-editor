@@ -1,5 +1,5 @@
 // Browser side of the MCP bridge: receives tool calls from the Najja server (SSE) and returns results.
-import { createQueue, PURE_READS } from './cmdqueue.js';
+import { createQueue, PURE_READS, CONTROL } from './cmdqueue.js';
 import { checkArgs, errorText } from './core/validate.js';
 
 let schemas = null;
@@ -104,6 +104,11 @@ export const bridge = {
       this.emit();
     }
   },
+  /**
+   * (v1.13.2, P1-2) Keep the line busy until `promise` settles: a job started in the background (apply_style with
+   * background: true) still runs alone, so no edit slips in between its steps. Reads and cancel_job still answer.
+   */
+  hold(promise) { return queue.run(() => Promise.resolve(promise).catch(() => {})); },
   /** The tool names this editor runs. */
   toolNames() { return Object.keys(this.handlers?.tools || {}); },
 
@@ -114,7 +119,7 @@ export const bridge = {
    * it waited, say) with code 'BUSY'; the editor is not changed.
    */
   schedule(tool, task, onStart, deadline = null) {
-    if (PURE_READS.has(tool)) { onStart?.(); return task(); }
+    if (PURE_READS.has(tool) || CONTROL.has(tool)) { onStart?.(); return task(); }
     return queue.run(() => {
       const why = this.handlers?.blocked?.(tool);
       if (why) throw Object.assign(new Error(why), { code: 'BUSY' });

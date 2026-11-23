@@ -961,6 +961,7 @@ const AI_LABEL = {
  */
 async function editorForAI(tool) {
   if (tool === 'new_project') return; // creates its own project and leaves the home screen
+  if (tool === 'get_job' || tool === 'list_jobs' || tool === 'cancel_job') return; // (v1.13.2) about jobs, not a project: nothing to open
   if (isPlaceholder()) {
     let id = prefs.get('lastProject');
     const list = await storage.listProjects().catch(() => []);
