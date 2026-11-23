@@ -9,7 +9,9 @@ import {
 import * as actions from './actions.js';
 import { need, oneOf, color, fontFamily, applyTextStyle, applyVisual, applyAnim, updateClip } from './core/clipedit.js';
 import { setAspect } from './player.js';
-import { exportState } from './exporter.js';
+import { exportState, cancelExport } from './exporter.js';
+import { createJobs, runJob } from './core/jobs.js';
+import { bridge } from './bridge.js';
 import { clamp, deepMerge } from './util.js';
 import { STYLES, checkMaterial } from './styles.js';
 import { generateStyle, getTranscript } from './stylerun.js';
@@ -51,6 +53,30 @@ function listMedia() {
 }
 
 const focus = (clipId) => { if (clipId && store.clip(clipId)) store.select(clipId); };
+
+// (v1.13.2, P1-2) long work as jobs: get_job / list_jobs / cancel_job follow and stop it
+export const jobs = createJobs();
+let exportJobId = null;
+/** The export's status as get_export_status gives it (also the result of a finished export job). */
+function exportInfo() {
+  const s = exportState;
+  return {
+    state: s.state,
+    phase: s.phase || undefined,
+    mode: s.mode || undefined,
+    progress_percent: Math.round((s.progress || 0) * 100),
+    error: s.error || undefined,
+    options: s.options || undefined,
+    result: s.result ? { file: s.result.filename, path: s.result.serverPath, url: s.result.serverUrl, size_bytes: s.result.size, width: s.result.width, height: s.result.height, fps: s.result.fps, duration: r3(s.result.duration || 0), mime: s.result.mime, render_seconds: s.result.seconds != null ? r3(s.result.seconds) : undefined } : undefined,
+    job_id: exportJobId || undefined,
+  };
+}
+/** Run `work` as a background job that keeps the command line busy until it ends; answer with its job_id. */
+function background(kind, work, what) {
+  const { id, done } = runJob(jobs, kind, work);
+  bridge.hold(done);
+  return { data: { started: true, job_id: id, note: `${what} runs in the background. Poll get_job with this job_id (it answers at once); other editing tools wait until it is done. cancel_job stops it.` } };
+}
 
 export const tools = {
   async get_project() { return { data: projectInfo() }; },
@@ -321,24 +347,22 @@ export const tools = {
     need(exportState.state !== 'running', 'An export is already running. Poll get_export_status.');
     if (a.resolution) oneOf(a.resolution, Object.keys(RESOLUTIONS), 'resolution');
     const opts = { resolution: a.resolution || '1080p', fps: Number(a.fps) || store.P.fps, format: a.format || 'mp4', quality: a.quality || 'recommended', filename: a.filename || store.P.name };
-    actions.app.runExport(opts, { saveToServer: true, download: false, fromAI: true });
+    // (v1.13.2) the export is a job too: get_job follows it, cancel_job stops it (its temporary file is removed)
+    const id = jobs.create('export', { cancel: () => cancelExport(), live: () => ({ progress: exportState.progress, label: exportState.phase || undefined }) });
+    exportJobId = id;
+    const settle = () => {
+      const st = exportState.state;
+      if (st === 'done') jobs.finish(id, { state: 'done', result: exportInfo() });
+      else if (st === 'cancelled') jobs.finish(id, { state: 'cancelled', error: 'Cancelled.' });
+      else jobs.finish(id, { state: 'error', error: exportState.error || 'The export did not finish.' });
+    };
+    Promise.resolve(actions.app.runExport(opts, { saveToServer: true, download: false, fromAI: true })).then(settle, settle);
     await new Promise((r) => setTimeout(r, 300));
-    return { data: { started: true, estimated_seconds: Math.ceil(store.duration()) + 2, options: exportState.options, note: 'Rendering: fast (WebCodecs) when this browser supports it, otherwise in real time. Poll get_export_status.' } };
+    return { data: { started: true, job_id: id, estimated_seconds: Math.ceil(store.duration()) + 2, options: exportState.options, note: 'Rendering: fast (WebCodecs) when this browser supports it, otherwise in real time. Poll get_export_status or get_job; cancel_job stops it.' } };
   },
 
   async get_export_status() {
-    const s = exportState;
-    return {
-      data: {
-        state: s.state,
-        phase: s.phase || undefined,
-        mode: s.mode || undefined,
-        progress_percent: Math.round((s.progress || 0) * 100),
-        error: s.error || undefined,
-        options: s.options || undefined,
-        result: s.result ? { file: s.result.filename, path: s.result.serverPath, url: s.result.serverUrl, size_bytes: s.result.size, width: s.result.width, height: s.result.height, fps: s.result.fps, duration: r3(s.result.duration || 0), mime: s.result.mime, render_seconds: s.result.seconds != null ? r3(s.result.seconds) : undefined } : undefined,
-      },
-    };
+    return { data: exportInfo() };
   },
 
   // ---- Style Konsep (v1.10) -------------------------------------------------------------------
@@ -355,16 +379,13 @@ export const tools = {
   },
 
   async get_transcript(a) {
-    const sp = await getTranscript({ lang: a.language || 'id', force: !!a.refresh });
-    need(sp.words.length, 'No speech found in the project videos (no one talks, or there is no video yet). Showcase Clean needs no speech.');
-    return {
-      data: {
-        language: sp.language, duration: sp.duration, sources: sp.sources,
-        sentences: sp.sentences,
-        words: sp.words.map((w) => ({ i: w.i, w: w.w, s: w.s, e: w.e })),
-        note: 'Times are speech times: the talking videos back to back in project order, before cuts. Use them in the plan of apply_style (cuts, keywords, price, hook, broll, stickers).',
-      },
+    const run = async ({ signal, onProgress } = {}) => {
+      const sp = await getTranscript({ lang: a.language || 'id', force: !!a.refresh, signal, onProgress });
+      need(sp.words.length, 'No speech found in the project videos (no one talks, or there is no video yet). Showcase Clean needs no speech.');
+      return transcriptData(sp);
     };
+    if (a.background) return background('transcript', run, 'The transcript');
+    return { data: await run() };
   },
 
   async apply_style(a) {
@@ -374,9 +395,33 @@ export const tools = {
       name: p.name, variant: p.variant ?? p.variants, size: p.size ?? p.sizes, note: p.note ?? p.notes, price: p.price, price_discount: p.price_discount, brand: p.brand,
     };
     for (const k of Object.keys(product)) if (product[k] == null) delete product[k];
-    const res = await generateStyle(a.style, { product, plan: a.plan || null, target: a.target === 'current' ? 'current' : 'new', lang: a.language || 'id' });
-    return { data: { ...res, next: 'The edit is in the editor now. Check it with get_frame at a few times (title, a keyword, the price, the end) and adjust with update_clip or another apply_style.' } };
+    const run = async ({ signal, onProgress } = {}) => {
+      const res = await generateStyle(a.style, { product, plan: a.plan || null, target: a.target === 'current' ? 'current' : 'new', lang: a.language || 'id', signal, onProgress });
+      return { ...res, next: 'The edit is in the editor now. Check it with get_frame at a few times (title, a keyword, the price, the end) and adjust with update_clip or another apply_style.' };
+    };
+    if (a.background) return background('style', run, 'The style edit');
+    return { data: await run() };
   },
+
+  // ---- jobs (v1.13.2, P1-2) ---------------------------------------------------------------------
+  async get_job(a) {
+    const v = jobs.get(a.job_id);
+    need(v, `Unknown job_id: ${a.job_id}. Call list_jobs.`);
+    return { data: v };
+  },
+  async list_jobs() { return { data: { jobs: jobs.list() } }; },
+  async cancel_job(a) { return { data: jobs.cancel(a.job_id) }; },
 };
+
+/** The answer of get_transcript (also the result of its background job). */
+function transcriptData(sp) {
+  return {
+    language: sp.language, duration: sp.duration, sources: sp.sources,
+    sentences: sp.sentences,
+    words: sp.words.map((w) => ({ i: w.i, w: w.w, s: w.s, e: w.e })),
+    note: 'Times are speech times: the talking videos back to back in project order, before cuts. Use them in the plan of apply_style (cuts, keywords, price, hook, broll, stickers).',
+  };
+}
+
 
 export { sortedClips, deepMerge };

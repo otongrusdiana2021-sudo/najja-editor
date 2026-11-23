@@ -344,7 +344,7 @@ export const TOOLS = [
     name: 'get_transcript',
     title: 'Transcript of the talking videos',
     description: 'Transcribe the project\'s videos on the Najja server (once per video, kept in the project) and return the words with their times, as sentences and words. Times are "speech times": the talking videos back to back, before cuts; use them in the plan of apply_style. Can take a few minutes the first time.',
-    inputSchema: obj({ language: str('Whisper language code of the speech (default "id"), or "auto".'), refresh: bool('Transcribe again even when the words are known.') }),
+    inputSchema: obj({ language: str('Whisper language code of the speech (default "id"), or "auto".'), refresh: bool('Transcribe again even when the words are known.'), background: bool('(v1.13.2) Answer at once with a job_id instead of waiting (this can take minutes). Follow it with get_job, stop it with cancel_job. Other editing tools wait until it is done.') }),
   },
   {
     name: 'apply_style',
@@ -352,6 +352,7 @@ export const TOOLS = [
     description: 'Build a complete edit of the project in one of the styles (see list_styles). By default it makes a NEW project (a copy, named "<project> · <style>") and leaves the current one as it is. You are the director: pass a plan with your choices (which words become big text, where the price is said, what to cut, which shot goes where); anything you leave out is chosen automatically. The style does the look (fonts, timing, colours, transitions, music), puts a sound effect on every text and transition (plan.sfx), shows what the talent says as moments (a colour said: its circle; "tinggal 2 hari": a ticking timer; "bisa buat …": chips; claims: badges — plan.moments), and keeps every text and sticker off the people in the picture: the whole person, the face above all (found on the user\'s device; a text over someone moves to the free background beside or above them, smaller if it must be). The result says how many text groups moved (faces) and how many sounds were placed (sfx). One undo takes the whole edit back.',
     inputSchema: obj({
       style: enm(['showcase', 'editorial', 'storypop'], 'The style.'),
+      background: bool('(v1.13.2) Answer at once with a job_id instead of waiting (this can take minutes). Follow it with get_job, stop it with cancel_job. Other editing tools wait until it is done.'),
       product: obj({
         name: str('Product name, e.g. "Travel Bag Motif Bunga".'),
         variant: str('Variant(s), comma separated, e.g. "Mini, Medium, Jumbo" (Showcase: one part per variant).'),
@@ -407,8 +408,29 @@ export const TOOLS = [
   {
     name: 'get_export_status',
     title: 'Export status',
-    description: 'Progress of the current or last export: state, percent, and once done, the saved file path and size.',
+    description: 'Progress of the current or last export: state, percent, and once done, the saved file path and size. (v1.13.2) Also its job_id, for get_job and cancel_job.',
     inputSchema: obj({}),
     annotations: { readOnlyHint: true },
+  },
+  // (v1.13.2, P1-2) jobs: long work started by export_video, or by apply_style / get_transcript with background: true
+  {
+    name: 'get_job',
+    title: 'Job status',
+    description: 'State of a job (export_video, or apply_style / get_transcript with background: true): running, cancelling, done, error or cancelled; percent; and once done, its result (the same data the tool returns when it waits). Answers at once, even while the job runs.',
+    inputSchema: obj({ job_id: str('The job_id the tool returned.') }, ['job_id']),
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'list_jobs',
+    title: 'Recent jobs',
+    description: 'The jobs of this editor tab, newest first (running ones and the last finished ones).',
+    inputSchema: obj({}),
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'cancel_job',
+    title: 'Cancel a job',
+    description: 'Stop a running job. An export stops and its temporary file is removed; a style or transcript stops at its next step. Says cancelled: false with the reason when the job is finished or cannot be stopped. The job then reads "cancelling" until the work has really stopped, then "cancelled".',
+    inputSchema: obj({ job_id: str('The job_id to stop.') }, ['job_id']),
   },
 ];

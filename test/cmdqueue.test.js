@@ -228,3 +228,31 @@ test('the tool definitions and the checker are one module for the server and the
   const mv = await import('../mcp/validate.js');
   assert.equal(v.checkArgs, mv.checkArgs);
 });
+
+// ---- (P1-2) jobs: a background job keeps the line; job tools answer at once and can stop it ----
+test('bridge: a background job holds the line; get_job answers meanwhile; cancel_job is never queued', async () => {
+  const { CONTROL, DURING_EXPORT } = await import('../public/js/cmdqueue.js');
+  assert.ok(PURE_READS.has('get_job') && PURE_READS.has('list_jobs') && CONTROL.has('cancel_job'));
+  for (const t of ['get_job', 'list_jobs', 'cancel_job']) assert.ok(DURING_EXPORT.has(t), `${t} works during an export`);
+  let release;
+  const job = new Promise((r) => { release = r; });
+  const order = [];
+  bridge.handlers = {
+    tools: {
+      apply_style: async () => { bridge.hold(job); order.push('style answered'); return { data: { job_id: 'job_1' } }; },
+      update_clip: async () => { order.push('update_clip ran'); return { data: {} }; },
+      get_job: async () => { order.push('get_job'); return { data: { state: 'running' } }; },
+      cancel_job: async () => { order.push('cancel_job'); return { data: { cancelled: true } }; },
+    },
+  };
+  posted.length = 0;
+  await bridge.run({ id: 's', tool: 'apply_style', args: { background: true }, timeout_ms: 60_000 });
+  const edit = bridge.run({ id: 'u', tool: 'update_clip', args: { clip_id: 'c1' }, timeout_ms: 60_000 });
+  await sleep(20);
+  await bridge.run({ id: 'g', tool: 'get_job', args: { job_id: 'job_1' }, timeout_ms: 30_000 });
+  await bridge.run({ id: 'c', tool: 'cancel_job', args: { job_id: 'job_1' }, timeout_ms: 30_000 });
+  assert.deepEqual(order, ['style answered', 'get_job', 'cancel_job'], 'the edit waits for the job; reads and cancel do not');
+  release();
+  await edit;
+  assert.deepEqual(order.at(-1), 'update_clip ran');
+});

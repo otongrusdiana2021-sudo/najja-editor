@@ -91,6 +91,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-5 Ekspor Najja Desain aman | ✅ selesai, branch `feat/p0-5-design-export` (berisi P0-1 sampai P0-5) **sudah di-push**. CI hijau di Node 22 (run 45129262367). Belum di-merge ke `main`, belum di-deploy. Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
 | P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema), 2 (split/hapus/duplikat/pindah/tambah), dan 3 (`update_clip` + helper gaya/visual/animasi) selesai. Langkah 3 dan perbaikan V20 di branch `fix/v20-update-clip-atomic` (sudah di-push, CI hijau run 45135252249). Sisa: subtitle, efek klip, keyframe, dan helper model dari `store.js` |
+| P1-2 Job system | ✅ selesai di branch `feat/p1-2-jobs` (belum di-push, belum di-deploy). Jalur sukses `apply_style`/`get_transcript` di latar belakang belum diuji dengan layanan AI sungguhan |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -473,3 +474,34 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Service di `docker compose` biasa `ai caddy najja` → `ai najja`.
   - Dry-run `docker compose up -d` tanpa nama service: kedua container "Running", Caddy tidak dibuat.
   - Port tetap `127.0.0.1:3333`, dan `/login` 200.
+
+
+#### P1-2 — Job system untuk pekerjaan panjang (2026-11-23)
+
+- **Masalah:**
+  - `apply_style` dan `get_transcript` menahan satu panggilan HTTP sampai 50 menit, dan AI tidak tahu progresnya.
+  - `export_video` langsung kembali tanpa ID, sehingga ekspor tidak bisa dibatalkan lewat MCP (M4).
+- **Perubahan (semua aditif):**
+  - `public/js/core/jobs.js` (baru, tanpa DOM): registry job (`running` / `cancelling` / `done` / `error` / `cancelled`, progres, hasil) dan `runJob()` dengan AbortController.
+    - Pekerjaan dimulai **seketika**, supaya pembatalan tepat setelah mulai tetap sampai. Bug ini ditemukan lewat test yang menggantung.
+    - Job baru berstatus `cancelled` setelah pekerjaannya **benar-benar berhenti**, tidak pernah lebih dulu.
+    - Job yang tidak bisa dihentikan dijawab "cannot be cancelled", bukan pura-pura berhenti.
+  - Tool baru:
+    - `get_job` dan `list_jobs`: baca saja, tidak ikut antrian, tetap boleh saat ekspor.
+    - `cancel_job`: tidak ikut antrian, supaya bisa menghentikan job yang sedang menahan antrian.
+  - `export_video` dan `get_export_status` mendapat `job_id`. Ekspor bisa dibatalkan (`cancelExport`), dan file sementaranya dihapus.
+  - `apply_style` dan `get_transcript` mendapat parameter opsional `background`. Tanpa parameter itu, perilaku **sama persis**. Dengan parameter itu, tool langsung menjawab `job_id`, dan job-nya tetap **menahan antrian edit** (`bridge.hold`), sehingga tidak ada edit yang menyelip di antara langkah-langkahnya.
+  - `editorForAI` tidak lagi membuka atau membuat proyek untuk tool job.
+- **Kontrak:** snapshot `mcp-contract-v1.json` bertambah 27 → 30 tool, dan `--update` menerima karena perubahannya hanya menambah. Test kini memastikan ke-27 tool v1.13.1 tetap ada.
+- **Hasil test:**
+  - Unit: **277 test, 263 lulus, 0 gagal**, 2×.
+  - Ditambah `test/jobs-registry.test.js` (4) dan test bridge: job di latar belakang menahan edit, sementara `get_job` dan `cancel_job` menjawab langsung.
+- **Browser asli lewat `/mcp`:**
+  - `tools/list` berisi 30 tool.
+  - Ekspor sampai selesai: `get_job` menunjukkan progres 47 → 100 → `done`, dengan hasil file. `get_export_status` menyertakan `job_id`.
+  - Ekspor 1080p dibatalkan di 9%: `cancelling` → `cancelled`, file sementara OPFS `najja-export/video-*.h264` ada selama render dan **kosong setelah dibatalkan**. Membatalkan lagi dijawab "already cancelled", dan ID yang tidak dikenal diberi alasan.
+  - `get_transcript` dengan `background` menjawab dalam 17 ms. Job-nya berakhir `error` dengan pesan yang sama seperti mode biasa, dan mode biasa tetap bekerja.
+  - Log bersih. Proyek dan file ekspor uji dihapus.
+- **Belum diuji:**
+  - Jalur **sukses** `apply_style`/`get_transcript` di latar belakang, termasuk pembatalan di tengah transkripsi. Ini butuh layanan AI dan model yang tidak ada di server lokal.
+  - Di produksi.
