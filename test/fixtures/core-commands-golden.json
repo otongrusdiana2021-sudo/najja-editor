@@ -1,0 +1,1269 @@
+{
+  "split one clip at a time": {
+    "result": [
+      [
+        "s2",
+        "new1"
+      ]
+    ],
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        2
+      ],
+      [
+        "new1",
+        "main",
+        5,
+        2
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "8d480ccb37d8d4fc14ac6b88b5b83a4a5ed6b3de9a7dc4e81a0876890b859de6"
+  },
+  "split every clip under the playhead (nothing selected)": {
+    "result": [
+      [
+        "s1",
+        "new1"
+      ],
+      [
+        "x1",
+        "new2"
+      ]
+    ],
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        1
+      ],
+      [
+        "new1",
+        "main",
+        1,
+        2
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        1
+      ],
+      [
+        "new2",
+        "t_tx",
+        1,
+        1
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "64d432bb16160e36d97bd55ba404495ca73c80b83be46bd2050f89d6f75bfe0a"
+  },
+  "split only the selected clip": {
+    "result": [
+      [
+        "x2",
+        "new1"
+      ]
+    ],
+    "selection": "x2",
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        1
+      ],
+      [
+        "new1",
+        "t_tx",
+        5,
+        1
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "e9ea78c2b7926baad150fbdb88c86e13a4a84cd69af2f59a50b020a709db0604"
+  },
+  "split on a clip edge does nothing": {
+    "result": [],
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "7ed84d5288052eec685fb11f629b17cc747c4a8da5051de5cb62fe97e1a0abc1"
+  },
+  "delete a main clip (magnet closes the gap)": {
+    "result": 1,
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s3",
+        "main",
+        3,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "165914383cfe1d00dbb6a4a7a833745273b1eefe5c16944087916dce6fe5adea"
+  },
+  "delete the selected clip and an unknown id": {
+    "result": 1,
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "b5caec2a6f903a1dcd7a2af90fa82f851a99523f7414f23152bb815a3ae3aa31"
+  },
+  "duplicate a main clip (magnet: right after it)": {
+    "result": {
+      "id": "new1"
+    },
+    "selection": "new1",
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        11,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ],
+      [
+        "new1",
+        "main",
+        7,
+        4
+      ]
+    ],
+    "sha256": "3861e80945a92a30f4a6157e906f28256fa6fff558a24d060a4d7bb85438696e"
+  },
+  "duplicate a main clip to a time (magnet)": {
+    "result": {
+      "id": "new1"
+    },
+    "selection": "new1",
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        4,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        7,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        11,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ],
+      [
+        "new1",
+        "main",
+        0,
+        4
+      ]
+    ],
+    "sha256": "10d0a248c27fd84ac560a5a0ff41fda0806e58b367510c1f08cbe2649daaf099"
+  },
+  "duplicate a main clip without magnet (the clips after it move along)": {
+    "result": {
+      "id": "new1"
+    },
+    "selection": "new1",
+    "magnet": false,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        6,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        10,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ],
+      [
+        "new1",
+        "main",
+        3,
+        3
+      ]
+    ],
+    "sha256": "3e2d0e6aeec4d4bed2515ddf708f6f22d18b91479749d7ab76329ebdcd9c0fb7"
+  },
+  "duplicate a text with free space after it": {
+    "result": {
+      "id": "new1"
+    },
+    "selection": "new1",
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ],
+      [
+        "new1",
+        "t_tx",
+        2,
+        2
+      ]
+    ],
+    "sha256": "f1ee377aa293bed52a6b85995039e48cf597e33d1594ce8bc6ded707bae8ed9a"
+  },
+  "duplicate a text with the space after it taken (a new track)": {
+    "result": {
+      "id": "new1"
+    },
+    "selection": "new1",
+    "magnet": true,
+    "tracks": [
+      "newT1:text",
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ],
+      [
+        "new1",
+        "newT1",
+        6,
+        2
+      ]
+    ],
+    "sha256": "55623160cf88c34a22432a86ea6b0974c4dd18cd1c6ed766adc1e4e52f98f1d3"
+  },
+  "duplicate an overlay to a time": {
+    "result": {
+      "id": "new1"
+    },
+    "selection": "new1",
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ],
+      [
+        "new1",
+        "t_ov",
+        10,
+        3
+      ]
+    ],
+    "sha256": "6e89de96fce263e6eb7b504399956e2d8ab8f513333e1a66801b1dc7416b16ac"
+  },
+  "duplicate an unknown clip": {
+    "result": {
+      "error": "Klip tidak ditemukan: nope"
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "7ed84d5288052eec685fb11f629b17cc747c4a8da5051de5cb62fe97e1a0abc1"
+  },
+  "move a main clip to the start (magnet reorders)": {
+    "result": {
+      "id": "s3"
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        2,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        5,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        0,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "b4326701cca15987a21ea71e579896b3356735470f49918dcb923786d2501cad"
+  },
+  "move a text on its track to a free time": {
+    "result": {
+      "id": "x1"
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        2,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "0409102a63a4f9ac233e3ed7a7d72128e9f460298598aae9f518a5acc195752e"
+  },
+  "move a text on its track where it overlaps another (a new track)": {
+    "result": {
+      "id": "x1"
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "newT1:text",
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "newT1",
+        2.5,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "3967e526f399ee71d2ea29f09ce6daaf811dbd55dc516717950f11d2dbdf6a5e"
+  },
+  "move a text on its track onto another text (a new track)": {
+    "result": {
+      "id": "x1"
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "newT1:text",
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "newT1",
+        4.5,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "774b7321a02fc2de25e8732e6a08952b70549ffc5c4fb7bc9734fb3b2e751c2d"
+  },
+  "move an overlay photo to the main track": {
+    "result": {
+      "id": "o1"
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        6,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        10,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "main",
+        3,
+        3
+      ]
+    ],
+    "sha256": "db0f005f91eb8fbde05aad98a74dc3b9636dbb3c5da4289b774645d6e05fc408"
+  },
+  "move a text to the main track is refused": {
+    "result": {
+      "error": "Track utama hanya untuk video, foto, dan latar warna."
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "7ed84d5288052eec685fb11f629b17cc747c4a8da5051de5cb62fe97e1a0abc1"
+  },
+  "add a photo on the overlay at a time": {
+    "result": {
+      "id": "new1"
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "newT1:overlay",
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ],
+      [
+        "new1",
+        "newT1",
+        2,
+        3
+      ]
+    ],
+    "sha256": "11cd869b0ddf0fe75af1b8e9127359933857e7aaedcb7b0518c6b00ccf48257d"
+  },
+  "add a photo to the main track (appended)": {
+    "result": {
+      "id": "new1"
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        0,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ],
+      [
+        "new1",
+        "main",
+        9,
+        3
+      ]
+    ],
+    "sha256": "6f1edfdf398b5c3f4354bbde3b0f4613cbc81ada6c86a399fe9541ede9a5a5d7"
+  }
+}

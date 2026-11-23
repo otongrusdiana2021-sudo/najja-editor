@@ -15,6 +15,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import { createMcpHandler, formatToolResult } from './mcp/protocol.js';
 import { TOOLS } from './mcp/tools.js';
+import { checkArgs, errorText } from './mcp/validate.js';
 import { createStorage } from './lib/storage.js';
 import { createAuth } from './lib/auth.js';
 import { createOAuth, ACCESS_PREFIX, protectedResourceMetadata, authorizationServerMetadata, redirectLabel } from './lib/oauth.js';
@@ -54,6 +55,30 @@ const MIME = {
   '.wasm': 'application/wasm', '.tflite': 'application/octet-stream',
   '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8', '.srt': 'text/plain; charset=utf-8',
 };
+// (P0-4) Security headers. Every response gets nosniff (set where requests come in). Every HTML page: other sites
+// may not frame it (clickjacking), only the origin goes to other sites as referrer, and a Content-Security-Policy
+// runs in report-only mode: what it would block shows in the browser console, nothing is blocked yet, so it can be
+// checked on the real pages before it is enforced. form-action is left out on purpose: Chrome applies it to the
+// redirect after a form, which would stop OAuth consent from returning to the AI client.
+const CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'", // onnxruntime-web (hapus latar, wajah) compiles WebAssembly
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", // style="" in the app's HTML templates
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob:",
+  "media-src 'self' data: blob:",
+  "connect-src 'self' data: blob:",
+  "worker-src 'self' blob:", // the engine's background tick runs in a blob: worker
+  "object-src 'none'",
+  "base-uri 'self'",
+].join('; ');
+const HTML_SECURITY_HEADERS = {
+  'Content-Security-Policy': "frame-ancestors 'self'",
+  'X-Frame-Options': 'SAMEORIGIN',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Content-Security-Policy-Report-Only': CSP_REPORT_ONLY,
+};
+
 const EXT_FROM_MIME = Object.fromEntries(Object.entries(MIME).map(([ext, mime]) => [mime.split(';')[0], ext]));
 EXT_FROM_MIME['audio/mp3'] = '.mp3';
 EXT_FROM_MIME['audio/x-wav'] = '.wav';
@@ -202,7 +227,8 @@ class Bridge {
         reject(new Error(`The editor did not answer within ${Math.round(timeoutMs / 1000)}s (${tool}). Make sure the editor tab is open and not frozen.`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer, clientKey: client.key, owner });
-      if (!this.send(client.key, 'command', { id, tool, args })) {
+      // timeout_ms (v1.13.2): the editor runs tools one at a time and drops one still waiting when we stop waiting.
+      if (!this.send(client.key, 'command', { id, tool, args, timeout_ms: timeoutMs })) {
         clearTimeout(timer);
         this.pending.delete(id);
         reject(new Error('Could not reach the editor tab.'));
@@ -474,10 +500,12 @@ async function sendFile(req, res, filePath, extraHeaders = {}) {
   }
   const type = MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
   const lastModified = stat.mtime.toUTCString();
-  const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache', 'Last-Modified': lastModified, ...extraHeaders };
+  const page = type.startsWith('text/html') ? HTML_SECURITY_HEADERS : {};
+  const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache', 'Last-Modified': lastModified, ...page, ...extraHeaders };
   const ims = req.headers['if-modified-since'];
   if (ims && !req.headers.range && Math.floor(stat.mtimeMs / 1000) <= Math.floor(Date.parse(ims) / 1000)) {
-    res.writeHead(304, { 'Last-Modified': lastModified, 'Cache-Control': headers['Cache-Control'] });
+    // (a 304 updates the headers the browser stored: a page cached before P0-4 gets them without a new download)
+    res.writeHead(304, { 'Last-Modified': lastModified, 'Cache-Control': headers['Cache-Control'], ...page });
     return res.end();
   }
   const range = req.headers.range;
@@ -753,7 +781,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       const setupMode = !(await accounts.hasUsers());
       let next = safeNext(url.searchParams.get('next'));
       const page = (status, error, email) => {
-        res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...HTML_SECURITY_HEADERS });
         res.end(loginPage(setupMode ? 'setup' : 'login', { error, email, next }));
       };
       if (req.method !== 'POST') return page(200);
@@ -907,6 +935,14 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
       const body = await readJson(req);
       if (body.clientInfo) bridge.noteMcpClient(body.clientInfo, body.protocolVersion, 'stdio', who.id);
       if (!body.name) return sendJson(res, 200, { ok: true });
+      // (v1.13.2) mcp-stdio.js checked the arguments already (mcp/protocol.js); a direct call gets the same refusal
+      // of wrong types here (its notes come from the protocol side only, so they are not said twice)
+      const tool = TOOLS.find((t) => t.name === body.name);
+      if (tool) {
+        const checked = checkArgs(tool.inputSchema, body.arguments ?? {});
+        if (checked.errors.length) return sendJson(res, 200, { content: [{ type: 'text', text: `Error: ${errorText(body.name, checked.errors)}` }], isError: true });
+        body.arguments = checked.args;
+      }
       try {
         const result = await callTool(body.name, body.arguments || {}, who);
         return sendJson(res, 200, formatToolResult(result));
@@ -1143,6 +1179,7 @@ export function createNajjaServer({ port = DEFAULT_PORT, host = DEFAULT_HOST } =
 
   const httpCounts = { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 };
   const server = http.createServer((req, res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff'); // (P0-4) a file is only ever used as the type it is sent as
     res.on('finish', () => { const k = `${Math.floor(res.statusCode / 100)}xx`; if (k in httpCounts) httpCounts[k]++; });
     route(req, res).catch((err) => {
       log('request error:', err.message);

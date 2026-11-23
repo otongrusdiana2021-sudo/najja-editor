@@ -3,10 +3,14 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+
+// (P0-6b) a port the OS says is free: random ports in one range could collide between test files run in parallel
+const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOKEN = 'test-token-0123456789abcdef';
@@ -24,8 +28,8 @@ function req(port, { method = 'GET', path: p = '/', headers = {}, body } = {}) {
     r.end();
   });
 }
-function startServer(env) {
-  const port = 39500 + Math.floor(Math.random() * 400);
+async function startServer(env) {
+  const port = await freePort();
   const child = spawn(process.execPath, ['server.js', '--no-open'], { cwd: ROOT, env: { ...process.env, NAJJA_NO_OPEN: '1', NAJJA_EDITOR_WAIT_MS: '100', PORT: String(port), HOST: '127.0.0.1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   return new Promise((resolve, reject) => {
     child.stdout.on('data', (d) => { if (String(d).includes('Najja Editor')) resolve({ child, port }); });
@@ -161,4 +165,60 @@ test('healthz is public and reports the version and login mode', async () => {
   const j = JSON.parse(r.body);
   assert.equal(j.login, 'email');
   assert.match(j.version, /^\d+\.\d+\.\d+$/);
+});
+
+// ---- (P0-4) security headers ----
+const HTML_HEADERS = (h, what) => {
+  assert.equal(h['x-content-type-options'], 'nosniff', `${what}: nosniff`);
+  assert.equal(h['content-security-policy'], "frame-ancestors 'self'", `${what}: other sites may not frame it`);
+  assert.equal(h['x-frame-options'], 'SAMEORIGIN', `${what}: X-Frame-Options for older browsers`);
+  assert.equal(h['referrer-policy'], 'strict-origin-when-cross-origin', `${what}: referrer`);
+  const csp = h['content-security-policy-report-only'] || '';
+  for (const d of ["default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'", "object-src 'none'", "worker-src 'self' blob:", 'https://fonts.googleapis.com', 'https://fonts.gstatic.com']) {
+    assert.ok(csp.includes(d), `${what}: report-only CSP has ${d}`);
+  }
+  assert.ok(!/form-action/.test(csp), `${what}: no form-action (it would stop the OAuth redirect back to the AI client)`);
+};
+
+test('security headers: the editor, Najja Desain and a project link are HTML pages with them', async () => {
+  const H = { host: `localhost:${local.port}` };
+  for (const p of ['/', '/design', '/?p=p_abc', '/some/spa/path']) {
+    const r = await req(local.port, { path: p, headers: H });
+    assert.equal(r.status, 200, p);
+    assert.match(r.headers['content-type'], /text\/html/, p);
+    HTML_HEADERS(r.headers, p);
+  }
+});
+
+test('security headers: a page answered 304 (cached before this version) gets them too', async () => {
+  const r = await req(local.port, { path: '/', headers: { host: `localhost:${local.port}`, 'if-modified-since': new Date(Date.now() + 86400e3).toUTCString() } });
+  assert.equal(r.status, 304);
+  HTML_HEADERS(r.headers, '304');
+});
+
+test('security headers: the login page has them', async () => {
+  const r = await req(secured.port, { path: '/login', headers: { host: 'editor.example.com', 'x-forwarded-proto': 'https', 'x-forwarded-for': '9.9.9.9' } });
+  assert.equal(r.status, 200);
+  HTML_HEADERS(r.headers, '/login');
+});
+
+test('security headers: scripts, JSON and errors get nosniff but no page policy', async () => {
+  const H = { host: `localhost:${local.port}` };
+  for (const p of ['/js/app.js', '/sw.js', '/api/status', '/api/projects/does-not-exist']) {
+    const r = await req(local.port, { path: p, headers: H });
+    assert.equal(r.headers['x-content-type-options'], 'nosniff', p);
+    assert.equal(r.headers['content-security-policy-report-only'], undefined, p);
+  }
+  const mcp = await req(local.port, { method: 'POST', path: '/mcp', headers: { ...json, ...H }, body: rpcBody });
+  assert.equal(mcp.headers['x-content-type-options'], 'nosniff', '/mcp');
+});
+
+// ---- (P0-6a) /api/tool (mcp-stdio.js forwards there) refuses wrong argument types too ----
+test('/api/tool: a wrong argument type is refused before any editor is asked', async () => {
+  const H = { ...json, host: `localhost:${local.port}` };
+  const r = await req(local.port, { method: 'POST', path: '/api/tool', headers: H, body: JSON.stringify({ name: 'update_clip', arguments: { clip_id: 'c1', opacity: 'setengah' } }) });
+  assert.equal(r.status, 200);
+  const j = JSON.parse(r.body);
+  assert.equal(j.isError, true);
+  assert.match(j.content[0].text, /Invalid arguments for update_clip: opacity: expected a number, got string "setengah"/);
 });

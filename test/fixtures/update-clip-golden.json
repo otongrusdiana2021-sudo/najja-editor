@@ -1,0 +1,1564 @@
+{
+  "text: content, preset, font by its shown name, size, colour, bold, italic, align, spacing": {
+    "error": null,
+    "result": {
+      "id": "txt",
+      "type": "text",
+      "track": "track3",
+      "track_kind": "text",
+      "start": 0,
+      "end": 3,
+      "duration": 3,
+      "name": "Baris satu",
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "text": "Baris satu\nbaris dua",
+      "font": "Libre Baskerville",
+      "size": 600,
+      "color": "#ff0055",
+      "preset": "neon"
+    },
+    "selection": "txt",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "79d0c5b8becc9911dbd4e19d99063b5d467343879758828cf008923f6cf8ba49"
+  },
+  "text: stroke, background, shadow, gradient": {
+    "error": null,
+    "result": {
+      "id": "txt",
+      "type": "text",
+      "track": "track3",
+      "track_kind": "text",
+      "start": 0,
+      "end": 3,
+      "duration": 3,
+      "name": "Halo dunia",
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "text": "Halo dunia",
+      "font": "Poppins",
+      "size": 96,
+      "color": "#ffffff",
+      "preset": "default"
+    },
+    "selection": "txt",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "b6d3e8bb25671052392259b95b0a55e0988a6e080e12c4a053972ee31982d199"
+  },
+  "text: background none, gradient none, stroke width 0": {
+    "error": null,
+    "result": {
+      "id": "txt",
+      "type": "text",
+      "track": "track3",
+      "track_kind": "text",
+      "start": 0,
+      "end": 3,
+      "duration": 3,
+      "name": "Halo dunia",
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "text": "Halo dunia",
+      "font": "Poppins",
+      "size": 96,
+      "color": "#ffffff",
+      "preset": "default"
+    },
+    "selection": "txt",
+    "history": 2,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "567a5b4ea3fd1379cff065f6580f31555fa70cff11908ea83518e8300d8be256"
+  },
+  "text: kinetic motion with options, then off": {
+    "error": null,
+    "result": {
+      "mid": {
+        "type": "wordPop",
+        "spring": "bouncy",
+        "stagger": 0.05,
+        "speed": 1.5,
+        "out": "none"
+      },
+      "opts": {
+        "type": "wordPop",
+        "spring": "bouncy",
+        "stagger": 0.05,
+        "speed": 2,
+        "out": "none"
+      },
+      "after": null
+    },
+    "selection": "txt",
+    "history": 3,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "text: a new preset changes the look and keeps the kinetic motion and word times": {
+    "error": null,
+    "result": {
+      "preset": "yellow",
+      "motion": {
+        "type": "wordPop",
+        "spring": "bouncy",
+        "stagger": 0.1,
+        "speed": 1.5,
+        "out": "none"
+      },
+      "words": [
+        [
+          0,
+          0.5
+        ],
+        [
+          0.5,
+          1
+        ]
+      ],
+      "content": "Halo dunia"
+    },
+    "selection": "txt",
+    "history": 2,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "6a22c7d05f260f75b452b8a073c30e4a709be2260d43eaafc727a9fd194a02be"
+  },
+  "text: kinetic options without a motion is refused": {
+    "error": "text_motion is needed (no kinetic animation on this text yet)",
+    "result": null,
+    "selection": null,
+    "history": 0,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "text: an unknown preset is refused": {
+    "error": "Unknown preset \"nope\". Valid: default, outline, yellow, boxBlack, boxWhite, subtitle, neon, gradient, shadow, redBold, elegant, marker, retro, minimal, bebas, handwritten, lobster, news",
+    "result": null,
+    "selection": null,
+    "history": 0,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "visual: position, scale and opacity clamped, rotation, flips, blend, crop": {
+    "error": null,
+    "result": {
+      "id": "vid",
+      "type": "video",
+      "track": "main",
+      "track_kind": "main",
+      "start": 0,
+      "end": 10,
+      "duration": 10,
+      "name": "video",
+      "media_id": "m_vid",
+      "source_in": 0,
+      "volume": 1,
+      "x": 0.25,
+      "y": -0.5,
+      "scale": 20,
+      "rotation": 45,
+      "opacity": 0
+    },
+    "selection": "vid",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "87bb11937bdb62a6c7ee48144e1e914642a7387e0a4d85a5d14d2db7682704d2"
+  },
+  "visual: a keyframed clip gets the value on every keyframe": {
+    "error": null,
+    "result": {
+      "id": "img",
+      "type": "image",
+      "track": "track4",
+      "track_kind": "overlay",
+      "start": 1,
+      "end": 4,
+      "duration": 3,
+      "name": "foto",
+      "media_id": "m_img",
+      "source_in": 0,
+      "x": 0.4,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 0.5,
+      "keyframes": 2
+    },
+    "selection": "img",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "13fea4c325985e0883dcdd5b1c9b37bdf14cb3fd9be6bf8a01996c7bc0c0c95c"
+  },
+  "video: source in, speed, duration, volume, mute, fades, filter, adjust, transition, animations": {
+    "error": null,
+    "result": {
+      "id": "vid",
+      "type": "video",
+      "track": "main",
+      "track_kind": "main",
+      "start": 0,
+      "end": 3,
+      "duration": 3,
+      "name": "video",
+      "media_id": "m_vid",
+      "source_in": 1,
+      "speed": 2,
+      "volume": 2,
+      "muted": true,
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "filter": {
+        "name": "vivid",
+        "intensity": 1
+      },
+      "transition": {
+        "type": "fade",
+        "duration": 5
+      },
+      "animation": {
+        "in": "fade",
+        "out": "fade",
+        "loop": "pulse"
+      },
+      "adjust": {
+        "brightness": 0.2
+      }
+    },
+    "selection": "vid",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        3
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        3,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "3ac878234efb50f0afc38d472ff4b9ba5d058a0a4ba369ce52b56ca007781d88"
+  },
+  "start on the main track with magnet moves the clip there": {
+    "error": null,
+    "result": {
+      "id": "sol",
+      "type": "solid",
+      "track": "main",
+      "track_kind": "main",
+      "start": 0,
+      "end": 2,
+      "duration": 2,
+      "name": "Warna",
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "solid": {
+        "color": "#123456",
+        "color2": null,
+        "angle": 135
+      }
+    },
+    "selection": "sol",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        2,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        0,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "f70c7efb4db0bba5f9ae8114b3963a56f9bafc20faf6959f9c9c73874e6bcc78"
+  },
+  "start without magnet sets the time": {
+    "error": null,
+    "result": {
+      "id": "sol",
+      "type": "solid",
+      "track": "main",
+      "track_kind": "main",
+      "start": 20,
+      "end": 22,
+      "duration": 2,
+      "name": "Warna",
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "solid": {
+        "color": "#123456",
+        "color2": null,
+        "angle": 135
+      }
+    },
+    "selection": "sol",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        20,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "f5e6895ded3b8a7013d49fc8f57dc988a3c453e3dc8da2a30cbed08d469c0237"
+  },
+  "start on another track sets the time": {
+    "error": null,
+    "result": {
+      "id": "img",
+      "type": "image",
+      "track": "track4",
+      "track_kind": "overlay",
+      "start": 4,
+      "end": 7,
+      "duration": 3,
+      "name": "foto",
+      "media_id": "m_img",
+      "source_in": 0,
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "keyframes": 2
+    },
+    "selection": "img",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        4,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "814a1a2004e892f1230243770095240e1357e60ac48b3f87f92709fd61812d51"
+  },
+  "effect: type and intensity": {
+    "error": null,
+    "result": {
+      "id": "eff",
+      "type": "effect",
+      "track": "track1",
+      "track_kind": "effect",
+      "start": 0,
+      "end": 2,
+      "duration": 2,
+      "name": "Glitch",
+      "effect": {
+        "type": "glitch",
+        "intensity": 1
+      }
+    },
+    "selection": "eff",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "2859705078e9b79233890346fbde85ee1d83a6fe1d2e4d17fec3d25752f390e9"
+  },
+  "colour clip: colours, then second colour none": {
+    "error": null,
+    "result": {
+      "id": "sol",
+      "type": "solid",
+      "track": "main",
+      "track_kind": "main",
+      "start": 10,
+      "end": 12,
+      "duration": 2,
+      "name": "Warna",
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "solid": {
+        "color": "#abcdef",
+        "color2": null,
+        "angle": 135
+      }
+    },
+    "selection": "sol",
+    "history": 2,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "747d5ffb51b85d706217cf96e2937ca380033bb3d01c2d2d041606c0e57cc7b2"
+  },
+  "badge sticker: colour and text": {
+    "error": null,
+    "result": {
+      "id": "badge",
+      "type": "sticker",
+      "track": "track2",
+      "track_kind": "text",
+      "start": 0,
+      "end": 2,
+      "duration": 2,
+      "name": "SALE",
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "sticker": {
+        "badge": "PROMO",
+        "icon": "🏷️"
+      }
+    },
+    "selection": "badge",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "54340d37eb1e512520ff0929076c2f4e50623717cd7a38852a2208f9d738b8fe"
+  },
+  "name": {
+    "error": null,
+    "result": {
+      "id": "vid",
+      "type": "video",
+      "track": "main",
+      "track_kind": "main",
+      "start": 0,
+      "end": 10,
+      "duration": 10,
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "media_id": "m_vid",
+      "source_in": 0,
+      "volume": 1,
+      "x": 0,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1
+    },
+    "selection": "vid",
+    "history": 1,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "1f7f775b745ffd3ff7743529a32803e0e98595f27beccb50a211001a25f2ac18"
+  },
+  "a bad value after a good one: refused, and what came before it stays (no undo step)": {
+    "error": null,
+    "result": {
+      "refused": "Unknown filter \"nope\". Valid: none, crystal, uhd4k, clear, vivid, warm, cool, bw, noir, vintage, retro, kodak, cinematic, moody, faded, drama, sunset, pink, mint, dream, vividWarm, warmMatte, cleanNatural",
+      "xAfter": 0,
+      "undoSteps": 0
+    },
+    "selection": null,
+    "history": 0,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "V20: a magnet move, then a refused filter": {
+    "error": null,
+    "result": {
+      "refused": "Unknown filter \"nope\". Valid: none, crystal, uhd4k, clear, vivid, warm, cool, bw, noir, vintage, retro, kodak, cinematic, moody, faded, drama, sunset, pink, mint, dream, vividWarm, warmMatte, cleanNatural",
+      "x": 0,
+      "txtX": 0,
+      "mainOrder": [
+        "vid",
+        "sol"
+      ],
+      "undoSteps": 0
+    },
+    "selection": null,
+    "history": 0,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "V20: remove_background on a text, after a good value": {
+    "error": null,
+    "result": {
+      "refused": "remove_background is for video and photo clips",
+      "x": 0,
+      "txtX": 0,
+      "mainOrder": [
+        "vid",
+        "sol"
+      ],
+      "undoSteps": 0
+    },
+    "selection": null,
+    "history": 0,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "V20: an unknown clip effect, after a good value": {
+    "error": null,
+    "result": {
+      "refused": "Efek tidak dikenal: nope",
+      "x": 0,
+      "txtX": 0,
+      "mainOrder": [
+        "vid",
+        "sol"
+      ],
+      "undoSteps": 0
+    },
+    "selection": null,
+    "history": 0,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "clip effects that exist are set, with the other values": {
+    "error": null,
+    "result": {
+      "id": "vid",
+      "type": "video",
+      "track": "main",
+      "track_kind": "main",
+      "start": 0,
+      "end": 10,
+      "duration": 10,
+      "name": "video",
+      "media_id": "m_vid",
+      "source_in": 0,
+      "volume": 1,
+      "x": 0.2,
+      "y": 0,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "clip_effects": [
+        {
+          "effect": "shake",
+          "intensity": 0.5
+        }
+      ]
+    },
+    "selection": "vid",
+    "history": 2,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "f7fd3abb006454768f61db7520ebe6cd511645995d29e502da9167251a34f0c9"
+  },
+  "a bad colour is refused": {
+    "error": "color must be a hex color like #ff0055 (got merah)",
+    "result": null,
+    "selection": null,
+    "history": 0,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "an unknown clip is refused": {
+    "error": "Clip not found: c_nope. Call get_project for valid clip ids.",
+    "result": null,
+    "selection": null,
+    "history": 0,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track4",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track3",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "0239b7809b3ad53daf0c261eb2471ca9a476517d73a584ac51895d3592ad4b46"
+  },
+  "add_text with style, position and animation (shared helpers)": {
+    "error": null,
+    "result": {
+      "id": "new1",
+      "type": "text",
+      "track": "track2",
+      "track_kind": "text",
+      "start": 1,
+      "end": 3,
+      "duration": 2,
+      "name": "Diskon",
+      "x": 0.1,
+      "y": -0.3,
+      "scale": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "text": "Diskon",
+      "font": "Libre Baskerville",
+      "size": 140,
+      "color": "#ffcc00",
+      "preset": "outline",
+      "animation": {
+        "in": "fade"
+      }
+    },
+    "selection": "new1",
+    "history": 2,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track5",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track4",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track3",
+        0,
+        2
+      ],
+      [
+        "new1",
+        "track2",
+        1,
+        2
+      ]
+    ],
+    "sha256": "e8e6c7a48d7ebcd9927b71d5625f2522763cc5186fad2e4f4151fbd62306f01c"
+  },
+  "add_sticker with position and loop (shared helpers)": {
+    "error": null,
+    "result": {
+      "id": "new1",
+      "type": "sticker",
+      "track": "track2",
+      "track_kind": "text",
+      "start": 0,
+      "end": 2,
+      "duration": 2,
+      "name": "🔥",
+      "x": -0.2,
+      "y": 0,
+      "scale": 1.5,
+      "rotation": 0,
+      "opacity": 1,
+      "sticker": {
+        "emoji": "🔥"
+      },
+      "animation": {
+        "loop": "pulse"
+      }
+    },
+    "selection": "new1",
+    "history": 2,
+    "clips": [
+      [
+        "vid",
+        "main",
+        0,
+        10
+      ],
+      [
+        "img",
+        "track5",
+        1,
+        3
+      ],
+      [
+        "txt",
+        "track4",
+        0,
+        3
+      ],
+      [
+        "sol",
+        "main",
+        10,
+        2
+      ],
+      [
+        "eff",
+        "track1",
+        0,
+        2
+      ],
+      [
+        "badge",
+        "track3",
+        0,
+        2
+      ],
+      [
+        "new1",
+        "track2",
+        0,
+        2
+      ]
+    ],
+    "sha256": "55f8cc7a25efc09231ec7a36fc16a1470cb50c8d667c4a4d18ce226a7457e15b"
+  }
+}

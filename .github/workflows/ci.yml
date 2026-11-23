@@ -1,0 +1,49 @@
+# (P0-3) Every push and pull request runs the unit tests, so a regression is seen before it is deployed.
+# Node 22: the version the production image uses (Dockerfile: node:22-alpine). The project has no npm
+# dependencies, so there is nothing to install besides ffmpeg, which the media proxy tests need (they are skipped,
+# not failed, where it is missing). The MCP contract test (test/mcp-contract.test.js) is part of npm test.
+# Browser e2e (npm run test:e2e) needs Playwright and is not run here yet.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: npm test (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install ffmpeg (media proxy tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -encoders | grep -E 'libx26[45]' || true
+
+      - name: Syntax check of the browser modules
+        run: find public/js -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: Unit tests (includes the MCP contract)
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+
+      # Failing tests become annotations: their names and errors show in the run summary (and the public API)
+      # without opening the logs.
+      - name: Failing tests as annotations
+        if: failure()
+        run: node test/ci-annotate.mjs test-output.txt

@@ -1,6 +1,7 @@
 // Minimal, dependency-free MCP (Model Context Protocol) JSON-RPC handler.
 // Shared by the Streamable HTTP endpoint (server.js) and the stdio entry (mcp-stdio.js).
 import { TOOLS } from './tools.js';
+import { checkArgs, errorText } from './validate.js';
 
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
@@ -100,11 +101,16 @@ export function createMcpHandler({ name, version, callTool, onInitialize }) {
         const toolName = params.name;
         const tool = TOOLS.find((t) => t.name === toolName);
         if (!tool) return fail(msg.id, -32602, `Unknown tool: ${toolName}`);
+        // (v1.13.2) the arguments are checked against inputSchema before the editor sees them (mcp/validate.js):
+        // a wrong type is refused (as a tool error, so the AI can correct itself), the rest only gets a note
+        const checked = checkArgs(tool.inputSchema, params.arguments ?? {});
+        if (checked.errors.length) return ok(msg.id, { content: [{ type: 'text', text: `Error: ${errorText(toolName, checked.errors)}` }], isError: true });
+        const note = checked.notes.length ? `Note: ${checked.notes.join('; ')}.` : '';
         try {
-          const result = await callTool(toolName, params.arguments || {});
-          return ok(msg.id, formatToolResult(result));
+          const result = formatToolResult(await callTool(toolName, checked.args));
+          return ok(msg.id, note ? { ...result, content: [...result.content, { type: 'text', text: note }] } : result);
         } catch (err) {
-          return ok(msg.id, { content: [{ type: 'text', text: `Error: ${err?.message || err}` }], isError: true });
+          return ok(msg.id, { content: [{ type: 'text', text: `Error: ${err?.message || err}${note ? ` (${note})` : ''}` }], isError: true });
         }
       }
       case 'resources/list':

@@ -11,6 +11,8 @@ import { createProxyManager, capabilities, probe, proxyReasons, editReasons } fr
 const caps = await capabilities();
 const hasHevc = caps.ffmpeg && /\blibx265\b/.test(execFileSync('ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8' }));
 const skip = !caps.ffmpeg || !caps.x264 || !hasHevc ? 'ffmpeg with libx264 + libx265 is not installed' : false;
+// (P0-3) tests that only make H.264 files need no libx265
+const skipX264 = !caps.ffmpeg || !caps.x264 ? 'ffmpeg with libx264 is not installed' : false;
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'najja-proxy-'));
 const st = createStorage(dir, { exportDir: path.join(dir, 'exports'), extFor: (n) => path.extname(n || '') || '.bin' });
@@ -129,7 +131,7 @@ test('light preview copy also for 60 fps and HDR camera footage; at most 30 fps'
   assert.deepEqual([35, 45, 48, 90, 240].map(previewFps), [35, 45, 24, 30, 30]);
 });
 
-test('a light copy made with older rules (60 fps) is remade at ≤ 30 fps; the old one stays ready meanwhile', async () => {
+test('a light copy made with older rules (60 fps) is remade at ≤ 30 fps; the old one stays ready meanwhile', { skip: skipX264 }, async () => {
   const id = 'm_old60fps1';
   const dir = st.mediaDir(id);
   fs.mkdirSync(dir, { recursive: true });

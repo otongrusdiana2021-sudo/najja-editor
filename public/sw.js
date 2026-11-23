@@ -22,9 +22,17 @@ self.addEventListener('fetch', (e) => {
     if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') e.respondWith(cacheFirst(req));
     return;
   }
+  // (P0-4) Leaving the account (Keluar, or a session that ended and shows the login page): the shell cached for it
+  // goes, with the addresses of the projects it opened (?p=<id>). The AI models (najja-models-*) stay: they are the
+  // same for everyone and a big download. The page itself still loads from the network as before.
+  if (req.mode === 'navigate' && (url.pathname === '/logout' || url.pathname === '/login')) e.waitUntil(clearShell());
   if (BYPASS.test(url.pathname) || req.headers.has('range')) return;
   e.respondWith(networkFirst(req));
 });
+
+async function clearShell() {
+  for (const k of await caches.keys()) if (k.startsWith('najja-shell-')) await caches.delete(k);
+}
 
 async function cacheFirst(req) {
   const hit = await caches.match(req);

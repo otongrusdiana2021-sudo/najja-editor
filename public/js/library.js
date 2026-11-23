@@ -364,7 +364,7 @@ export class Library {
       const log = st.log.slice(0, 40);
       body = `
         <div class="lib-section"><h4>Aktivitas AI</h4>
-          ${log.length ? `<ul class="mcp-log">${log.map((l) => `<li class="${l.state}"><span class="lt">${escapeHtml(l.tool)}${l.local ? ' <em>(JSON)</em>' : ''}</span><span class="ls">${l.state === 'ok' ? `${l.ms} ms` : l.state === 'error' ? escapeHtml(l.error || 'gagal') : '…'}</span></li>`).join('')}</ul>` : '<p class="hint">Belum ada perintah dari AI.</p>'}</div>
+          ${log.length ? `<ul class="mcp-log">${log.map((l) => `<li class="${l.state}"><span class="lt">${escapeHtml(l.tool)}${l.local ? ' <em>(JSON)</em>' : ''}</span><span class="ls">${l.state === 'ok' ? `${l.ms} ms` : l.state === 'error' ? escapeHtml(l.error || 'gagal') : l.state === 'wait' ? 'antri' : '…'}</span></li>`).join('')}</ul>` : '<p class="hint">Belum ada perintah dari AI.</p>'}</div>
         <details class="lib-section tools-list"><summary>${(st.status?.tools || []).length} tool tersedia</summary>
           <ul>${(st.status?.tools || []).map((t) => `<li><code>${t.name}</code><span>${escapeHtml(t.description.split('. ')[0])}.</span></li>`).join('')}</ul></details>`;
     }
@@ -407,7 +407,8 @@ export class Library {
       const t0 = performance.now();
       try {
         const out = await bridge.runLocal(calls[i].tool, calls[i].args);
-        Object.assign(r, { state: 'ok', ms: Math.round(performance.now() - t0), note: out?.data?.id ? out.data.id : '' });
+        // (v1.13.2) the checker's notes (an unknown field, a value outside the list...) show next to the result
+        Object.assign(r, { state: 'ok', ms: Math.round(performance.now() - t0), note: [out?.data?.id, ...(out?.notes || [])].filter(Boolean).join(' · ') });
       } catch (err) {
         Object.assign(r, { state: 'error', error: err.message });
         failed = true;

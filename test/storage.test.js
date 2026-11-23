@@ -71,3 +71,18 @@ test('mediaFile never returns an upload still being written (source.*.tmp)', asy
   fs.writeFileSync(path.join(d, 'source.mp4'), 'the whole file');
   assert.equal(path.basename(await s.mediaFile(id)), 'source.mp4');
 });
+
+test('(V19) a save built on a revision of a project deleted since is refused (410 gone), not silently brought back', async () => {
+  const id = 'p_gone01';
+  const first = await st.putProject(id, { id, name: 'Akan dihapus', updatedAt: 1, media: [] }, { baseRev: 0 });
+  assert.equal(first.rev, 1);
+  await st.deleteProject(id);
+  await assert.rejects(st.putProject(id, { id, name: 'autosave yang tertunda', updatedAt: 2, media: [] }, { baseRev: 1 }), (err) => err.status === 410 && err.data?.gone === true);
+  assert.equal(await st.getProject(id).catch(() => null), null, 'still deleted');
+  // the user chose to keep it (force), a brand-new project (baseRev 0) and older clients (no baseRev) still write
+  assert.equal((await st.putProject(id, { id, name: 'Disimpan lagi', updatedAt: 3, media: [] }, { baseRev: 1, force: true })).rev, 1);
+  await st.deleteProject(id);
+  assert.equal((await st.putProject(id, { id, name: 'Baru', updatedAt: 4, media: [] }, { baseRev: 0 })).rev, 1);
+  await st.deleteProject(id);
+  assert.equal((await st.putProject(id, { id, name: 'Klien lama', updatedAt: 5, media: [] })).rev, 1);
+});

@@ -5,11 +5,15 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+
+// (P0-6b) a port the OS says is free: random ports in one range could collide between test files run in parallel
+const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOKEN = 'ai-token-0123456789abcdef';
@@ -50,7 +54,7 @@ const imageSize = (buf) => JSON.parse(execFileSync('python3', ['-I', '-c', 'impo
 
 before(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'najja-ai-'));
-  const port = 39500 + Math.floor(Math.random() * 400);
+  const port = await freePort();
   const child = spawn(process.execPath, ['server.js', '--no-open'], {
     cwd: ROOT,
     env: { ...process.env, NAJJA_NO_OPEN: '1', PORT: String(port), HOST: '127.0.0.1', NAJJA_TOKEN: TOKEN, NAJJA_DATA_DIR: dir, NAJJA_AI_URL: '', ...(MODELS ? { NAJJA_AI_MODELS: MODELS } : {}) },

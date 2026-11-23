@@ -1,5 +1,19 @@
 // Browser side of the MCP bridge: receives tool calls from the Najja server (SSE) and returns results.
+import { createQueue, PURE_READS } from './cmdqueue.js';
+import { checkArgs, errorText } from './core/validate.js';
+
+let schemas = null;
+/** The tools' input schemas (public/js/core/tools.js), loaded the first time a command is pasted. */
+function toolSchemas() {
+  schemas ||= import('./core/tools.js').then(({ TOOLS }) => new Map(TOOLS.map((t) => [t.name, t.inputSchema])));
+  return schemas;
+}
+
 const listeners = new Set();
+// (v1.13.2) Tools run one at a time in this tab (AI commands and pasted JSON alike); pure reads skip the line.
+const queue = createQueue();
+// Allowance for the trip from the server to this tab: a command is dropped a little before the server gives up on it.
+const DEADLINE_SLACK_MS = 250;
 const clientId = (() => {
   try {
     let id = sessionStorage.getItem('najja:client');
@@ -63,17 +77,23 @@ export const bridge = {
    * AI's own commands; returns the result or throws.
    */
   async runLocal(tool, args = {}) {
-    const entry = { id: `local_${Date.now()}`, tool, state: 'run', at: Date.now(), ms: 0, local: true };
+    const entry = { id: `local_${Date.now()}`, tool, state: 'wait', at: Date.now(), ms: 0, local: true };
     this.state.log.unshift(entry);
     if (this.state.log.length > 200) this.state.log.length = 200;
     this.emit();
-    const t0 = performance.now();
+    let t0 = performance.now();
     try {
       const fn = this.handlers?.tools?.[tool];
       if (!fn) throw new Error(`Tool "${tool}" tidak ada di editor ini`);
-      const result = await fn(args);
+      // (v1.13.2, P0-6b) the same check the server makes for AI clients (public/js/core/validate.js): a wrong type
+      // is refused before the project is touched; the rest is converted or noted (notes come back with the result)
+      const checked = checkArgs((await toolSchemas()).get(tool), args);
+      if (checked.errors.length) throw Object.assign(new Error(errorText(tool, checked.errors)), { code: 'INVALID' });
+      const input = checked.args;
+      const out = await this.schedule(tool, () => fn(input), () => { t0 = performance.now(); entry.state = 'run'; this.emit(); });
+      const result = checked.notes.length ? { ...out, notes: checked.notes } : out;
       entry.state = 'ok';
-      this.handlers?.onDone?.(tool, args, result);
+      this.handlers?.onDone?.(tool, input, result);
       return result;
     } catch (err) {
       entry.state = 'error';
@@ -87,18 +107,35 @@ export const bridge = {
   /** The tool names this editor runs. */
   toolNames() { return Object.keys(this.handlers?.tools || {}); },
 
+  /**
+   * (v1.13.2) Run a tool in turn: after the tools before it have finished, unless it only reads (PURE_READS).
+   * onStart runs when the tool really starts. deadline: a Date.now() time after which a waiting tool is dropped.
+   * handlers.blocked(tool) (P0-2) is asked when the tool's turn comes: a reason refuses it (an export started while
+   * it waited, say) with code 'BUSY'; the editor is not changed.
+   */
+  schedule(tool, task, onStart, deadline = null) {
+    if (PURE_READS.has(tool)) { onStart?.(); return task(); }
+    return queue.run(() => {
+      const why = this.handlers?.blocked?.(tool);
+      if (why) throw Object.assign(new Error(why), { code: 'BUSY' });
+      return task();
+    }, { deadline, onStart });
+  },
+
   async run(cmd) {
-    const entry = { id: cmd.id, tool: cmd.tool, state: 'run', at: Date.now(), ms: 0 };
+    const entry = { id: cmd.id, tool: cmd.tool, state: 'wait', at: Date.now(), ms: 0 };
     this.state.log.unshift(entry);
     if (this.state.log.length > 200) this.state.log.length = 200;
     this.state.activeAt = Date.now();
     this.emit();
-    const t0 = performance.now();
+    // The server stops waiting after timeout_ms (sent since v1.13.2): a command still in the queue by then is not run.
+    const deadline = cmd.timeout_ms > 0 ? Date.now() + cmd.timeout_ms - DEADLINE_SLACK_MS : null;
+    let t0 = performance.now();
     let body;
     try {
       const fn = this.handlers?.tools?.[cmd.tool];
       if (!fn) throw new Error(`Tool not supported by this editor version: ${cmd.tool}`);
-      const result = await fn(cmd.args || {});
+      const result = await this.schedule(cmd.tool, () => fn(cmd.args || {}), () => { t0 = performance.now(); entry.state = 'run'; this.emit(); }, deadline);
       entry.state = 'ok';
       body = { id: cmd.id, result };
       this.handlers?.onDone?.(cmd.tool, cmd.args, result);

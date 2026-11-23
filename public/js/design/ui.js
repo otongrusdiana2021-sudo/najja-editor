@@ -9,6 +9,7 @@ import { drawPage, boxOf, envFor } from './draw.js';
 import { textEl, shapeEl, slotEl, iconEl, emojiEl, badgeEl, swatchEl, TEXT_KINDS, SHAPE_NAMES, SIZES, aabb, union } from './model.js';
 import { templatesFor, COMBOS, ICON_NODES } from './templates.js';
 import { searchIcons } from './assets.js';
+import { SAFE_PIXELS } from './exportcheck.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1231,7 +1232,7 @@ export class UI {
     const d = this.app.design;
     const n = d.pages.length;
     const big = d.width * d.height * 4 > 16.7e6;
-    const st = { fmt: 'png', pages: n > 1 ? 'all' : 'cur', scale: 1 };
+    const st = { fmt: 'png', pages: n > 1 ? 'all' : 'cur', scale: 1, anyway: false };
     const bg = document.createElement('div');
     bg.className = 'ds-modal-bg';
     const canShare = typeof navigator.canShare === 'function';
@@ -1248,7 +1249,17 @@ export class UI {
     const sync = () => {
       for (const seg of $$('[data-k]', bg)) for (const b of $$('button', seg)) b.classList.toggle('on', String(st[seg.dataset.k]) === b.dataset.v);
       const many = st.pages === 'all' && n > 1;
-      $('[data-note]', bg).textContent = `${many ? `${n} file dalam satu ZIP. ` : ''}${st.fmt === 'jpg' ? 'JPG: file kecil, cocok untuk marketplace.' : st.fmt === 'tpng' ? 'Tanpa warna latar halaman (untuk ditempel di desain lain).' : 'PNG: kualitas terbaik.'}${canShare ? ' Di iPad, “Bagikan” → Simpan Gambar untuk menaruhnya di Foto.' : ''}`;
+      // (v1.13.2) bigger than every device draws: said before, made smaller only where the device cannot draw it
+      const huge = d.width * d.height * st.scale * st.scale > SAFE_PIXELS;
+      const note = $('[data-note]', bg);
+      note.style.color = '';
+      note.textContent = `${many ? `${n} file dalam satu ZIP. ` : ''}${st.fmt === 'jpg' ? 'JPG: file kecil, cocok untuk marketplace.' : st.fmt === 'tpng' ? 'Tanpa warna latar halaman (untuk ditempel di desain lain).' : 'PNG: kualitas terbaik.'}${huge ? ' Ukuran ini besar: kalau perangkat tidak sanggup, hasilnya diperkecil otomatis.' : ''}${canShare ? ' Di iPad, “Bagikan” → Simpan Gambar untuk menaruhnya di Foto.' : ''}`;
+    };
+    /** (v1.13.2) Why the export stopped, kept in the dialog (a toast goes too soon for a list of photos). */
+    const problem = (text) => {
+      const note = $('[data-note]', bg);
+      note.textContent = text;
+      note.style.color = 'var(--danger)';
     };
     sync();
     const close = () => bg.remove();
@@ -1268,12 +1279,22 @@ export class UI {
           } else downloadBlobFile(out.blob, out.name);
         } else downloadBlobFile(out.blob, out.name);
         close();
-        this.toast(share ? 'Siap dibagikan' : `Diunduh: ${out.name}`, 'ok');
+        const smaller = out.reduced ? ` · ${out.width} × ${out.height}, diperkecil karena perangkat ini tidak sanggup ukuran penuh` : '';
+        this.toast(`${share ? 'Siap dibagikan' : `Diunduh: ${out.name}`}${smaller}`, 'ok');
       } catch (err) {
-        this.toast(`Ekspor gagal: ${err.message}`, 'err');
         busy = false;
         prog.hidden = true;
         $$('.ds-actions button', bg).forEach((b) => { b.disabled = false; });
+        if (err.code === 'FONTS') {
+          // (the user may go on with the stand-in font: the button says so)
+          problem(`${err.message} Tunggu sebentar lalu coba lagi, atau tekan “Tetap unduh”.`);
+          st.anyway = true;
+          const dl = $('[data-dl]', bg);
+          if (dl) dl.innerHTML = `${I('download')}Tetap unduh`;
+          return;
+        }
+        if (err.code === 'PHOTOS') problem(err.message);
+        this.toast(`Ekspor gagal: ${err.message}`, 'err');
       }
     };
     bg.addEventListener('click', (e) => {

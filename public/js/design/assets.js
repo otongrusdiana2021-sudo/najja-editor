@@ -6,6 +6,7 @@
 import { remote } from '../remote.js';
 import { db } from '../db.js';
 import { uid } from '../util.js';
+import { photosOf } from './exportcheck.js';
 
 const PREVIEW_MAX = 2048;
 const MAX_IMPORT = 6000;
@@ -80,15 +81,28 @@ export class Assets {
   async original(id) {
     if (this.full.has(id)) return this.full.get(id);
     await this.load(id);
-    return this.full.get(id);
+    if (this.full.has(id)) return this.full.get(id);
+    // (v1.13.2) only the on-screen copy is here: the original is fetched again, never the small copy or nothing
+    const pic = await decode(await this.blobOf(id));
+    this.full.set(id, pic);
+    return pic;
   }
-  /** Sources at full quality for an export of these pages. */
+  /**
+   * Sources at full quality for an export of these pages. (v1.13.2) A photo that does not load is no longer left
+   * out silently (the file came out without the product photo): it is listed in `failed` ({ id, pages, error }) and
+   * the export stops (design/app.js).
+   */
   async exportSources(pages) {
-    const ids = new Set();
-    for (const p of pages) { if (p.bg?.mediaId) ids.add(p.bg.mediaId); for (const e of p.els) if (e.mediaId) ids.add(e.mediaId); }
     const out = new Map();
-    for (const id of ids) { try { out.set(id, await this.original(id)); } catch { /* left out */ } }
-    return out;
+    const failed = [];
+    for (const ph of photosOf(pages)) {
+      try {
+        const pic = await this.original(ph.id);
+        if (!pic) throw new Error('foto tidak ada');
+        out.set(ph.id, pic);
+      } catch (err) { failed.push({ ...ph, error: err?.message || String(err) }); }
+    }
+    return Object.assign(out, { failed });
   }
 
   /**

@@ -16,6 +16,8 @@ import { Toolbar } from './toolbar.js';
 import * as actions from './actions.js';
 import { tools } from './api.js';
 import { bridge } from './bridge.js';
+import { blockedReason } from './cmdqueue.js';
+import { revCheck } from './core/sync.js';
 import { exportVideo, exportState, cancelExport, supportedFormats, exportSize } from './exporter.js';
 import { fastExportAvailable } from './fastexport.js';
 import { RESOLUTIONS, FPS_OPTIONS } from './presets.js';
@@ -80,12 +82,13 @@ nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') nameInput.
 const syncName = () => { if (document.activeElement !== nameInput) nameInput.value = store.P.name; document.title = `${store.P.name} · Najja Editor`; };
 store.on('project', syncName);
 store.on('rename', syncName);
-saveState.addEventListener('click', () => { if (store.conflict) conflictDialog(); });
+saveState.addEventListener('click', () => { if (store.conflict) conflictDialog(); else if (store.gone && store.gone === store.P.id) projectGoneDialog(store.gone); });
 store.on('conflict', () => conflictDialog());
 store.on('save', (s) => {
   saveState.className = `save-state ${s}`;
   saveState.innerHTML = s === 'saving' ? '<i class="spin"></i><span>Menyimpan…</span>'
     : s === 'conflict' ? `${icon('x', 13)}<span>Diubah di perangkat lain — pilih versi</span>`
+    : s === 'gone' ? `${icon('x', 13)}<span>Dihapus di perangkat lain — pilih tindakan</span>`
     : s === 'error' ? `${icon('x', 13)}<span>Gagal menyimpan — mencoba lagi…</span>`
       : `${icon('check', 13)}<span>${storage.server ? 'Tersimpan di server' : 'Tersimpan'}</span>`;
 });
@@ -298,12 +301,36 @@ if (window.visualViewport) {
 
 // ---------------------------------------------------------------------------------------------
 // Keyboard shortcuts
+/**
+ * (v1.13.2) While an export renders no shortcut runs: Space would pause the timeline a real-time export plays, and
+ * undo, split or delete would change the project being rendered. Space/Enter would also press a button still
+ * focused behind the export card (the play button, say), so they are held back too, except on the card's own
+ * buttons (Batal). A line on the card says why nothing happened.
+ */
+const APP_MOD_KEYS = new Set(['z', 'y', 'b', 'd', 'c', 'v', 'e', 'i', 'o', 'k', 's', '=', '+', '-', '0']);
+function exportKeys(e, k, mod) {
+  if (['tab', 'shift', 'control', 'meta', 'alt', 'capslock'].includes(k)) return;
+  if (document.activeElement?.closest?.('.export-overlay')) return;
+  if (k === ' ' || k === 'enter' || (mod && APP_MOD_KEYS.has(k))) { e.preventDefault(); e.stopPropagation(); }
+  const card = exportOverlay?.querySelector('.export-card');
+  if (!card) return;
+  let note = card.querySelector('.ex-keys');
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'hint ex-keys';
+    note.textContent = 'Pintasan keyboard tidak aktif selama ekspor. Tekan Batal untuk berhenti.';
+    card.querySelector('.ex-actions')?.before(note);
+  }
+  clearTimeout(note.timer);
+  note.timer = setTimeout(() => note.remove(), 3000);
+}
 const isTyping = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) && !['range', 'checkbox', 'button', 'color'].includes(el.type);
 window.addEventListener('keydown', (e) => {
   if (document.querySelector('.modal-wrap')) return;
   if (isTyping(document.activeElement)) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
+  if (exportState.state === 'running') { exportKeys(e, k, mod); return; }
   const stop = () => { e.preventDefault(); e.stopPropagation(); };
   if (k === ' ') { stop(); engine.toggle(); return; }
   if (mod && k === 'z') { stop(); e.shiftKey ? store.redo() : store.undo(); return; }
@@ -342,10 +369,21 @@ window.addEventListener('drop', async (e) => {
     } catch (err) { toast(err.message, { type: 'error', timeout: 4500 }); }
   }
 });
+/**
+ * (v1.13.2) Leaving or hiding the page: the device draft is written now (it waits 400 ms otherwise, so the last
+ * edit was lost when the tab closed sooner) and the server save starts.
+ */
+function flushNow() {
+  store.saveDraft.flush();
+  if (store.dirty) store.scheduleSave.flush();
+}
 window.addEventListener('beforeunload', (e) => {
-  store.scheduleSave.flush?.();
+  flushNow();
   if (uploadsPending() || remote.pending > 0) { e.preventDefault(); e.returnValue = ''; }
 });
+window.addEventListener('pagehide', flushNow); // Safari on iPad may close a tab without beforeunload
+// Back online: save now instead of waiting out the retry (up to 60 s after several failures).
+window.addEventListener('online', () => { if (store.dirty && !store.conflict) store.scheduleSave.flush(); });
 
 function shortcutsDialog() {
   const rows = [
@@ -571,15 +609,59 @@ function conflictDialog({ local = null } = {}) {
 }
 
 let pollingRev = false;
+let goneId = null; // (v1.13.2, V19) the open project the server no longer has
+// Saved again (the user chose to, or kept editing and autosave put it back): it exists again, follow it as before.
+store.on('save', (s) => { if (s === 'saved' && goneId && store.P.id === goneId) goneId = null; });
+// An autosave the server refused because the project was deleted since (410): the same question, once.
+store.on('gone', (id) => { if (goneId !== id && store.P.id === id) { goneId = id; projectGoneDialog(id); } });
+
+/**
+ * (v1.13.2, V19) The open project was deleted on another device or tab. Nothing is lost silently and nothing comes
+ * back silently: the user keeps it (saved to the server again, with the changes made here) or closes it.
+ */
+function projectGoneDialog(id) {
+  const name = store.P.name || 'Proyek';
+  const m = modal({
+    title: 'Proyek ini sudah dihapus',
+    body: `<p class="muted">Proyek <b>${escapeHtml(name)}</b> dihapus dari perangkat atau tab lain. Yang masih ada tinggal versi yang terbuka di sini.</p>
+      <ul class="conflict-list"><li><b>Simpan lagi</b>: proyek ini disimpan lagi ke server, dengan perubahan yang ada di sini.</li>
+      <li><b>Tutup</b>: kembali ke beranda tanpa menyimpan; proyek tetap terhapus.</li></ul>`,
+    footer: '<button class="btn" data-close-project>Tutup</button><button class="btn btn-primary" data-keep>Simpan lagi</button>',
+  });
+  m.el.querySelector('[data-keep]').onclick = async () => {
+    m.close();
+    if (store.P.id !== id) return;
+    store.dirty = true;
+    await store.save({ force: true }); // (the server refuses a plain save of a deleted project)
+    if (store.saveState === 'saved') toast('Proyek disimpan lagi', { type: 'ok' });
+  };
+  m.el.querySelector('[data-close-project]').onclick = async () => {
+    m.close();
+    if (store.P.id !== id) return;
+    store.dirty = false; // (nothing to save: closing must not put it back)
+    db.deleteDraft(id);
+    await goHome();
+  };
+}
+
 async function pollRevision() {
   if (!storage.server || document.hidden || pollingRev || store.conflict || store._live || exportState.state === 'running') return;
+  // (v1.13.2) never saved to the server yet (a new project, the empty one behind the home screen): nothing to
+  // follow, and asking every second only got 404s
+  if (!store.baseRev) return;
+  if (store.P.id === goneId) return; // (asked once: the user chose, or closed the question and keeps working)
   pollingRev = true;
   try {
     const id = store.P.id;
-    const r = await storage.projectRev(id).catch(() => null);
-    if (!r || store.P.id !== id || r.rev <= store.baseRev) return;
+    let r = null;
+    let error = null;
+    try { r = await storage.projectRev(id); } catch (err) { error = err; }
+    if (store.P.id !== id) return;
     // Newer on the server. With local changes, the next save gets 409 and the user chooses; without, follow it.
-    if (store.dirty || store.saveState === 'saving') return;
+    // (v1.13.2, V19) deleted on another device: said once, no more polling for it (it got a 404 every second)
+    const next = revCheck({ rev: r?.rev, error }, { baseRev: store.baseRev, dirty: store.dirty, saving: store.saveState === 'saving' });
+    if (next === 'gone') { goneId = id; projectGoneDialog(id); return; }
+    if (next !== 'follow') return;
     const rec = await storage.getProject(id);
     if (!rec || store.P.id !== id || store.dirty || store._live || (rec.rev || 0) <= store.baseRev) return;
     const t = engine.time;
@@ -598,7 +680,7 @@ async function pollRevision() {
   }
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { if (store.dirty) store.scheduleSave.flush(); } else pollRevision();
+  if (document.hidden) flushNow(); else pollRevision();
 });
 
 async function openProject(id) {
@@ -891,6 +973,8 @@ async function editorForAI(tool) {
 const toolsForMcp = Object.fromEntries(Object.entries(tools).map(([name, fn]) => [name, async (args) => { await editorForAI(name); return fn(args); }]));
 bridge.start({
   tools: toolsForMcp,
+  // (v1.13.2) asked when a tool's turn comes: during an export only reads (and export_video) run
+  blocked: (tool) => blockedReason(tool, { exporting: exportState.state === 'running' }),
   onDone: (tool) => {
     const label = AI_LABEL[tool];
     if (label) toast(`AI ${label}`, { type: 'ai', timeout: 1800 });

@@ -76,4 +76,26 @@ export function pageCanvas(design, page, scale, opts = {}) {
   drawPage(c.getContext('2d'), design, page, { scale, ...opts });
   return c;
 }
-export const toBlob = (canvas, type = 'image/png', quality = 0.92) => new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('gambar tidak bisa dibuat'))), type, quality));
+/**
+ * (v1.13.2) Whether this device draws a canvas of w × h (Safari on iPad refuses big ones: no context, or an empty
+ * image). Draws one pixel in the far corner and reads it back; the canvas is freed at once.
+ */
+export function canvasFits(w, h) {
+  const c = document.createElement('canvas');
+  try {
+    c.width = w;
+    c.height = h;
+    if (c.width !== w || c.height !== h) return false;
+    const ctx = c.getContext('2d');
+    if (!ctx) return false;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(w - 1, h - 1, 1, 1);
+    return ctx.getImageData(w - 1, h - 1, 1, 1).data[3] === 255;
+  } catch {
+    return false;
+  } finally {
+    c.width = 0;
+    c.height = 0;
+  }
+}
+export const toBlob =(canvas, type = 'image/png', quality = 0.92) => new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('gambar tidak bisa dibuat'))), type, quality));

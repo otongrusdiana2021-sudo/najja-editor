@@ -1,25 +1,22 @@
 // Editing actions shared by the UI (toolbar, shortcuts, menus, panels) and the MCP API.
 import {
-  store, makeClip, placeClip, splitClip, sortedClips, insertIntoMain, findFreeStart, MIN_CLIP, TRACK_KIND_FOR, clipEnd, packMain,
+  store, makeClip, placeClip, splitClip, sortedClips, insertIntoMain, MIN_CLIP, TRACK_KIND_FOR, clipEnd, packMain,
   upsertKeyframe, removeKeyframe, spreadLook, subtitleTrackOf, TRACK_NAMES,
 } from './store.js';
 import { mediaRT, importCanvasAsImage } from './media.js';
-import { TEXT_PRESETS, TEXT_TEMPLATES, DEFAULT_TEXT, FILTERS, TRANSITIONS, EFFECTS, BADGES, ADJUSTMENTS } from './presets.js';
+import { TEXT_TEMPLATES, FILTERS, TRANSITIONS, EFFECTS, BADGES, ADJUSTMENTS } from './presets.js';
 import { clone, deepMerge, uid } from './util.js';
 import { wordCount } from './kinetic.js';
 import { toast } from './ui.js';
+import * as cmd from './core/commands.js';
+import { presetStyle } from './core/clipedit.js';
 
 export const app = { engine: null, timeline: null, library: null, inspector: null, player: null, toolbar: null, openSheet: null };
 
 const now = () => app.engine?.time ?? 0;
 
-export function presetStyle(id) {
-  const p = TEXT_PRESETS.find((x) => x.id === id) || TEXT_PRESETS[0];
-  const base = clone(DEFAULT_TEXT);
-  deepMerge(base, clone(p.style));
-  base.preset = p.id;
-  return base;
-}
+// (v1.13.2, P0-6b) presetStyle moved to core/clipedit.js; still exported here for the panels that import it
+export { presetStyle };
 
 export function select(id) {
   store.select(id);
@@ -31,18 +28,9 @@ export function addMediaClip(mediaId, { track = 'auto', start, sourceIn = 0, dur
   const m = store.media(mediaId);
   if (!m) throw new Error(`Media tidak ditemukan: ${mediaId}`);
   if (mediaRT.get(mediaId)?.status === 'missing') throw new Error('File media ini hilang dari penyimpanan browser. Impor ulang filenya.');
-  const type = m.type;
-  const speed = props.speed || 1;
-  const inPt = Math.max(0, Math.min(sourceIn || 0, Math.max(0, (m.duration || 0) - MIN_CLIP)));
-  let dur = duration;
-  if (!dur) dur = type === 'image' ? 3 : Math.max(MIN_CLIP, ((m.duration || 3) - inPt) / speed);
-  if (type !== 'image' && m.duration) dur = Math.min(dur, (m.duration - inPt) / speed);
-  const clip = makeClip(type, { mediaId, in: inPt, duration: dur, name: m.name, ...props });
-  return store.mutate('Tambah klip', (P) => {
-    const target = type === 'audio' && track === 'auto' ? 'audio' : track;
-    placeClip(P, clip, target, start ?? (target === 'auto' || target === 'main' ? undefined : now()));
-    return clip;
-  });
+  const clip = cmd.mediaClip(m, { sourceIn, duration, props });
+  const at = now();
+  return store.mutate('Tambah klip', (P) => cmd.addClip(P, clip, { track, start, at }));
 }
 
 export function addText({ text = 'Teks baru', preset = 'default', template, start, duration = 3, track = 'auto', style = {}, props = {} } = {}) {
@@ -128,24 +116,17 @@ export function applyTransition(clipId, type, duration = 0.6) {
 
 // ---------------------------------------------------------------------------------------------
 // Timeline operations
+// (v1.13.2, P0-6b) the edits themselves are in core/commands.js (pure, shared with MCP); here: playhead, selection
 export function splitAt(t = now(), clipId) {
-  const P = store.P;
-  let targets;
-  if (clipId) targets = [store.clip(clipId)].filter(Boolean);
-  else {
-    const sel = store.selected();
-    targets = sel && t > sel.start && t < clipEnd(sel) ? [sel] : P.clips.filter((c) => t > c.start && t < clipEnd(c) && !store.track(c.trackId)?.locked);
-  }
-  targets = targets.filter((c) => t > c.start + MIN_CLIP / 2 && t < clipEnd(c) - MIN_CLIP / 2);
-  if (!targets.length) return [];
-  const created = store.mutate('Pisah', (p) => targets.map((c) => [c.id, splitClip(p, c, t)?.id]));
-  return created;
+  const ids = cmd.splitTargets(store.P, t, { clipId, selectedId: store.selection }).map((c) => c.id);
+  if (!ids.length) return [];
+  return store.mutate('Pisah', (P) => cmd.splitClips(P, ids, t));
 }
 
 export function deleteClips(ids) {
   ids = ids.filter((id) => store.clip(id));
   if (!ids.length) return 0;
-  store.mutate('Hapus', (P) => { P.clips = P.clips.filter((c) => !ids.includes(c.id)); });
+  store.mutate('Hapus', (P) => cmd.deleteClips(P, ids));
   if (ids.includes(store.selection)) store.select(null);
   return ids.length;
 }
@@ -154,40 +135,9 @@ export function deleteSelected() {
 }
 
 export function duplicateClip(id, start) {
-  const src = store.clip(id);
-  if (!src) throw new Error(`Klip tidak ditemukan: ${id}`);
-  const copy = clone(src);
-  copy.id = uid('c');
-  const created = store.mutate('Duplikat', (P) => {
-    if (src.trackId === 'main' && P.magnet) {
-      insertIntoMain(P, copy, start ?? clipEnd(src) - 0.001);
-      // insert right after the source
-      const list = sortedClips(P, 'main').filter((c) => c.id !== copy.id);
-      const idx = start != null ? undefined : list.indexOf(src) + 1;
-      if (idx !== undefined) {
-        list.splice(idx, 0, copy);
-        let t = 0;
-        for (const c of list) { c.start = t; t += c.duration; }
-      }
-    } else if (start != null) {
-      P.clips.push(copy);
-      copy.start = findFreeStart(P, copy.trackId, start, copy.duration, copy.id);
-      if (copy.start !== start) placeClip(P, copy, 'new', start);
-    } else {
-      // Right after the source (v1.9: it went to the next free place on the track, often the very end):
-      // - on the main track without magnet, the clips after it move along by the copy's length;
-      // - on other tracks, when the space right after it is taken, on a track above at that time.
-      P.clips.push(copy);
-      const s = clipEnd(src);
-      const free = findFreeStart(P, copy.trackId, s, copy.duration, copy.id) === s;
-      if (free) copy.start = s;
-      else if (src.trackId === 'main') {
-        for (const c of P.clips) if (c.trackId === 'main' && c.id !== copy.id && c.start >= s - 1e-4) c.start += copy.duration;
-        copy.start = s;
-      } else placeClip(P, copy, 'new', s);
-    }
-    return copy;
-  });
+  if (!store.clip(id)) throw new Error(`Klip tidak ditemukan: ${id}`); // (before the edit: a drag in progress stays)
+  const newId = uid('c');
+  const created = store.mutate('Duplikat', (P) => cmd.duplicateClip(P, id, start, newId));
   store.select(created.id);
   return created;
 }
@@ -214,24 +164,8 @@ export function paste() {
 }
 
 export function moveClip(id, { start, track } = {}) {
-  const c = store.clip(id);
-  if (!c) throw new Error(`Klip tidak ditemukan: ${id}`);
-  return store.mutate('Pindah', (P) => {
-    const tgt = track || c.trackId;
-    const s = start ?? c.start;
-    const curTrack = store.track(c.trackId);
-    if ((tgt === 'main' || store.track(tgt)?.kind === 'main')) {
-      if (!['video', 'image', 'solid'].includes(c.type)) throw new Error('Track utama hanya untuk video, foto, dan latar warna.');
-      insertIntoMain(P, c, s);
-    } else if (tgt === c.trackId && curTrack?.kind !== 'main') {
-      if (P.clips.some((o) => o.trackId === c.trackId && o.id !== c.id && o.start < s + c.duration - 1e-4 && o.start + o.duration > s + 1e-4)) placeClip(P, c, 'new', s);
-      else c.start = Math.max(0, s);
-    } else {
-      placeClip(P, c, tgt === c.trackId ? 'auto' : tgt, s);
-      if (c.trackId === 'main') insertIntoMain(P, c, s);
-    }
-    return c;
-  });
+  if (!store.clip(id)) throw new Error(`Klip tidak ditemukan: ${id}`); // (before the edit, as before)
+  return store.mutate('Pindah', (P) => cmd.moveClip(P, id, { start, track }));
 }
 
 export function toggleFlip(axis = 'h') {
@@ -471,13 +405,21 @@ export function removeClipEffect(clipId, index) {
   store.mutate('Hapus efek klip', () => { c.fx = (c.fx || []).filter((_, i) => i !== index); if (!c.fx.length) delete c.fx; });
 }
 /** Replace the clip's effects: [{ type, intensity }] (empty: none). */
-export function setClipEffects(clipId, list = []) {
-  const c = fxClip(clipId);
-  const fx = list.slice(0, CLIP_FX_MAX).map((f) => {
+/**
+ * The effects setClipEffects would put on the clip, checked the same way (throws the same errors) without changing
+ * anything. (v1.13.2, V20) update_clip calls it first, so a refused list leaves the project as it was.
+ */
+export function checkClipEffects(clipId, list = []) {
+  fxClip(clipId);
+  return list.slice(0, CLIP_FX_MAX).map((f) => {
     const type = f.type || f.effect;
     if (!EFFECTS.some((e) => e.id === type)) throw new Error(`Efek tidak dikenal: ${type}`);
     return { type, intensity: Math.max(0, Math.min(1, Number(f.intensity ?? 0.8))) };
   });
+}
+export function setClipEffects(clipId, list = []) {
+  const c = fxClip(clipId);
+  const fx = checkClipEffects(clipId, list);
   store.mutate('Efek klip', () => { if (fx.length) c.fx = fx; else delete c.fx; });
   return fx;
 }

@@ -12,7 +12,8 @@ import {
 import { Assets } from './assets.js';
 import { Stage } from './stage.js';
 import { UI } from './ui.js';
-import { pageCanvas, toBlob, envFor } from './draw.js';
+import { pageCanvas, toBlob, envFor, canvasFits } from './draw.js';
+import { exportScale, fontsOf, photoLabel } from './exportcheck.js';
 import { zip } from './zip.js';
 
 const SAVE_DELAY = 700;
@@ -147,6 +148,7 @@ class DesignApp {
   }
   async save({ force = false } = {}) {
     clearTimeout(this.saveT);
+    if (this.isGone && !force) { this.unsaved = true; this.ui.saveState('error', 'Dihapus di perangkat lain'); return undefined; } // (V19: waits for the user's choice)
     if (this.saving) { this.pendingSave = true; return this.savingP; }
     this.saving = true;
     this.unsaved = false;
@@ -159,11 +161,13 @@ class DesignApp {
         delete rec.rev;
         const res = await storage.putProject(rec, { baseRev: storage.server ? this.baseRev : null, force });
         if (res?.rev != null) this.baseRev = res.rev;
+        this.isGone = false;
         this.ui.saveState(this.unsaved ? 'dirty' : this.uploadsN ? 'uploading' : storage.server ? 'saved' : 'local');
         this.retryUploads();
       } catch (err) {
         this.unsaved = true;
         if (err.status === 409) this.conflict();
+        else if (err.status === 410 && err.data?.gone) this.gone(); // (V19: no retry for ever)
         else {
           this.ui.saveState('error', 'Gagal menyimpan · dicoba lagi');
           clearTimeout(this.retryT);
@@ -188,6 +192,22 @@ class DesignApp {
     document.body.appendChild(bg);
     bg.addEventListener('click', (e) => {
       if (e.target.closest('[data-reload]')) location.reload();
+      if (e.target.closest('[data-force]')) { bg.remove(); this.save({ force: true }); }
+    });
+  }
+  /** (v1.13.2, V19) Deleted on another device or tab after it was opened here: the user keeps it or leaves. */
+  gone() {
+    this.isGone = true;
+    this.ui.saveState('error', 'Dihapus di perangkat lain');
+    if (document.querySelector('.ds-modal-bg[data-gone]')) return;
+    const bg = document.createElement('div');
+    bg.className = 'ds-modal-bg';
+    bg.dataset.gone = '1';
+    bg.innerHTML = `<div class="ds-modal"><h2>Desain ini sudah dihapus</h2><p class="ds-hint" style="font-size:13px">Desain ini dihapus dari perangkat atau tab lain setelah dibuka di sini. Simpan lagi untuk memulihkannya dengan isi yang ada di sini, atau kembali ke beranda (desain tetap terhapus).</p>
+      <div class="ds-actions"><button class="ds-btn" data-home>Ke beranda</button><button class="ds-btn acc" data-force>Simpan lagi</button></div></div>`;
+    document.body.appendChild(bg);
+    bg.addEventListener('click', (e) => {
+      if (e.target.closest('[data-home]')) { this.unsaved = false; location.href = '/'; }
       if (e.target.closest('[data-force]')) { bg.remove(); this.save({ force: true }); }
     });
   }
@@ -546,20 +566,37 @@ class DesignApp {
 
   // ---------------------------------------------------------------------------------------------
   // export
-  /** The pages as image files ({ name, blob }; several pages: one ZIP). fmt: png | jpg | tpng; scale: 1 | 2. */
-  async exportFiles({ fmt = 'png', pages = 'cur', scale = 1, onProgress = () => {} } = {}) {
+  /**
+   * The pages as image files ({ name, blob, width, height, reduced }; several pages: one ZIP). fmt: png | jpg | tpng;
+   * scale: 1 | 2. (v1.13.2) Before drawing: a photo that does not load stops the export (code PHOTOS, with the
+   * list); a font that did not load stops it too (code FONTS) unless anyway: true; a size this device cannot draw
+   * is made smaller (reduced: true) instead of giving an empty or broken file.
+   */
+  async exportFiles({ fmt = 'png', pages = 'cur', scale = 1, anyway = false, onProgress = () => {} } = {}) {
     if (this.stage.editing) this.stage.endEdit();
     const d = this.design;
     const list = pages === 'all' ? d.pages.map((p, i) => [p, i]) : [[this.page, this.pageIndex]];
-    await preloadFonts({ clips: list.flatMap(([p]) => p.els) }).catch(() => {});
+    const chosen = list.map(([p]) => p);
+    await preloadFonts({ clips: chosen.flatMap((p) => p.els) }).catch(() => {});
     if (document.fonts?.ready) await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 3000))]);
-    const sources = await this.assets.exportSources(list.map(([p]) => p));
+    const sources = await this.assets.exportSources(chosen);
+    if (sources.failed.length) {
+      const what = sources.failed.map((f) => photoLabel(d, f)).join(', ');
+      throw Object.assign(new Error(`${sources.failed.length} foto tidak bisa dimuat: ${what}. Periksa koneksi lalu coba lagi, atau ganti foto itu.`), { code: 'PHOTOS', failed: sources.failed });
+    }
+    if (!anyway && document.fonts) {
+      const fonts = fontsOf(chosen);
+      await Promise.race([Promise.all(fonts.map((f) => document.fonts.load(f.spec, f.text || undefined).catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]);
+      const missing = [...new Set(fonts.filter((f) => !document.fonts.check(f.spec, f.text || undefined)).map((f) => f.family))];
+      if (missing.length) throw Object.assign(new Error(`Font belum termuat: ${missing.join(', ')}. Teksnya akan memakai font pengganti.`), { code: 'FONTS', fonts: missing });
+    }
+    const size = exportScale(d.width, d.height, scale, canvasFits);
     const type = fmt === 'jpg' ? 'image/jpeg' : 'image/png';
     const ext = fmt === 'jpg' ? 'jpg' : 'png';
     const base = safeName(d.name);
     const files = [];
     for (const [k, [p, i]] of list.entries()) {
-      const c = pageCanvas(d, p, scale, { sources, transparent: fmt === 'tpng' });
+      const c = pageCanvas(d, p, size, { sources, transparent: fmt === 'tpng' });
       const blob = await toBlob(c, type, 0.92);
       c.width = 0; // (free the memory at once: tablets keep little)
       c.height = 0;
@@ -567,9 +604,10 @@ class DesignApp {
       onProgress((k + 1) / list.length);
       await new Promise((r) => setTimeout(r, 0));
     }
-    if (files.length === 1) return files[0];
+    const info = { width: Math.round(d.width * size), height: Math.round(d.height * size), reduced: size < scale };
+    if (files.length === 1) return { ...files[0], ...info };
     const z = zip(await Promise.all(files.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.blob.arrayBuffer()) }))));
-    return { name: `${base}.zip`, blob: new Blob([z], { type: 'application/zip' }) };
+    return { name: `${base}.zip`, blob: new Blob([z], { type: 'application/zip' }), ...info };
   }
 
   // ---------------------------------------------------------------------------------------------
