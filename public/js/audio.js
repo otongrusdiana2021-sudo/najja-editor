@@ -29,6 +29,9 @@ const AHEAD = 1.0; // timeline seconds of sound scheduled ahead of what the spea
 const PREFETCH = 8; // timeline seconds decoded ahead
 const START_LEAD = 0.05; // seconds between deciding to start and the first scheduled sample
 const START_WAIT_MS = 700; // play waits at most this long for the first sound to be decoded
+// (v1.14.3) ... and at most this long for the pictures of the cuts of the next moment to be here (copy still streamed:
+// a project opening with 5 cuts in 1.7 s showed its first cuts late on Wi-Fi)
+const PREROLL_WAIT_MS = 1500;
 const KEEP_S = 150; // decoded seconds kept in memory, all files together (≈ 55 MB at 48 kHz stereo)
 const FULL_MAX_S = 150; // MP3/WAV/… are decoded whole up to this length; longer ones keep the element's sound
 const UPDATE_MS = 90;
@@ -83,9 +86,10 @@ class Source {
   /** Bytes of the samples of [t0, t1] (source seconds), read before the decoder starts (they may come from the server). */
   async load(t0, t1, { low = false } = {}) {
     if (!this.bytes || !this.track) return;
-    // (v1.14.1) only the sound's own bytes: in an MP4 they lie in runs between the video's, and reading the whole span
-    // fetched ~10× more (all the video of those seconds) — on Wi-Fi that delayed the pictures of the next cuts
-    const runs = runsOf(this.track.samples.filter((x) => x.pts >= t0 - 0.3 && x.pts <= t1 + 0.3));
+    // (v1.14.1) only the bytes of the stretch of sound needed (not 8 s of the whole file around it)
+    // (v1.14.3) runs less than 256 KB apart as one: in the server's copies (ffmpeg) the sound sits between the
+    // pictures every ~20 ms, and a request per 400-byte piece flooded an iPad on Wi-Fi with hundreds a second
+    const runs = runsOf(this.track.samples.filter((x) => x.pts >= t0 - 0.3 && x.pts <= t1 + 0.3), 256 << 10);
     if (runs.length) await withTimeout(Promise.all(runs.map((r) => this.bytes.ensure(r.a, r.z, { exact: true, low }))), READ_TIMEOUT_MS, 'reading the sound from the server');
   }
   blockOf(s) { return this.state === 'full' ? 0 : Math.max(0, Math.floor(s / this.block + 1e-9)); }
@@ -226,7 +230,9 @@ export class PreviewAudio {
     const ctx = this.ctx;
     if (this.pending) {
       const p = this.pending;
-      if (ctx.state !== 'running' || (!this.firstReady(p.t) && now < p.until)) { this.live = false; return p.t; }
+      const soundLate = !this.firstReady(p.t) && now < p.until;
+      const picturesLate = now - p.at < PREROLL_WAIT_MS && this.E.picturesReadyAt?.(p.t) === false;
+      if (ctx.state !== 'running' || soundLate || picturesLate) { this.live = false; return p.t; }
       this.anchor = { t0: p.t, c0: ctx.currentTime + START_LEAD };
       this.pending = null;
       metrics.sample('audio_start_wait_ms', now - p.at);

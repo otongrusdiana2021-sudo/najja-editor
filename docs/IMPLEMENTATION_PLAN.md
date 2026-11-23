@@ -761,3 +761,25 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Container `healthy`, 0 restart, 0 error di log. `/healthz`, `/login`, dan `.well-known` 200; Range tetap `206`.
   - `resumeAfterScrub` ada di dalam container.
 
+#### P2-6 v1.14.3: iPad 10 masih tersendat — banjir permintaan kecil dan salinan 97 MB yang selalu diunduh ulang (2026-11-23)
+
+- **Laporan pemilik:** di iPad 10 (A14, RAM 4 GB) masih kurang mulus, apalagi dengan sound effect dan potong-ke-potong. Di Mac M4 mulus.
+- **Bukti dari log nginx** (sesi iPad 15:03–15:06, CriOS = WebKit):
+  - 4.971 permintaan ke satu salinan ringan. 3.730 di antaranya di bawah 1 KB (rata-rata ~400 byte, sebesar satu potong suara AAC), dengan puncak 365 permintaan/dtk.
+  - Salinan 97,7 MB diunduh penuh ulang di setiap sesi ("200 97 MB" pada 14:14, 14:15, 14:54, 15:06): 228–335 MB per 10 menit. Salinan di perangkat itu tidak pernah terpakai di iPad.
+- **Bukti dari tabel sampel** salinan ringan pemilik (dibaca di server, hanya metadata): ffmpeg menyelipkan suara di antara gambar per ~20 ms, yaitu 94 potong per 2 dtk. Pembaca v1.14.1 membuat 60 permintaan per blok suara 2 dtk. Video uji lab (AVAssetWriter) mengelompokkan per ~0,4 dtk, jadi masalah ini tidak muncul di lab.
+- **Proyek pemilik:** 1080×1920, 203 dtk, 6 klip dari satu video 4K: 5 potongan 0,1–0,72 dtk lalu 1 klip 201 dtk. 1 klip dipercepat 2×, jadi klip itu masih memakai elemen `<video>`. Tidak ada filter atau efek.
+- **Perbaikan:**
+  - `audio.js`: deretan suara yang berjarak kurang dari 256 KB dibaca sebagai satu permintaan. Per blok 2 dtk: 60 → 1 permintaan (dihitung dari tabel sampel asli).
+  - `mediabytes.js`: lubang yang berjarak kurang dari 64 KB diambil dalam satu permintaan (`JOIN_GAP`).
+  - `media.js`: salinan cadangan di memori hanya untuk file ≤ 64 MB (kecuali ekspor); file lebih besar di-*stream*. Kegagalan menyimpan salinan di perangkat dicatat beserta alasannya, dan ditampilkan di Diagnostik.
+  - `engine.js` + `audio.js`: buffer awal. Play mulai setelah byte gambar 1,5 dtk ke depan ada (maksimal tunggu 1,5 dtk; salinan di perangkat tidak menunggu). Pengambilan awal mulai dari playhead.
+- **Diukur** dengan proyek berbentuk sama, di-*stream* lewat proxy HTTP/2 (10 Mbps, 150 ms), dengan suara, 3 putaran:
+  - 5/5 potongan tepat waktu, 0 buffer, 0 suara kosong.
+  - ~20 permintaan per putaran.
+  - Tunggu awal 0,95–1,5 dtk.
+- **Test:** 2 test baru (deretan suara gaya ffmpeg → 1 permintaan; lubang berdekatan → 1 permintaan), keduanya gagal tanpa perbaikannya. Penuh: 312 test, 298 lulus, 0 gagal, 14 dilewati.
+- **Belum:**
+  - Penyebab salinan di perangkat tidak tersimpan di iPad belum diketahui; butuh Diagnostik JSON dari iPad.
+  - Klip bersuara yang dipercepat masih memakai `<video>`.
+

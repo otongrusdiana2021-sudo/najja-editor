@@ -34,6 +34,7 @@ const DEC_PRIME = 3;
 // The picture is this far behind the clock: the playhead waits for it (after STALL_GRACE_MS), like a stalled video.
 const DEC_STALL_LAG = 0.25;
 const PREFETCH_CUTS_S = 4; // seconds of timeline whose cuts' bytes are fetched ahead while playing
+const PREROLL_S = 1.5; // (v1.14.3) play starts once the pictures of this much timeline are here (at most 1.5 s wait)
 const ENGINE_PREF = 'najja.previewEngine'; // 'element': the <video> elements as before v1.14 (Diagnostik switch)
 const loadEnginePref = () => { try { return localStorage.getItem(ENGINE_PREF) === 'element' ? 'element' : 'auto'; } catch { return 'auto'; } };
 
@@ -894,17 +895,39 @@ export class Engine {
     if (this.exportTarget || this.frameMode === 'element' || now - (this.pfAt || 0) < 200) return;
     this.pfAt = now;
     const t = this.time;
-    const next = (store.P?.clips || []).filter((c) => c.type === 'video' && c.start > t && c.start <= t + PREFETCH_CUTS_S).sort((a, b) => a.start - b.start);
+    const next = (store.P?.clips || []).filter((c) => c.type === 'video' && c.start + c.duration > t && c.start <= t + PREFETCH_CUTS_S).sort((a, b) => a.start - b.start);
     for (const c of next) {
       const f = videoFileFor(mediaRT.get(c.mediaId));
       if (f?.state !== 'ready' || this.decFailed.has(c.mediaId)) continue;
       const S = f.track.samples;
-      const k = f.keyIndexAt(c.in);
-      const until = Math.min(c.in + c.duration * (c.speed || 1), c.in + 1.5);
+      const from = this.localTime(c, Math.max(t, c.start)); // (the clip on screen: from the playhead on)
+      const k = f.keyIndexAt(from);
+      const until = Math.min(c.in + c.duration * (c.speed || 1), from + 1.5);
       let j = k;
       while (j + 1 < S.length && S[j + 1].pts <= until) j++;
       f.bytes.prefetch(S[k].offset, S[j].offset + S[j].size - S[k].offset, { high: c.start - t < 1 });
     }
+  }
+  /**
+   * (v1.14.3) Before play starts (audio.js waits on it, at most PREROLL_WAIT_MS): are the bytes of the pictures of the
+   * next PREROLL_S of timeline here? A copy on this device always is; a streamed one is fetched by prefetchCuts. Like
+   * a video player's start buffer: a short wait at the start instead of the first cuts late.
+   */
+  picturesReadyAt(t) {
+    if (this.frameMode === 'element') return true;
+    for (const c of store.P?.clips || []) {
+      if (c.type !== 'video' || c.start + c.duration <= t || c.start > t + PREROLL_S || this.decFailed.has(c.mediaId)) continue;
+      const f = videoFileFor(mediaRT.get(c.mediaId));
+      if (!f || f.state !== 'ready' || f.bytes.blob) continue;
+      const S = f.track.samples;
+      const from = this.localTime(c, Math.max(t, c.start));
+      const k = f.keyIndexAt(from);
+      const until = Math.min(c.in + c.duration * (c.speed || 1), from + 0.6);
+      let j = k;
+      while (j + 1 < S.length && S[j + 1].pts <= until) j++;
+      if (!f.bytes.has(S[k].offset, S[j].offset + S[j].size - S[k].offset)) return false;
+    }
+    return true;
   }
   /** A decoder has the picture for its target (redraw), or failed (its media goes back to the <video> element). */
   onDecFrame(D) {

@@ -274,6 +274,11 @@ async function tryOriginal(id, entry) {
 // disk. Streaming the same file to several players at once over a home connection is what made video drop out
 // mid-way; after the download, playback and export never wait on the network.
 const DEVICE_FILE_MAX = 1024 ** 3; // larger files keep streaming
+// (v1.14.3) A copy kept in memory (no persistent storage, or it failed) only up to this size for the preview: the
+// preview streams the bytes it needs. An iPad 10 (4 GB) downloaded its 97 MB light copy into memory again on every
+// visit (the copy on the device was never usable there) — over Wi-Fi, next to the preview's own reads. An export still
+// gets a full copy in memory (it waits for it).
+const MEMORY_PREVIEW_MAX = 64 * 1024 ** 2;
 const DEVICE_TOTAL_MAX = 2 * 1024 ** 3;
 let deviceBytes = 0;
 let cacheChain = Promise.resolve();
@@ -328,6 +333,7 @@ export async function cacheLocally(id) {
 async function downloadToDevice(id, src, onProgress, stillWanted) {
   // Persistent copy on this device (survives refresh and browser restarts), limited to 5 GB.
   const key = deviceCache.keyFor(id, src);
+  let why = key ? 'no persistent storage (OPFS)' : 'not a server copy';
   if (key && await deviceCache.available()) {
     let last = 0;
     try {
@@ -349,17 +355,24 @@ async function downloadToDevice(id, src, onProgress, stillWanted) {
       onProgress?.(null);
       if (url) {
         if (!stillWanted()) { revokeUrl(url); return null; }
+        metrics.count('device_copy_saved');
         return url;
       }
-    } catch { /* fall through to the in-memory copy */ }
+      why = 'the saved copy could not be opened';
+    } catch (err) { why = `error: ${String(err?.message || err).slice(0, 120)}`; }
     onProgress?.(null);
     if (!stillWanted()) return null;
   }
-  return downloadToMemory(src, onProgress, stillWanted);
+  // (v1.14.3) Diagnostik shows why a copy could not be kept on this device
+  if (key) {
+    metrics.count('device_copy_failed');
+    metrics.event('device_copy_failed', { why, file: String(entryOf(id)?.name || id).slice(0, 40) });
+  }
+  return downloadToMemory(src, onProgress, stillWanted, forceCache > 0 ? DEVICE_FILE_MAX : MEMORY_PREVIEW_MAX);
 }
 
 /** Fallback when the browser has no persistent storage (or no room): keep a copy in memory for this tab. */
-async function downloadToMemory(src, onProgress, stillWanted) {
+async function downloadToMemory(src, onProgress, stillWanted, maxSize = DEVICE_FILE_MAX) {
   const parts = [];
   let got = 0;
   let total = 0;
@@ -381,7 +394,11 @@ async function downloadToMemory(src, onProgress, stillWanted) {
       if (!total) {
         total = Number((r.headers.get('content-range') || '').split('/')[1]) || Number(r.headers.get('content-length')) || 0;
         type = r.headers.get('content-type') || '';
-        if (total > DEVICE_FILE_MAX || deviceBytes + total > DEVICE_TOTAL_MAX) { r.body.cancel().catch(() => {}); return null; }
+        if (total > maxSize || deviceBytes + total > DEVICE_TOTAL_MAX) {
+          r.body.cancel().catch(() => {});
+          if (total > maxSize) metrics.count('memory_copy_skipped_streams'); // (the preview streams it instead)
+          return null;
+        }
         onProgress?.(0);
       }
       const reader = r.body.getReader();

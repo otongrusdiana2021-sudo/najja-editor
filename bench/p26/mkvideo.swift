@@ -1,5 +1,6 @@
 // Test video like the server's light copy: H.264 Main 1280x720 30 fps, keyframe every 15 frames, no B-frames,
 // moov at the front, AAC stereo. Every frame shows its number and a white bar at x = (frame % 30).
+// CHUNK=frame interleaves sound and pictures every frame, like ffmpeg (the server's light copies).
 import AVFoundation
 import AppKit
 import CoreText
@@ -15,11 +16,15 @@ let vset: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthK
     AVVideoAllowFrameReorderingKey: false, AVVideoProfileLevelKey: AVVideoProfileLevelH264MainAutoLevel, AVVideoExpectedSourceFrameRateKey: 30]]
 let vin = AVAssetWriterInput(mediaType: .video, outputSettings: vset)
 vin.expectsMediaDataInRealTime = false
+// CHUNK=frame: sound and pictures interleaved every frame, like the server's light copies (ffmpeg)
+let perFrame = ProcessInfo.processInfo.environment["CHUNK"] == "frame"
+if perFrame { vin.preferredMediaChunkDuration = CMTime(value: 1, timescale: 30) }
 let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: vin, sourcePixelBufferAttributes: [
   kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: w, kCVPixelBufferHeightKey as String: h])
 writer.add(vin)
 let ain = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 128000])
 ain.expectsMediaDataInRealTime = false
+if perFrame { ain.preferredMediaChunkDuration = CMTime(value: 1024, timescale: 48000) }
 writer.add(ain)
 writer.startWriting()
 writer.startSession(atSourceTime: .zero)

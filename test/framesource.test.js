@@ -323,7 +323,7 @@ test('a range announced is fetched exactly, in one request — not the whole win
   assert.ok(log[1][1] < 1_150_000 + 65_536, `ends at ${log[1][1]}`);
 });
 
-test('the sound\'s own bytes: its runs between the video\'s are fetched without the video around them', async () => {
+test('exact runs far apart (more than 64 KB): fetched without the bytes between them', async () => {
   const log = [];
   const b = MediaBytes.fromUrl('/m/1/edit?v=1', { fetch: server(log) });
   // audio samples in runs of 4 × 2000 bytes, every 100 000 bytes (the video's runs in between)
@@ -335,6 +335,28 @@ test('the sound\'s own bytes: its runs between the video\'s are fetched without 
   assert.equal(b.stats.bytes, 8 * 8000, 'only the sound: 64 KB, not the 750 KB of video between');
   for (const x of audio) assert.deepEqual(await b.read(x.offset, x.size), FILE.slice(x.offset, x.offset + x.size));
   assert.equal(log.length, 8);
+});
+
+test('ffmpeg-style interleaving (a 400-byte piece of sound every 21 ms between the pictures): a 2 s block of sound is one request', async () => {
+  // (iPad, 2026-11-23: 3,730 requests under 1 KB in 3 minutes, up to 365 a second — one per piece of sound)
+  const log = [];
+  const b = MediaBytes.fromUrl('/m/1/edit?v=1', { fetch: server(log) });
+  const audio = [];
+  let off = 10_000;
+  for (let t = 0; t < 2.6; t += 1024 / 48000) { audio.push({ offset: off, size: 400, pts: t }); off += 400 + 6000; } // (a picture of ~6 KB after each)
+  await Promise.all(runsOf(audio, 256 << 10).map((r) => b.ensure(r.a, r.z, { exact: true })));
+  assert.equal(log.length, 1, `${log.length} requests for ${audio.length} pieces of sound`);
+  for (const x of audio.slice(0, 20)) assert.deepEqual(b.peek(x.offset, x.size), FILE.slice(x.offset, x.offset + x.size));
+});
+
+test('holes less than 64 KB apart in what is here are fetched as one request', async () => {
+  const log = [];
+  const b = MediaBytes.fromUrl('/m/1/edit?v=1', { fetch: server(log) });
+  for (let k = 0; k < 10; k++) await b.ensure(100_000 + k * 20_000, 100_000 + k * 20_000 + 12_000, { exact: true }); // pieces with 8 KB holes
+  const before = log.length;
+  await b.ensure(100_000, 300_000);
+  assert.equal(log.length - before, 1, 'one request for the nine holes');
+  assert.deepEqual(b.peek(100_000, 200_000), FILE.slice(100_000, 300_000));
 });
 
 test('the device copy arrives: the same reader reads it from then on, without the network', async () => {

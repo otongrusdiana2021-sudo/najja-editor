@@ -18,6 +18,10 @@ import { blobOfUrl } from './util.js';
 const MIN_READ = 64 << 10; // a server read is at least this long (a lone sample read then serves its neighbours too)
 const MIN_READ_BLOB = 2 << 20; // a slice of a device copy (local: big slices are cheap)
 const MAX_READ = 4 << 20; // longer ranges are fetched in pieces (each one usable as soon as it is here)
+// (v1.14.3) Holes less than this apart are fetched as one request, the bytes between them again. The server's light
+// copy (ffmpeg) puts the sound between the pictures every ~20 ms: read hole by hole, an iPad sent 3,730 requests of
+// under 1 KB in 3 minutes (365 a second at the start of play), and the sound and the next cuts came late.
+const JOIN_GAP = 64 << 10;
 const BUDGET = 48 << 20; // bytes kept in memory, all files together
 const RETRIES = 4;
 // Reads ahead of need (low priority) run at most this many at a time, all files together; a read needed now starts at
@@ -151,7 +155,13 @@ export class MediaBytes {
     if (z <= a) return Promise.resolve();
     // a read needed now: what was queued ahead of need for this range starts at once
     if (!low) for (const f of this.inflight) if (!f.started && f.a < z && f.z > a) f.startNow();
-    for (let [ga, gz] of this.gaps(a, z)) {
+    const holes = [];
+    for (const g of this.gaps(a, z)) {
+      const last = holes[holes.length - 1];
+      if (last && g[0] - last[1] <= JOIN_GAP) last[1] = g[1];
+      else holes.push([...g]);
+    }
+    for (let [ga, gz] of holes) {
       if (!exact && gz - ga < this.minRead) {
         const next = [...this.segs, ...this.inflight].filter((s) => s.a >= gz).reduce((m, s) => Math.min(m, s.a), Infinity);
         gz = Math.min(ga + this.minRead, next, this.size || Infinity);
