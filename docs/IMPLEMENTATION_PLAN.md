@@ -783,3 +783,5 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Penyebab salinan di perangkat tidak tersimpan di iPad belum diketahui; butuh Diagnostik JSON dari iPad.
   - Klip bersuara yang dipercepat masih memakai `<video>`.
 
+- **Deploy produksi `5b3a824` (P2-6 v1.14.3), 2026-11-23 15:22 UTC:** VPS `27208b1` → `5b3a824`, image lama `backup-27208b1`. Test lokal 298 lulus / 0 gagal, CI hijau (run 45203806654). Container `healthy`, 0 restart, 0 error di log, Range tetap `206`. `JOIN_GAP`, `MEMORY_PREVIEW_MAX`, dan `picturesReadyAt` ada di dalam container. **Berikutnya:** pemilik mencoba di iPad 10 dan mengirim Diagnostik JSON (kenapa salinan di perangkat tidak tersimpan).
+
