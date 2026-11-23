@@ -4,3 +4,8 @@ services:
   najja:
     ports:
       - "127.0.0.1:${NAJJA_LOCAL_PORT:-3333}:3333"
+  # (v1.13.2) Di mode ini web server lain yang memegang 80/443, jadi Caddy tidak pernah dinyalakan, juga oleh
+  # `docker compose up -d` tanpa nama service (dulu Caddy ikut menyala dan bentrok dengan nginx). Mode Caddy biasa
+  # (tanpa file ini) tidak berubah.
+  caddy:
+    profiles: ["caddy"]

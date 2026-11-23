@@ -84,7 +84,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 
 | Milestone | Status |
 |---|---|
-| P0-1 Antrian perintah MCP + mutex capture | ✅ selesai, di-commit di branch `feat/p0-1-mcp-command-queue` (**belum di-push dan belum di-deploy**). E2E belum dijalankan (lihat log) |
+| P0-1 Antrian perintah MCP + mutex capture | ✅ selesai. **Di produksi sejak 2026-11-23** (PR #1, `96d2e9f`) bersama P0-2 sampai P0-6b langkah 3, V19, dan V20 |
 | P0-2 Autosave + kunci ekspor | ✅ selesai, di-commit di branch `feat/p0-2-autosave-export-lock` (dibangun di atas P0-1; **belum di-push dan belum di-deploy**). Thumbnail per-autosave (bagian V14) ditunda ke P2 karena butuh benchmark |
 | P0-3 Test infra + CI | ✅ selesai. Branch `feat/p0-3-contract-ci` (berisi P0-1 + P0-2 + P0-3) **sudah di-push** ke GitHub (belum di-merge ke `main`, belum di-deploy). Run CI pertama **hijau** (run 45125714348). E2E Playwright di CI ditunda |
 | P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy`, ikut di-push lewat branch `feat/p0-5-design-export` (CI hijau, run 45129262367). Snippet nginx `.well-known` **dipasang di VPS 2026-11-23**. **Belum:** record DNS `www` (butuh akses pengelola DNS) |
@@ -442,3 +442,25 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
   - Rantai discovery MCP: `POST /mcp` tanpa token → 401 dengan `resource_metadata` → URL itu 200.
 - **Rollback:** hapus file tersebut, lalu `nginx -t && nginx -s reload`.
 - **Belum dicoba:** menyambungkan klien AI sungguhan lewat discovery `/.well-known/`, karena butuh akun pengguna. Jalur yang dipakai klien kini menjawab benar.
+
+#### Deploy produksi `96d2e9f` (PR #1) — 2026-11-23
+
+- **Izin:** PR #1 di-merge pemilik (merge commit, semua 23 commit tetap ada), lalu pemilik menyetujui deploy secara eksplisit.
+- **Sebelum:**
+  - CI `main` hijau. Tree `96d2e9f` identik dengan branch PR yang sudah hijau.
+  - `npm test` di `main`: 256 lulus, 0 gagal.
+  - VPS di `86305a7`, bersih, disk sisa 65 GB, kedua container sehat.
+  - Image lama ditandai `najja-editor-najja:v1.13.1-backup` (`029801390a7e`).
+- **Langkah:** `git merge --ff-only` ke `96d2e9f` (Dockerfile dan compose tidak berubah), `docker compose build najja` (6 dtk, container lama tetap melayani), lalu ganti container.
+- **Insiden (±2 menit down, 502):**
+  - Container diganti dengan `docker compose up -d najja` yang hanya memakai `docker-compose.yml`. Produksi ternyata dijalankan dengan `docker-compose.yml` **dan** `deploy/compose.proxy.yml`; file kedua mem-publish `127.0.0.1:3333`.
+  - Container baru sehat, tapi tanpa port ke host, sehingga nginx menjawab 502.
+  - Penyebabnya terlihat di label `com.docker.compose.project.config_files` container `ai` yang belum diganti. Diperbaiki dengan `docker compose -f docker-compose.yml -f deploy/compose.proxy.yml up -d najja`, dan `healthz` 200 dalam 2 dtk.
+  - **Akar masalah:** prosedur update di `DEPLOY.md` (ditulis di P0-4) tidak memeriksa file compose mana yang dipakai produksi. Prosedur itu kini diperbaiki: dua file selalu dipakai, image dicadangkan dulu, port dicek setelah deploy, dan ada rollback tanpa build. Pencegahan tambahan yang diusulkan: `COMPOSE_FILE=docker-compose.yml:deploy/compose.proxy.yml` di `.env` VPS, supaya `docker compose` biasa memakai kedua file (butuh izin, belum dilakukan).
+- **Sesudah (dari luar):**
+  - `/healthz`, `/login`, `/oauth/*`, dan ketiga `.well-known` = 200.
+  - Header keamanan P0-4 muncul di `/login`, bukti kode baru berjalan.
+  - Rantai `/mcp` 401 → metadata jalan.
+  - Port `127.0.0.1:3333->3333/tcp`. Log 0 error. Kedua container sehat.
+  - `healthz` tetap menyebut 1.13.1, karena versi di `package.json` belum dinaikkan.
+- **Belum dicek:** alur pengguna yang butuh login (editor, Desain, MCP dengan token) dan iPad. Pemilik diminta mencoba.
