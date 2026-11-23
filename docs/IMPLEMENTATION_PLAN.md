@@ -90,7 +90,7 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
 | P0-4 Keamanan dan deploy | 🟡 bagian kode selesai, di-commit di branch `feat/p0-4-security-deploy`, ikut di-push lewat branch `feat/p0-5-design-export` (CI hijau, run 45129262367). **Belum dipasang:** snippet nginx `.well-known` di VPS (butuh izin) dan record DNS `www` (butuh akses pengelola DNS) |
 | P0-5 Ekspor Najja Desain aman | ✅ selesai, branch `feat/p0-5-design-export` (berisi P0-1 sampai P0-5) **sudah di-push**. CI hijau di Node 22 (run 45129262367). Belum di-merge ke `main`, belum di-deploy. Belum diuji di iPad Safari asli (jalur perkecil-otomatis hanya terpicu di sana) |
 | P0-6a Validasi argumen MCP di server | ✅ selesai, di-commit di branch `feat/p0-6-mcp-validation` (di atas P0-5; belum di-push) |
-| P0-6b Service layer `public/js/core/` | 🟡 langkah 1 selesai (validator + schema bersama, perintah tempel divalidasi), di-commit di branch `feat/p0-6b-core-validate` (di atas P0-6a; belum di-push). Langkah 2–3 belum |
+| P0-6b Service layer `public/js/core/` | 🟡 langkah 1 (validator + schema bersama) dan langkah 2 (split/hapus/duplikat/pindah/tambah klip di `core/commands.js`) selesai, branch `feat/p0-6b-core-commands` (belum di-push). Sisa: `update_clip` dan teks/subtitle ke `core/`, serta helper model dari `store.js` |
 | Lainnya | ⏳ belum mulai |
 
 ### Log milestone
@@ -318,3 +318,32 @@ P0-4 Keamanan + deploy (paralel)      P0-5 Ekspor Desain aman ──► P2-3 Mem
     - Proyek uji dihapus.
 - **Temuan baru:** V19 (lihat `AUDIT_REPORT.md`).
 - **Berikutnya (P0-6b langkah 2):** operasi klip murni ke `core/commands.js`, dengan test kesetaraan sebelum dan sesudah.
+
+#### P0-6b langkah 2 — Operasi klip inti di `public/js/core/commands.js` (2026-11-23)
+
+- **Tujuan:** operasi edit inti yang dipakai UI **dan** MCP menjadi fungsi murni atas proyek, tanpa mengubah perilaku.
+- **Cara membuktikan "tidak berubah":**
+  1. **Rekam dulu, ubah kemudian.** Commit `3c1def0` berisi `test/core-commands.test.js` dan `test/fixtures/core-commands-golden.json`, direkam dari `actions.js` **sebelum** refactor. Isinya 21 skenario split/hapus/duplikat/pindah/tambah, dan untuk tiap skenario disimpan ringkasan track/klip, nilai balik, seleksi, dan **SHA-256 seluruh isi proyek** (key terurut), sehingga perubahan field apa pun ketahuan.
+  2. Refactor dikerjakan, lalu rekaman yang sama diputar ulang: **21/21 identik**.
+  3. **Mutation test pada `core`:**
+     - Nama salinan diberi spasi → 6 skenario gagal.
+     - Posisi pindah digeser 0,1 ms → awalnya **lolos**. Ternyata skenario "pindah ke waktu kosong" (`x1` ke 2,5 dtk) bertabrakan dengan `x2`, sehingga cabang tempat-kosong tidak pernah teruji. Skenarionya dibetulkan (ke 2 dtk), ditambah skenario tabrakan, lalu golden direkam ulang dari `actions.js` lama (hash file sama dengan commit `3c1def0`). Setelah itu mutasi ini ketahuan.
+- **Perubahan:**
+  - `public/js/core/commands.js` (baru): `mediaClip`, `addClip`, `splitTargets`, `splitClips`, `deleteClips`, `duplicateClip`, `moveClip`. Semuanya fungsi `(P, …)` tanpa `store`, engine, seleksi, atau DOM. Cek statis di test menjaganya.
+  - `public/js/actions.js`: `addMediaClip`, `splitAt`, `deleteClips`, `duplicateClip`, dan `moveClip` memanggil `core` di dalam `store.mutate` (undo dan autosave tetap sama).
+  - Yang tetap di `actions.js`: playhead, seleksi, cek file media hilang, dan "klip tidak ditemukan". Cek terakhir ini tetap di **luar** `mutate` seperti dulu, karena di dalamnya ia akan menghapus drag yang sedang berjalan (`store._live`).
+  - Tool MCP `split_clip`, `delete_clip`, `move_clip`, `duplicate_clip`, dan `add_media_clip` sudah lewat `actions.*`, jadi otomatis ikut memakai `core`.
+  - `test/core-commands.test.js` (22 test), `package.json`.
+- **Hasil test:**
+  - Unit: **239 test, 225 lulus, 0 gagal, 14 dilewati**.
+  - Browser asli:
+    - `core/commands.js` termuat.
+    - Jalur MCP: split 3→4 klip, duplikat →5, pindah ke 0 (magnet mengurutkan ulang), hapus →4.
+    - Jalur keyboard: S →5, ⌘D →6, Delete →5, ⌘Z →6, dengan riwayat undo tercatat.
+    - Tidak ada error JS. Proyek uji dihapus.
+- **Belum dipindah (langkah berikutnya):**
+  - `update_clip` (handler besar di `api.js`).
+  - Teks, subtitle, efek, dan keyframe.
+  - Helper model (`makeClip`, `placeClip`, `splitClip`, `insertIntoMain`…) yang masih di `store.js`.
+  - Masing-masing dipindah dengan pola rekam-dulu yang sama.
+- **Berikutnya:** P0-6b langkah 3 (`update_clip` ke `core/`) atau lanjut ke P1.

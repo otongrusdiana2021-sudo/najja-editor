@@ -100,9 +100,29 @@ scenario('duplicate a text with the space after it taken (a new track)', {}, () 
 scenario('duplicate an overlay to a time', {}, () => actions.duplicateClip('o1', 10));
 scenario('duplicate an unknown clip', {}, () => actions.duplicateClip('nope'));
 scenario('move a main clip to the start (magnet reorders)', {}, () => actions.moveClip('s3', { start: 0 }));
-scenario('move a text on its track to a free time', {}, () => actions.moveClip('x1', { start: 2.5 }));
+scenario('move a text on its track to a free time', {}, () => actions.moveClip('x1', { start: 2 }));
+scenario('move a text on its track where it overlaps another (a new track)', {}, () => actions.moveClip('x1', { start: 2.5 }));
 scenario('move a text on its track onto another text (a new track)', {}, () => actions.moveClip('x1', { start: 4.5 }));
 scenario('move an overlay photo to the main track', {}, () => actions.moveClip('o1', { start: 3, track: 'main' }));
 scenario('move a text to the main track is refused', {}, () => actions.moveClip('x1', { track: 'main' }));
 scenario('add a photo on the overlay at a time', { time: 2 }, () => actions.addMediaClip('m_img', { track: 'overlay', start: 2 }));
 scenario('add a photo to the main track (appended)', {}, () => actions.addMediaClip('m_img'));
+
+test('core commands run on a bare project: no store, no editor, no page', async () => {
+  const cmd = await import('../public/js/core/commands.js');
+  const before = store.P;
+  const P = fixture();
+  assert.deepEqual(cmd.splitClips(P, cmd.splitTargets(P, 5, { clipId: 's2' }).map((c) => c.id), 5).length, 1);
+  assert.equal(P.clips.length, 8);
+  const copy = cmd.duplicateClip(P, 'x1', undefined, 'c_fixed');
+  assert.deepEqual([copy.id, copy.trackId, copy.start], ['c_fixed', 't_tx', 2]);
+  assert.throws(() => cmd.moveClip(P, 'x1', { track: 'main' }), /Track utama hanya/);
+  assert.throws(() => cmd.duplicateClip(P, 'nope'), /Klip tidak ditemukan: nope/);
+  cmd.deleteClips(P, ['c_fixed']);
+  assert.ok(!P.clips.some((c) => c.id === 'c_fixed'));
+  const m = cmd.mediaClip({ id: 'm_v', type: 'video', name: 'v', duration: 10 }, { sourceIn: 4, props: { speed: 2 } });
+  assert.deepEqual([m.in, m.duration, m.mediaId], [4, 3, 'm_v']);
+  assert.equal(store.P, before, 'the store was not touched');
+  const src = fs.readFileSync(new URL('../public/js/core/commands.js', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(src, /\bstore\.(?!js')|\bdocument\b|\bwindow\b|\bengine\b|\btoast\(/, 'core/commands.js uses only the project it is given');
+});

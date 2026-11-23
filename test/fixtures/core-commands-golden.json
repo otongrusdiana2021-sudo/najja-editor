@@ -860,6 +860,63 @@
     "selection": null,
     "magnet": true,
     "tracks": [
+      "t_ov:overlay",
+      "t_tx:text",
+      "main:main"
+    ],
+    "clips": [
+      [
+        "s1",
+        "main",
+        0,
+        3
+      ],
+      [
+        "s2",
+        "main",
+        3,
+        4
+      ],
+      [
+        "s3",
+        "main",
+        7,
+        2
+      ],
+      [
+        "x1",
+        "t_tx",
+        2,
+        2
+      ],
+      [
+        "x2",
+        "t_tx",
+        4,
+        2
+      ],
+      [
+        "x3",
+        "t_tx",
+        6,
+        2
+      ],
+      [
+        "o1",
+        "t_ov",
+        1,
+        3
+      ]
+    ],
+    "sha256": "0409102a63a4f9ac233e3ed7a7d72128e9f460298598aae9f518a5acc195752e"
+  },
+  "move a text on its track where it overlaps another (a new track)": {
+    "result": {
+      "id": "x1"
+    },
+    "selection": null,
+    "magnet": true,
+    "tracks": [
       "newT1:text",
       "t_ov:overlay",
       "t_tx:text",

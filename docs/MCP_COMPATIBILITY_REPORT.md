@@ -149,6 +149,8 @@ Nama tool di `mcp/tools.js` sama 1:1 dengan handler di `public/js/api.js` (27 = 
 
 **Lokasi definisi tool (P0-6b, 2026-11-23):** `TOOLS` dan validator pindah ke `public/js/core/tools.js` dan `public/js/core/validate.js`, supaya editor memakai schema yang sama untuk perintah yang ditempel. `mcp/tools.js` dan `mcp/validate.js` tetap ada dan meneruskan ekspornya. Kontrak tidak berubah (snapshot lulus).
 
+**Fase B dimulai (P0-6b, 2026-11-23):** split/hapus/duplikat/pindah/tambah klip sekarang fungsi murni di `public/js/core/commands.js`, dipakai UI dan tool MCP lewat `actions.js`. Perilaku dibuktikan identik dengan rekaman dari kode sebelumnya (`test/core-commands.test.js`). `update_clip` dan tool lain belum.
+
 **Status M8 (2026-11-23):** snippet `deploy/aapanel/najja-wellknown.conf` disiapkan di P0-4 (meneruskan hanya `/.well-known/oauth-*` dan `/.well-known/openid-configuration` ke app). **Belum dipasang di VPS.**
 
 **Status M1 (2026-11-23):** diperbaiki di P0-1 (branch `feat/p0-1-mcp-command-queue`), belum di-push dan belum di-deploy ke produksi.
